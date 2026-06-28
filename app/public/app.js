@@ -1,0 +1,4353 @@
+const state = {
+  conversations: [],
+  currentId: "",
+  messages: [],
+  contextItem: null,
+  theme: "light",
+  overviewDrag: null,
+  conversationCreatedAt: "",
+  pendingAttachments: [],
+  composeMode: "",
+  scriptGrade: "B",
+  currentRunName: "",
+  appName: "猫主子漫剧剧本分镜小助手",
+  workbenchRunName: "",
+  runs: [],
+  activeWorkbenchNode: null,
+  archiveSelections: [],
+  workbenchOpen: false,
+  workbenchLoading: false,
+  searchTimer: null,
+  testedModelConfigSignature: "",
+  appMode: "chat",
+  projects: [],
+  projectGroups: [],
+  currentProjectId: "no-project",
+  collapsedProjectIds: new Set(),
+  editingProjectId: "",
+  sidebarCollapsed: false,
+  sidebarWidth: 260,
+  sidebarResize: null,
+  canvases: [],
+  currentCanvasId: "",
+  currentCanvas: null,
+  activeCanvasNodeId: "",
+  selectedCanvasNodeId: "",
+  selectedCanvasEdgeId: "",
+  canvasZoom: 1,
+  canvasViewportAnimation: null,
+  canvasMiniMapDrag: null,
+  editingCanvasNodeId: "",
+  canvasDrag: null,
+  suppressCanvasPlusClick: false,
+  suppressCanvasTitleClick: false,
+  pendingEpisodes: null,
+  canvasDeleteConfirm: null,
+};
+
+const $ = (id) => document.getElementById(id);
+const themeStorageKey = "mbh-chat-theme";
+const hiddenConversationsStorageKey = "mbh-hidden-conversations";
+const collapsedProjectsStorageKey = "mbh-collapsed-projects";
+const sidebarCollapsedStorageKey = "mbh-sidebar-collapsed";
+const sidebarWidthStorageKey = "mbh-sidebar-width";
+const sidebarMinWidth = 252;
+const sidebarMaxWidth = 460;
+const newProjectSelectValue = "__new_project__";
+const canvasConnectHoldMs = 220;
+const canvasConnectMovePx = 6;
+const canvasNodeHoldMs = 260;
+const canvasNodeMovePx = 5;
+const canvasPanHoldMs = 220;
+const canvasSurfaceMinWidth = 100000;
+const canvasSurfaceMinHeight = 100000;
+const canvasSurfacePadding = 1600;
+const canvasOriginX = 50000;
+const canvasOriginY = 50000;
+const canvasZoomMin = 0.35;
+const canvasZoomMax = 1.8;
+const canvasZoomStep = 0.1;
+const canvasFitAnimationMs = 280;
+const canvasTypeLabels = {
+  novel: "小说",
+  script: "剧本",
+  storyboard: "分镜脚本",
+  label: "标识",
+};
+const canvasTypeIconPaths = {
+  novel: '<path d="M6 5.5c1.7-.9 3.6-.9 5.5 0v12c-1.9-.9-3.8-.9-5.5 0z"/><path d="M18 5.5c-1.7-.9-3.6-.9-5.5 0v12c1.9-.9 3.8-.9 5.5 0z"/><path d="M12 5.5v12"/>',
+  script: '<path d="M7 4h9l3 3v13H7z"/><path d="M16 4v4h4"/><path d="M10 11h6"/><path d="M10 14h6"/><path d="M10 17h4"/>',
+  storyboard: '<path d="M4 6h16v12H4z"/><path d="M8 6v12"/><path d="M16 6v12"/><path d="M4 10h16"/><path d="M4 14h16"/>',
+  label: '<path d="M5 6.5A2.5 2.5 0 0 1 7.5 4H18v10.5L12.5 20 5 12.5z"/><circle cx="9" cy="8" r="1.2"/>',
+};
+const providerDefaults = {
+  deepseek: {
+    label: "DeepSeek",
+    baseUrl: "https://api.deepseek.com",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat"],
+    keyName: "DeepSeek API Key",
+  },
+  openai: {
+    label: "OpenAI",
+    baseUrl: "https://api.openai.com/v1",
+    models: ["gpt-5.5", "gpt-5"],
+    keyName: "OpenAI API Key",
+  },
+  apimart: {
+    label: "APIMart",
+    baseUrl: "https://api.apimart.ai/v1",
+    models: ["gpt-5.5", "gpt-5", "gpt-5.1", "gpt-5-chat-latest", "gpt-5-mini"],
+    keyName: "APIMart API Key",
+  },
+};
+const catImages = {
+  light: "/assets/cat-light-calico-cutout.png",
+  dark: "/assets/cat-dark-shorthair-cutout.png",
+  eye: "/assets/cat-eye-orange-cutout.png",
+};
+const catAnimationClasses = [
+  "cat-anim-hop",
+  "cat-anim-wiggle",
+  "cat-anim-nod",
+  "cat-anim-stretch",
+  "cat-anim-peek",
+];
+const reminderRules = [
+  { id: "lunch", hour: 12, minute: 0, text: "到饭点啦，记得吃饭～" },
+  { id: "offwork", hour: 18, minute: 0, text: "到下班时间啦，收拾一下回家～" },
+];
+const legalHolidayDates = new Set([
+  "2026-01-01",
+  "2026-02-16",
+  "2026-02-17",
+  "2026-02-18",
+  "2026-04-05",
+  "2026-05-01",
+  "2026-05-02",
+  "2026-06-19",
+  "2026-09-25",
+  "2026-10-01",
+  "2026-10-02",
+  "2026-10-03",
+]);
+const reminderTimers = [];
+const textAttachmentExtensions = new Set([
+  "txt",
+  "md",
+  "markdown",
+  "csv",
+  "json",
+  "srt",
+  "ass",
+  "log",
+  "xml",
+  "html",
+  "htm",
+]);
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  const text = await response.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { raw: text };
+  }
+  if (!response.ok) throw new Error(data.error || text || "请求失败");
+  return data;
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function renderMessages() {
+  const box = $("messages");
+  box.innerHTML = "";
+  if (!state.messages.length) {
+    appendMessage("assistant", "把小说、剧本、分镜或修改意见发给我。我会按 AI 漫剧流程判断该走小说转剧本、剧本评审、直接分镜、样例学习，还是质量回退。", false, "intro");
+    renderConversationOverview();
+    return;
+  }
+  state.messages.forEach((message, index) => {
+    appendMessage(message.role, message.content, false, index, message.time, message.attachments, message.usage, message.skillRoute, message.learningSuggestion, message.chatIntent, message.scriptGrade);
+  });
+  renderConversationOverview();
+  syncOverviewPosition();
+  box.scrollTop = box.scrollHeight;
+}
+
+function appendMessage(role, content, keep = true, messageIndex = null, time = null, attachments = [], usage = null, skillRoute = null, learningSuggestion = null, chatIntent = null, scriptGrade = null) {
+  const messageTime = normalizeMessageTime(time);
+  if (keep) {
+    const nextMessage = { role, content, time: messageTime, attachments };
+    if (usage) nextMessage.usage = usage;
+    if (skillRoute) nextMessage.skillRoute = skillRoute;
+    if (learningSuggestion) nextMessage.learningSuggestion = learningSuggestion;
+    if (chatIntent) nextMessage.chatIntent = chatIntent;
+    if (scriptGrade) nextMessage.scriptGrade = scriptGrade;
+    state.messages.push(nextMessage);
+    messageIndex = state.messages.length - 1;
+  }
+  const node = document.createElement("article");
+  node.className = `message ${role}`;
+  if (messageIndex !== null) {
+    node.dataset.messageIndex = String(messageIndex);
+  }
+  if (role === "assistant") {
+    node.appendChild(createCatAvatar());
+  }
+  const body = document.createElement("div");
+  body.className = "message-body";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  renderMessageContent(bubble, role, content);
+  body.appendChild(bubble);
+  renderMessageAttachments(body, attachments);
+  const meta = document.createElement("div");
+  meta.className = "message-time";
+  meta.title = formatMessageTime(messageTime, true);
+  const timeNode = document.createElement("span");
+  timeNode.textContent = formatMessageTime(messageTime);
+  meta.appendChild(timeNode);
+  const usageText = formatUsageText(usage);
+  if (usageText) {
+    const usageNode = document.createElement("span");
+    usageNode.className = "message-usage";
+    usageNode.textContent = usageText;
+    usageNode.title = formatUsageTitle(usage);
+    meta.appendChild(usageNode);
+  }
+  const intentText = formatChatIntent(chatIntent);
+  if (intentText) {
+    const intentNode = document.createElement("span");
+    intentNode.className = "message-intent";
+    intentNode.textContent = intentText;
+    intentNode.title = formatChatIntentTitle(chatIntent);
+    meta.appendChild(intentNode);
+  }
+  const gradeText = formatScriptGrade(scriptGrade);
+  if (gradeText) {
+    const gradeNode = document.createElement("span");
+    gradeNode.className = "message-grade";
+    gradeNode.textContent = gradeText;
+    gradeNode.title = scriptGrade === "A" ? "A级本：更高质量，更慢，token 更多" : "B级本：快速可用，token 更省";
+    meta.appendChild(gradeNode);
+  }
+  const skillText = formatSkillRoute(skillRoute);
+  if (skillText) {
+    const skillNode = document.createElement("span");
+    skillNode.className = "message-skill";
+    skillNode.textContent = skillText;
+    skillNode.title = formatSkillRouteTitle(skillRoute);
+    meta.appendChild(skillNode);
+  }
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "message-copy";
+  copy.textContent = "复制";
+  copy.title = "复制这条消息";
+  copy.addEventListener("click", async () => {
+    const ok = await copyText(content || "");
+    copy.textContent = ok ? "已复制" : "复制失败";
+    window.setTimeout(() => {
+      copy.textContent = "复制";
+    }, 1200);
+  });
+  meta.appendChild(copy);
+  body.appendChild(meta);
+  if (role === "assistant" && learningSuggestion) {
+    renderLearningSuggestion(body, messageIndex, learningSuggestion);
+  }
+  node.appendChild(body);
+  $("messages").appendChild(node);
+  $("messages").scrollTop = $("messages").scrollHeight;
+  return bubble;
+}
+
+async function copyText(text) {
+  const value = String(text || "");
+  if (!value) return false;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      // Fall through to textarea copy for older browser contexts.
+    }
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  }
+  textarea.remove();
+  return copied;
+}
+
+function renderMessageContent(bubble, role, content) {
+  if (role === "assistant" && window.MbhMarkdown && typeof window.MbhMarkdown.renderMarkdown === "function") {
+    bubble.classList.add("markdown-body");
+    bubble.innerHTML = window.MbhMarkdown.renderMarkdown(content);
+    return;
+  }
+  bubble.textContent = content;
+}
+
+function normalizeMessageTime(time) {
+  if (time && !Number.isNaN(new Date(time).getTime())) return time;
+  if (state.conversationCreatedAt && !Number.isNaN(new Date(state.conversationCreatedAt).getTime())) {
+    return state.conversationCreatedAt;
+  }
+  return new Date().toISOString();
+}
+
+function formatMessageTime(time, withSeconds = false) {
+  const date = new Date(normalizeMessageTime(time));
+  const pad = (value) => String(value).padStart(2, "0");
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hour = pad(date.getHours());
+  const minute = pad(date.getMinutes());
+  const second = pad(date.getSeconds());
+  return withSeconds
+    ? `${year}年${month}月${day}日 ${hour}:${minute}:${second}`
+    : `${year}年${month}月${day}日 ${hour}:${minute}`;
+}
+
+function formatUsageText(usage) {
+  if (window.MbhUsage && typeof window.MbhUsage.formatTokenUsage === "function") {
+    return window.MbhUsage.formatTokenUsage(usage);
+  }
+  return "";
+}
+
+function formatUsageTitle(usage) {
+  if (!usage) return "";
+  const prompt = Number(usage.prompt_tokens);
+  const completion = Number(usage.completion_tokens);
+  const total = Number(usage.total_tokens);
+  const parts = [];
+  if (Number.isFinite(total)) parts.push(`总计 ${total}`);
+  if (Number.isFinite(prompt)) parts.push(`输入 ${prompt}`);
+  if (Number.isFinite(completion)) parts.push(`输出 ${completion}`);
+  return parts.join("，");
+}
+
+function formatSkillRoute(skillRoute) {
+  if (!skillRoute) return "";
+  return `skill ${skillRoute.name || skillRoute.id || ""}`.trim();
+}
+
+function formatSkillRouteTitle(skillRoute) {
+  if (!skillRoute) return "";
+  const files = Array.isArray(skillRoute.files) ? skillRoute.files.join("；") : "";
+  return [skillRoute.path || skillRoute.id || "", files].filter(Boolean).join("｜");
+}
+
+function formatChatIntent(chatIntent) {
+  if (!chatIntent) return "";
+  const names = {
+    chat: "闲聊",
+    inspiration: "灵感",
+    script: "剧本",
+    script_analysis: "剧本分析",
+    storyboard: "分镜",
+    storyboard_analysis: "分镜分析",
+    learning: "学习",
+  };
+  return `intent ${names[chatIntent.intent] || chatIntent.intent || "未知"}`;
+}
+
+function formatChatIntentTitle(chatIntent) {
+  if (!chatIntent) return "";
+  const mode = chatIntent.mode === "skill" ? "专业模式" : "轻量模式";
+  return `${mode}${chatIntent.reason ? `｜${chatIntent.reason}` : ""}`;
+}
+
+function normalizeScriptGrade(value) {
+  if (window.MbhScriptGrade && typeof window.MbhScriptGrade.normalizeScriptGrade === "function") {
+    return window.MbhScriptGrade.normalizeScriptGrade(value);
+  }
+  return String(value || "").toUpperCase() === "A" ? "A" : "B";
+}
+
+function formatScriptGrade(value) {
+  if (!value) return "";
+  if (window.MbhScriptGrade && typeof window.MbhScriptGrade.formatScriptGrade === "function") {
+    return window.MbhScriptGrade.formatScriptGrade(value);
+  }
+  return `grade ${normalizeScriptGrade(value)}`;
+}
+
+function renderLearningSuggestion(container, messageIndex, suggestion) {
+  const card = document.createElement("div");
+  card.className = `learning-suggestion ${suggestion.status || "pending"}`;
+  const text = document.createElement("div");
+  text.className = "learning-suggestion-text";
+  text.textContent = suggestion.status === "remembered"
+    ? `已记住：${suggestion.summary || "这条偏好"}`
+    : suggestion.status === "skipped"
+      ? `未记住：${suggestion.summary || "这条偏好"}`
+      : `已识别为可长期记住的偏好：${suggestion.summary || "这条偏好"}`;
+  card.appendChild(text);
+
+  if (!suggestion.status || suggestion.status === "pending") {
+    const actions = document.createElement("div");
+    actions.className = "learning-suggestion-actions";
+    const remember = document.createElement("button");
+    remember.type = "button";
+    remember.textContent = "记住";
+    remember.addEventListener("click", () => confirmLearningSuggestion(messageIndex, "remember"));
+    const skip = document.createElement("button");
+    skip.type = "button";
+    skip.textContent = "不记";
+    skip.className = "secondary";
+    skip.addEventListener("click", () => confirmLearningSuggestion(messageIndex, "skip"));
+    actions.append(remember, skip);
+    card.appendChild(actions);
+  }
+
+  container.appendChild(card);
+}
+
+async function confirmLearningSuggestion(messageIndex, action) {
+  if (messageIndex === null || messageIndex === undefined || messageIndex === "intro") return;
+  try {
+    const data = await api("/api/learning-confirm", {
+      method: "POST",
+      body: JSON.stringify({
+        conversationId: state.currentId,
+        messageIndex: Number(messageIndex),
+        action,
+      }),
+    });
+    state.messages = data.messages || state.messages;
+    renderMessages();
+    await loadLearningPanel();
+  } catch (error) {
+    appendMessage("assistant", error.message, false);
+  }
+}
+
+function formatFileSize(size) {
+  const value = Number(size || 0);
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function fileExtension(name) {
+  const match = String(name || "").toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match ? match[1] : "";
+}
+
+function isTextAttachment(file) {
+  return String(file.type || "").startsWith("text/") || textAttachmentExtensions.has(fileExtension(file.name));
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("读取文件失败"));
+    reader.readAsText(file, "utf-8");
+  });
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("读取文件失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function attachmentFromFile(file) {
+  const image = String(file.type || "").startsWith("image/");
+  const attachment = {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name: file.name,
+    type: file.type || "application/octet-stream",
+    size: file.size,
+    kind: image ? "image" : "file",
+    extracted: false,
+  };
+  if (image) {
+    attachment.dataUrl = await readFileAsDataUrl(file);
+    return attachment;
+  }
+  if (isTextAttachment(file)) {
+    attachment.text = await readFileAsText(file);
+    attachment.extracted = true;
+    return attachment;
+  }
+  attachment.dataUrl = await readFileAsDataUrl(file);
+  return attachment;
+}
+
+async function addPendingFiles(files) {
+  const nextFiles = Array.from(files || []);
+  if (!nextFiles.length) return;
+  for (const file of nextFiles) {
+    try {
+      state.pendingAttachments.push(await attachmentFromFile(file));
+    } catch (error) {
+      state.pendingAttachments.push({
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        size: file.size,
+        kind: "file",
+        error: error.message,
+      });
+    }
+  }
+  renderPendingAttachments();
+}
+
+function renderPendingAttachments() {
+  const list = $("attachmentList");
+  if (!list) {
+    updateSendState();
+    return;
+  }
+  list.innerHTML = "";
+  list.classList.toggle("empty", !state.pendingAttachments.length);
+  for (const attachment of state.pendingAttachments) {
+    const item = document.createElement("div");
+    item.className = "pending-attachment";
+    const name = document.createElement("span");
+    name.textContent = attachment.name;
+    const meta = document.createElement("small");
+    meta.textContent = `${formatFileSize(attachment.size)}${attachment.extracted ? "｜已读取" : attachment.kind === "image" ? "｜图片" : "｜待处理"}`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `移除附件 ${attachment.name}`);
+    remove.addEventListener("click", () => {
+      state.pendingAttachments = state.pendingAttachments.filter((item) => item.id !== attachment.id);
+      renderPendingAttachments();
+    });
+    item.append(name, meta, remove);
+    list.appendChild(item);
+  }
+  updateSendState();
+}
+
+function createCatAvatar() {
+  const avatar = document.createElement("div");
+  avatar.className = "cat-avatar";
+  avatar.setAttribute("aria-hidden", "true");
+  avatar.innerHTML = `<img class="cat-image" src="${currentCatImage()}" alt="" />`;
+  return avatar;
+}
+
+function currentCatImage() {
+  return catImages[state.theme] || catImages.light;
+}
+
+function renderMessageAttachments(container, attachments = []) {
+  const safeAttachments = Array.isArray(attachments) ? attachments : [];
+  if (!safeAttachments.length) return;
+  const list = document.createElement("div");
+  list.className = "message-attachments";
+  for (const attachment of safeAttachments) {
+    const item = document.createElement("div");
+    item.className = `message-attachment ${attachment.kind === "image" ? "image" : "file"}`;
+    if (attachment.kind === "image" && attachment.dataUrl) {
+      const image = document.createElement("img");
+      image.src = attachment.dataUrl;
+      image.alt = attachment.name || "图片附件";
+      item.appendChild(image);
+    }
+    const meta = document.createElement("div");
+    meta.className = "attachment-meta";
+    const name = document.createElement("div");
+    name.className = "attachment-name";
+    name.textContent = attachment.name || "未命名附件";
+    const size = document.createElement("div");
+    size.className = "attachment-size";
+    size.textContent = `${formatFileSize(attachment.size)}${attachment.extracted ? "｜已读取正文" : ""}`;
+    meta.append(name, size);
+    item.appendChild(meta);
+    list.appendChild(item);
+  }
+  container.appendChild(list);
+}
+
+function setComposeMode(mode) {
+  state.composeMode = state.composeMode === mode ? "" : mode;
+  document.querySelectorAll("[data-compose-mode]").forEach((button) => {
+    const active = button.dataset.composeMode === state.composeMode;
+    const label = button.textContent.trim();
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+    button.setAttribute("aria-label", active ? `${label}，已选中，再次点击取消` : `${label}，点击选中`);
+    button.title = active ? "已选中，再次点击可取消" : "点击选中";
+  });
+  updateSendState();
+}
+
+function setScriptGrade(grade) {
+  state.scriptGrade = normalizeScriptGrade(grade);
+  document.querySelectorAll("[data-script-grade]").forEach((button) => {
+    const buttonGrade = normalizeScriptGrade(button.dataset.scriptGrade);
+    const active = buttonGrade === state.scriptGrade;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+    button.title = buttonGrade === "A"
+      ? "A级本：更高质量，更慢，token 更多"
+      : "B级本：快速可用，token 更省";
+  });
+}
+
+function buildOutgoingText(text) {
+  if (window.MbhCompose && typeof window.MbhCompose.buildOutgoingText === "function") {
+    return window.MbhCompose.buildOutgoingText(text, state.composeMode);
+  }
+  return String(text || "").trim();
+}
+
+function canSendCurrentCompose(text, attachments) {
+  if (window.MbhCompose && typeof window.MbhCompose.canSendCompose === "function") {
+    return window.MbhCompose.canSendCompose({ text, attachments, composeMode: state.composeMode });
+  }
+  return Boolean(String(text || "").trim()) || (Array.isArray(attachments) && attachments.length > 0);
+}
+
+function updateSendState() {
+  const send = $("sendBtn");
+  const input = $("chatInput");
+  if (!send || !input) return;
+  const canSend = canSendCurrentCompose(input.value, state.pendingAttachments);
+  send.disabled = !canSend;
+  send.setAttribute("aria-disabled", String(!canSend));
+  send.title = canSend ? "发送" : "请输入文字或添加附件后再发送";
+}
+
+function autoGrowTextarea() {
+  const input = $("chatInput");
+  if (!input) return;
+  input.style.height = "auto";
+  const maxHeight = Math.floor(window.innerHeight * 0.36);
+  input.style.height = `${Math.min(input.scrollHeight, maxHeight)}px`;
+}
+
+function renderConversationOverview() {
+  const overview = $("conversationOverview");
+  const box = $("messages");
+  if (!overview || !box) return;
+  overview.innerHTML = "";
+  const messageNodes = Array.from(box.querySelectorAll(".message[data-message-index]"));
+  const overviewMessages = messageNodes
+    .map((node) => {
+      const bubble = node.querySelector(".bubble");
+      return {
+        index: node.dataset.messageIndex,
+        role: node.classList.contains("user") ? "user" : "assistant",
+        content: bubble ? bubble.textContent : "",
+        node,
+      };
+    })
+    .filter((message) => message.content && message.content.trim());
+
+  if (!overviewMessages.length) {
+    overview.classList.add("empty");
+    return;
+  }
+
+  overview.classList.remove("empty");
+  const track = document.createElement("div");
+  track.className = "overview-track";
+  track.setAttribute("aria-hidden", "false");
+  const viewport = document.createElement("div");
+  viewport.className = "overview-viewport";
+  viewport.setAttribute("aria-label", "拖动定位当前对话位置");
+  viewport.setAttribute("role", "slider");
+  track.appendChild(viewport);
+
+  for (const message of overviewMessages) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `overview-dot ${message.role}`;
+    button.dataset.targetIndex = String(message.index);
+    button.dataset.preview = truncateText(message.content, 15);
+    button.title = cleanPreviewText(message.content);
+    button.style.top = `${overviewPositionPercent(box, message.node)}%`;
+    button.setAttribute("aria-label", `跳到对话：${truncateText(message.content, 15)}`);
+    const preview = document.createElement("span");
+    preview.className = "overview-preview";
+    preview.textContent = cleanPreviewText(message.content);
+    preview.dataset.long = cleanPreviewText(message.content);
+    button.appendChild(preview);
+    button.addEventListener("click", () => scrollToMessage(message.index));
+    track.appendChild(button);
+  }
+  overview.appendChild(track);
+  updateOverviewRailBounds();
+  syncOverviewPosition();
+}
+
+function overviewPositionPercent(box, targetOrIndex) {
+  if (!box) return 0;
+  const target =
+    targetOrIndex instanceof HTMLElement
+      ? targetOrIndex
+      : box.querySelector(`[data-message-index="${targetOrIndex}"]`);
+  if (!target) return 0;
+  const contentHeight = Math.max(1, box.scrollHeight);
+  const center = target.offsetTop + target.offsetHeight / 2;
+  return clamp((center / contentHeight) * 100, 0, 100);
+}
+
+function truncateText(text, maxLength) {
+  const clean = cleanPreviewText(text);
+  if (clean.length <= maxLength) return clean || "空内容";
+  return `${clean.slice(0, maxLength)}...`;
+}
+
+function cleanPreviewText(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+function scrollToMessage(index) {
+  const box = $("messages");
+  const target = box.querySelector(`[data-message-index="${index}"]`);
+  if (!target) return;
+  setActiveOverviewDot(String(index));
+  box.scrollTo({
+    top: Math.max(0, target.offsetTop - 24),
+    behavior: "smooth",
+  });
+}
+
+function syncOverviewPosition() {
+  const box = $("messages");
+  const overview = $("conversationOverview");
+  if (!box || !overview) return;
+  if (state.overviewDrag) {
+    updateOverviewViewport(box, overview);
+    updateOverviewActiveFromScroll(box, overview);
+    return;
+  }
+  updateOverviewRailBounds();
+  updateOverviewViewport(box, overview);
+  updateOverviewActiveFromScroll(box, overview);
+}
+
+function updateOverviewRailBounds() {
+  const box = $("messages");
+  const overview = $("conversationOverview");
+  if (!box || !overview) return;
+  const boxRect = box.getBoundingClientRect();
+  const overviewRect = overview.getBoundingClientRect();
+  const top = Math.max(0, boxRect.top - overviewRect.top);
+  const height = Math.max(80, boxRect.height);
+  overview.style.setProperty("--overview-rail-top", `${top}px`);
+  overview.style.setProperty("--overview-rail-height", `${height}px`);
+}
+
+function updateOverviewViewport(box, overview) {
+  const marker = overview.querySelector(".overview-viewport");
+  if (!marker) return;
+  const contentHeight = Math.max(box.clientHeight, box.scrollHeight);
+  const height = clamp((box.clientHeight / contentHeight) * 100, 8, 100);
+  const top = clamp((box.scrollTop / contentHeight) * 100, 0, 100 - height);
+  marker.style.top = `${top}%`;
+  marker.style.height = `${height}%`;
+  marker.setAttribute("aria-valuemin", "0");
+  marker.setAttribute("aria-valuemax", String(Math.max(0, box.scrollHeight - box.clientHeight)));
+  marker.setAttribute("aria-valuenow", String(Math.round(box.scrollTop)));
+}
+
+function initOverviewDragEvents() {
+  const overview = $("conversationOverview");
+  if (!overview) return;
+  overview.addEventListener("pointerdown", startOverviewDrag);
+  document.addEventListener("pointermove", moveOverviewDrag);
+  document.addEventListener("pointerup", stopOverviewDrag);
+  document.addEventListener("pointercancel", stopOverviewDrag);
+}
+
+function startOverviewDrag(event) {
+  const overview = $("conversationOverview");
+  const box = $("messages");
+  const track = overview ? overview.querySelector(".overview-track") : null;
+  const handle = overview ? overview.querySelector(".overview-viewport") : null;
+  if (!overview || !box || !track || !handle) return;
+  if (event.target.closest(".overview-dot")) return;
+  if (!event.target.closest(".overview-track") && !event.target.closest(".overview-viewport")) return;
+
+  event.preventDefault();
+  const trackRect = track.getBoundingClientRect();
+  const handleRect = handle.getBoundingClientRect();
+  const maxScroll = Math.max(1, box.scrollHeight - box.clientHeight);
+  const handleHeight = Math.max(24, handleRect.height);
+  const maxTop = Math.max(1, trackRect.height - handleHeight);
+  let startTop = Math.max(0, handleRect.top - trackRect.top);
+
+  if (!event.target.closest(".overview-viewport")) {
+    startTop = clamp(event.clientY - trackRect.top - handleHeight / 2, 0, maxTop);
+    box.scrollTop = (startTop / maxTop) * maxScroll;
+    syncOverviewPosition();
+  }
+
+  state.overviewDrag = {
+    pointerId: event.pointerId,
+    startY: event.clientY,
+    startTop,
+    maxTop,
+    maxScroll,
+    pendingScrollTop: box.scrollTop,
+    raf: 0,
+  };
+  overview.classList.add("dragging");
+  if (overview.setPointerCapture) overview.setPointerCapture(event.pointerId);
+}
+
+function moveOverviewDrag(event) {
+  if (!state.overviewDrag || state.overviewDrag.pointerId !== event.pointerId) return;
+  const box = $("messages");
+  const overview = $("conversationOverview");
+  if (!box || !overview) return;
+  const drag = state.overviewDrag;
+  const nextTop = clamp(drag.startTop + event.clientY - drag.startY, 0, drag.maxTop);
+  drag.pendingScrollTop = (nextTop / drag.maxTop) * drag.maxScroll;
+  if (drag.raf) return;
+  drag.raf = requestAnimationFrame(() => {
+    if (!state.overviewDrag) return;
+    box.scrollTop = state.overviewDrag.pendingScrollTop;
+    updateOverviewViewport(box, overview);
+    updateOverviewActiveFromScroll(box, overview);
+    state.overviewDrag.raf = 0;
+  });
+}
+
+function stopOverviewDrag(event) {
+  if (!state.overviewDrag) return;
+  const overview = $("conversationOverview");
+  const box = $("messages");
+  if (box && Number.isFinite(state.overviewDrag.pendingScrollTop)) {
+    box.scrollTop = state.overviewDrag.pendingScrollTop;
+  }
+  if (state.overviewDrag.raf) {
+    cancelAnimationFrame(state.overviewDrag.raf);
+  }
+  if (overview && overview.releasePointerCapture && event.pointerId === state.overviewDrag.pointerId) {
+    try {
+      overview.releasePointerCapture(event.pointerId);
+    } catch {}
+  }
+  state.overviewDrag = null;
+  if (overview) overview.classList.remove("dragging");
+  syncOverviewPosition();
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function setActiveOverviewDot(activeIndex) {
+  const overview = $("conversationOverview");
+  if (!overview) return;
+  const dots = Array.from(overview.querySelectorAll(".overview-dot"));
+  for (const dot of dots) {
+    dot.classList.toggle("active", dot.dataset.targetIndex === activeIndex);
+  }
+}
+
+function updateOverviewActiveFromScroll(box, overview) {
+  if (!box || !overview) return;
+  const userNodes = Array.from(box.querySelectorAll(".message[data-message-index]"));
+  const dots = Array.from(overview.querySelectorAll(".overview-dot"));
+  if (!userNodes.length || !dots.length) return;
+
+  if (box.scrollTop + box.clientHeight >= box.scrollHeight - 16) {
+    setActiveOverviewDot(userNodes[userNodes.length - 1].dataset.messageIndex);
+    return;
+  }
+
+  const marker = box.scrollTop + box.clientHeight * 0.38;
+  let activeIndex = userNodes[0].dataset.messageIndex;
+  for (const node of userNodes) {
+    if (node.offsetTop <= marker) activeIndex = node.dataset.messageIndex;
+  }
+  setActiveOverviewDot(activeIndex);
+}
+
+function applyTheme(theme) {
+  const allowedThemes = new Set(["light", "dark", "eye"]);
+  state.theme = allowedThemes.has(theme) ? theme : "light";
+  document.body.dataset.theme = state.theme;
+  localStorage.setItem(themeStorageKey, state.theme);
+  updateCatImages();
+  document.querySelectorAll("[data-theme-choice]").forEach((button) => {
+    const active = button.dataset.themeChoice === state.theme;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function updateCatImages() {
+  document.querySelectorAll(".cat-image").forEach((image) => {
+    image.src = currentCatImage();
+  });
+}
+
+function loadTheme() {
+  applyTheme(localStorage.getItem(themeStorageKey) || "light");
+}
+
+function initSidebarCat() {
+  scheduleSidebarCatMotion();
+  scheduleDailyReminders();
+  const cat = $("sidebarCat");
+  if (cat) cat.addEventListener("click", () => playSidebarCatAnimation());
+
+  window.__mbhCatTest = {
+    playSidebarCatAnimation,
+    showCatReminder,
+    isSingleRestWorkday,
+    scheduleDailyReminders,
+  };
+}
+
+function scheduleSidebarCatMotion() {
+  const delay = 14000 + Math.floor(Math.random() * 14000);
+  window.setTimeout(() => {
+    playSidebarCatAnimation();
+    scheduleSidebarCatMotion();
+  }, delay);
+}
+
+function playSidebarCatAnimation(animationClass = "") {
+  const cat = $("sidebarCat");
+  if (!cat) return;
+  const picked =
+    animationClass ||
+    catAnimationClasses[Math.floor(Math.random() * catAnimationClasses.length)];
+
+  cat.classList.remove(...catAnimationClasses);
+  void cat.offsetWidth;
+  cat.classList.add(picked);
+  window.setTimeout(() => cat.classList.remove(picked), 1500);
+}
+
+function scheduleDailyReminders() {
+  while (reminderTimers.length) window.clearTimeout(reminderTimers.pop());
+  for (const rule of reminderRules) {
+    const nextDate = nextReminderDate(rule);
+    const delay = Math.max(0, nextDate.getTime() - Date.now());
+    const timer = window.setTimeout(() => {
+      showScheduledReminder(rule, nextDate);
+      scheduleDailyReminders();
+    }, delay);
+    reminderTimers.push(timer);
+  }
+}
+
+function nextReminderDate(rule, from = new Date()) {
+  const cursor = new Date(from);
+  cursor.setSeconds(0, 0);
+  for (let offset = 0; offset < 400; offset += 1) {
+    const candidate = new Date(
+      cursor.getFullYear(),
+      cursor.getMonth(),
+      cursor.getDate() + offset,
+      rule.hour,
+      rule.minute,
+      0,
+      0,
+    );
+    if (candidate <= from) continue;
+    if (isSingleRestWorkday(candidate)) return candidate;
+  }
+  return new Date(from.getTime() + 24 * 60 * 60 * 1000);
+}
+
+function showScheduledReminder(rule, scheduledDate = new Date()) {
+  if (!isSingleRestWorkday(scheduledDate)) return;
+  const key = `mbh-reminder-${rule.id}-${dateStamp(scheduledDate)}`;
+  if (localStorage.getItem(key)) return;
+  localStorage.setItem(key, "1");
+  showCatReminder(rule.text);
+}
+
+function isSingleRestWorkday(date = new Date()) {
+  const day = date.getDay();
+  if (day === 0) return false;
+  return !legalHolidayDates.has(dateStamp(date));
+}
+
+function dateStamp(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function showCatReminder(text) {
+  const reminder = $("catReminder");
+  const note = document.querySelector(".cat-note");
+  if (!reminder) return;
+  reminder.textContent = text;
+  reminder.classList.add("show");
+  if (note) note.textContent = text;
+  playSidebarCatAnimation("cat-anim-hop");
+
+  window.clearTimeout(showCatReminder.hideTimer);
+  showCatReminder.hideTimer = window.setTimeout(() => {
+    reminder.classList.remove("show");
+    if (note) note.textContent = "喵，随时待命";
+  }, 12000);
+}
+
+async function loadConversations() {
+  const data = await api("/api/conversations");
+  state.projects = data.projects || [];
+  state.projectGroups = data.projectGroups || [];
+  state.conversations = data.conversations || [];
+  if (!state.projects.some((project) => project.id === state.currentProjectId)) {
+    state.currentProjectId = state.projects[0]?.id || "no-project";
+  }
+  renderConversationList();
+  if (!state.currentId) {
+    const visibleConversations = visibleConversationItems();
+    if (visibleConversations.length) {
+      await loadConversation(visibleConversations[0].id);
+    } else {
+      await newConversation();
+    }
+  }
+}
+
+function hiddenConversationIds() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(hiddenConversationsStorageKey) || "[]");
+    return new Set(Array.isArray(raw) ? raw : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveHiddenConversationIds(ids) {
+  localStorage.setItem(hiddenConversationsStorageKey, JSON.stringify(Array.from(ids)));
+}
+
+function loadCollapsedProjectIds() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(collapsedProjectsStorageKey) || "[]");
+    state.collapsedProjectIds = window.MbhProjectTree.normalizeCollapsedProjectIds(raw);
+  } catch {
+    state.collapsedProjectIds = new Set();
+  }
+}
+
+function saveCollapsedProjectIds() {
+  localStorage.setItem(collapsedProjectsStorageKey, JSON.stringify(Array.from(state.collapsedProjectIds)));
+}
+
+function clampSidebarWidth(width) {
+  const viewportLimit = Math.max(sidebarMinWidth, Math.min(sidebarMaxWidth, Math.floor(window.innerWidth * 0.42)));
+  return Math.min(viewportLimit, Math.max(sidebarMinWidth, Math.round(Number(width) || 260)));
+}
+
+function applySidebarWidth(width, persist = false) {
+  state.sidebarWidth = clampSidebarWidth(width);
+  document.documentElement.style.setProperty("--sidebar-width", `${state.sidebarWidth}px`);
+  const handle = $("sidebarResizeHandle");
+  if (handle) handle.setAttribute("aria-valuenow", String(state.sidebarWidth));
+  if (persist) localStorage.setItem(sidebarWidthStorageKey, String(state.sidebarWidth));
+}
+
+function loadSidebarWidth() {
+  applySidebarWidth(localStorage.getItem(sidebarWidthStorageKey) || state.sidebarWidth);
+}
+
+function applySidebarCollapsed(collapsed) {
+  state.sidebarCollapsed = Boolean(collapsed);
+  document.querySelector(".app-shell")?.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
+  const handle = $("sidebarResizeHandle");
+  if (handle) {
+    handle.setAttribute("aria-disabled", String(state.sidebarCollapsed));
+    handle.tabIndex = state.sidebarCollapsed ? -1 : 0;
+  }
+  const button = $("toggleSidebar");
+  if (button) {
+    const path = button.querySelector(".sidebar-collapse-path");
+    if (path) {
+      path.setAttribute("d", state.sidebarCollapsed ? "M10 6l6 6-6 6" : "M14 6 8 12l6 6");
+    } else {
+      button.textContent = state.sidebarCollapsed ? "›" : "‹";
+    }
+    button.title = state.sidebarCollapsed ? "展开侧边栏" : "收起侧边栏";
+    button.setAttribute("aria-label", state.sidebarCollapsed ? "展开侧边栏" : "收起侧边栏");
+    button.setAttribute("aria-pressed", String(state.sidebarCollapsed));
+  }
+}
+
+function loadSidebarCollapsed() {
+  applySidebarCollapsed(localStorage.getItem(sidebarCollapsedStorageKey) === "true");
+}
+
+function toggleSidebarCollapsed() {
+  applySidebarCollapsed(!state.sidebarCollapsed);
+  localStorage.setItem(sidebarCollapsedStorageKey, String(state.sidebarCollapsed));
+}
+
+function beginSidebarResize(event) {
+  if (state.sidebarCollapsed) return;
+  if (event.button !== undefined && event.button !== 0) return;
+  event.preventDefault();
+  state.sidebarResize = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startWidth: state.sidebarWidth,
+  };
+  $("sidebarResizeHandle")?.setPointerCapture?.(event.pointerId);
+  document.body.classList.add("sidebar-resizing");
+}
+
+function updateSidebarResize(event) {
+  if (!state.sidebarResize || state.sidebarCollapsed) return;
+  const delta = event.clientX - state.sidebarResize.startX;
+  applySidebarWidth(state.sidebarResize.startWidth + delta);
+}
+
+function endSidebarResize(event) {
+  if (!state.sidebarResize) return;
+  $("sidebarResizeHandle")?.releasePointerCapture?.(state.sidebarResize.pointerId || event.pointerId);
+  state.sidebarResize = null;
+  document.body.classList.remove("sidebar-resizing");
+  localStorage.setItem(sidebarWidthStorageKey, String(state.sidebarWidth));
+}
+
+function visibleConversationItems() {
+  const hidden = hiddenConversationIds();
+  return state.conversations.filter((item) => !hidden.has(item.id) && (item.projectId || "no-project") === state.currentProjectId);
+}
+
+function hiddenConversationItems() {
+  const hidden = hiddenConversationIds();
+  return state.conversations.filter((item) => hidden.has(item.id));
+}
+
+function renderConversationList() {
+  const list = $("sessionList");
+  list.innerHTML = "";
+  const hidden = hiddenConversationIds();
+  const groups = state.projectGroups.length
+    ? state.projectGroups
+    : [{ id: "no-project", title: "无项目", conversations: state.conversations }];
+  for (const group of groups) {
+    const visibleItems = (group.conversations || []).filter((item) => !hidden.has(item.id));
+    const groupNode = document.createElement("section");
+    groupNode.className = "project-group";
+
+    const expanded = window.MbhProjectTree.isProjectExpanded(group.id, state.collapsedProjectIds);
+    const title = document.createElement("div");
+    title.className = `project-title${group.id === state.currentProjectId ? " active" : ""}`;
+    if (state.editingProjectId === group.id) {
+      title.classList.add("editing");
+      const input = document.createElement("input");
+      input.className = "project-rename-input";
+      input.value = group.title || "无项目";
+      input.setAttribute("aria-label", "项目名称");
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commitProjectRename(group, input.value);
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          cancelProjectRename();
+        }
+      });
+      title.appendChild(input);
+
+      const actions = document.createElement("div");
+      actions.className = "project-rename-actions";
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "project-rename-confirm";
+      save.textContent = "✓";
+      save.title = "保存项目名";
+      save.setAttribute("aria-label", "保存项目名");
+      save.addEventListener("click", () => commitProjectRename(group, input.value));
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "project-rename-cancel";
+      cancel.textContent = "×";
+      cancel.title = "取消重命名";
+      cancel.setAttribute("aria-label", "取消重命名");
+      cancel.addEventListener("click", cancelProjectRename);
+      actions.append(save, cancel);
+      title.appendChild(actions);
+      window.setTimeout(() => {
+        input.focus();
+        input.select();
+      }, 0);
+    } else {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "project-toggle";
+      toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+      toggle.setAttribute("aria-label", `${expanded ? "收起" : "展开"}项目 ${group.title || "无项目"}`);
+      toggle.innerHTML = `<span class="project-chevron" aria-hidden="true">${expanded ? "▾" : "▸"}</span><span class="project-name">${escapeHtml(group.title || "无项目")}</span><span class="project-count">${visibleItems.length}</span>`;
+      toggle.addEventListener("click", () => toggleProject(group.id));
+      title.appendChild(toggle);
+
+      const rename = document.createElement("button");
+      rename.type = "button";
+      rename.className = "project-rename";
+      rename.textContent = "✎";
+      rename.title = "重命名项目";
+      rename.setAttribute("aria-label", `重命名项目 ${group.title || "无项目"}`);
+      rename.addEventListener("click", (event) => {
+        event.stopPropagation();
+        startProjectRename(group.id);
+      });
+      title.appendChild(rename);
+    }
+    groupNode.appendChild(title);
+
+    const children = document.createElement("div");
+    children.className = "project-conversations";
+    children.hidden = !expanded;
+    for (const item of visibleItems) {
+      children.appendChild(renderConversationRow(item));
+    }
+    groupNode.appendChild(children);
+    list.appendChild(groupNode);
+  }
+}
+
+function toggleProject(projectId) {
+  const result = window.MbhProjectTree.toggleProjectExpansion({
+    projectId,
+    currentProjectId: state.currentProjectId,
+    collapsedProjectIds: state.collapsedProjectIds,
+  });
+  state.currentProjectId = result.currentProjectId;
+  state.collapsedProjectIds = result.collapsedProjectIds;
+  saveCollapsedProjectIds();
+  renderConversationList();
+}
+
+function renderConversationRow(item) {
+  const row = document.createElement("div");
+  row.className = "session-row";
+
+  const button = document.createElement("button");
+  button.className = `session-item${item.id === state.currentId ? " active" : ""}`;
+  button.textContent = item.title || "新对话";
+  let clickTimer = null;
+  button.addEventListener("click", () => {
+    if (clickTimer) clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => loadConversation(item.id), 180);
+  });
+  button.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    if (clickTimer) {
+      clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+    startRenameConversation(item, row);
+  });
+
+  row.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    if (clickTimer) clearTimeout(clickTimer);
+    openContextMenu(event, item, row);
+  });
+
+  row.appendChild(button);
+  return row;
+}
+
+async function hideConversationFromList(item) {
+  if (!item || !item.id) return;
+  const hidden = hiddenConversationIds();
+  hidden.add(item.id);
+  saveHiddenConversationIds(hidden);
+  closeContextMenu();
+  renderConversationList();
+  renderTrashPanel();
+  if (state.currentId === item.id) {
+    const next = visibleConversationItems()[0];
+    if (next) {
+      await loadConversation(next.id);
+    } else {
+      state.currentId = "";
+      await newConversation();
+    }
+  }
+}
+
+function renderTrashPanel() {
+  const list = $("trashList");
+  if (!list) return;
+  const items = hiddenConversationItems();
+  list.innerHTML = "";
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "trash-empty";
+    empty.textContent = "暂无可恢复窗口";
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "trash-item";
+    const title = document.createElement("div");
+    title.className = "trash-title";
+    title.textContent = item.title || "新对话";
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.className = "trash-restore";
+    restore.textContent = "恢复";
+    restore.addEventListener("click", () => restoreConversationToList(item.id));
+    row.append(title, restore);
+    list.appendChild(row);
+  }
+}
+
+function restoreConversationToList(id) {
+  const hidden = hiddenConversationIds();
+  hidden.delete(id);
+  saveHiddenConversationIds(hidden);
+  renderConversationList();
+  renderTrashPanel();
+}
+
+function clearConversationSearch() {
+  const results = $("conversationSearchResults");
+  if (results) {
+    results.innerHTML = "";
+    results.classList.remove("open");
+  }
+}
+
+function updateSearchModalMode() {
+  const canvasMode = state.appMode === "canvas";
+  const title = $("conversationSearchTitle");
+  const input = $("conversationSearch");
+  const close = $("closeConversationSearch");
+  if (title) title.textContent = canvasMode ? "搜索画布" : "搜索对话";
+  if (input) {
+    input.placeholder = canvasMode ? "输入关键词，搜索当前画布节点内容" : "输入关键词，搜索全部对话内容";
+    input.setAttribute("aria-label", canvasMode ? "搜索当前画布节点内容" : "搜索全部对话内容");
+  }
+  if (close) close.textContent = "关闭";
+}
+
+function openConversationSearch() {
+  const modal = $("conversationSearchModal");
+  updateSearchModalMode();
+  modal.classList.add("open");
+  modal.setAttribute("aria-hidden", "false");
+  clearConversationSearch();
+  const input = $("conversationSearch");
+  if (input) {
+    input.value = "";
+    window.setTimeout(() => input.focus(), 0);
+  }
+}
+
+function closeConversationSearch() {
+  const modal = $("conversationSearchModal");
+  if (!modal) return;
+  modal.classList.remove("open");
+  modal.setAttribute("aria-hidden", "true");
+  clearConversationSearch();
+  const input = $("conversationSearch");
+  if (input) input.value = "";
+}
+
+function queueConversationSearch() {
+  window.clearTimeout(state.searchTimer);
+  state.searchTimer = window.setTimeout(() => {
+    if (state.appMode === "canvas") {
+      searchCanvasNodes();
+    } else {
+      searchConversations();
+    }
+  }, 180);
+}
+
+async function searchConversations() {
+  if (state.appMode === "canvas") {
+    searchCanvasNodes();
+    return;
+  }
+  const input = $("conversationSearch");
+  const results = $("conversationSearchResults");
+  if (!input || !results) return;
+  const query = input.value.trim();
+  if (!query) {
+    clearConversationSearch();
+    return;
+  }
+  results.classList.add("open");
+  results.innerHTML = '<div class="conversation-search-empty">搜索中...</div>';
+  try {
+    const data = await api(`/api/conversation-search?q=${encodeURIComponent(query)}`);
+    const hidden = hiddenConversationIds();
+    const matches = (data.results || []).filter((item) => !hidden.has(item.conversationId));
+    renderConversationSearchResults(matches, query);
+  } catch (error) {
+    results.innerHTML = "";
+    const item = document.createElement("div");
+    item.className = "conversation-search-empty";
+    item.textContent = error.message;
+    results.appendChild(item);
+  }
+}
+
+function searchCanvasNodes() {
+  const input = $("conversationSearch");
+  const results = $("conversationSearchResults");
+  if (!input || !results) return;
+  const query = input.value.trim();
+  if (!query) {
+    clearConversationSearch();
+    return;
+  }
+  results.classList.add("open");
+  renderCanvasSearchResults(findCanvasNodeMatches(query), query);
+}
+
+function findCanvasNodeMatches(query) {
+  const lowerQuery = query.toLowerCase();
+  return (state.currentCanvas?.nodes || [])
+    .map((node) => {
+      const typeLabel = canvasTypeLabels[node.type] || "标识";
+      const title = node.title || "未命名节点";
+      const content = node.content || "";
+      const searchText = `${title}\n${typeLabel}\n${content}`;
+      if (!searchText.toLowerCase().includes(lowerQuery)) return null;
+      const snippetSource = content.toLowerCase().includes(lowerQuery) ? content : `${title} ${typeLabel}`;
+      return {
+        nodeId: node.id,
+        title,
+        typeLabel,
+        snippet: buildCanvasSearchSnippet(snippetSource, query),
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildCanvasSearchSnippet(text, query) {
+  const source = String(text || "");
+  if (!source) return query;
+  const lowerSource = source.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const index = lowerSource.indexOf(lowerQuery);
+  if (index < 0) return source.slice(0, 96);
+  const start = Math.max(0, index - 36);
+  const end = Math.min(source.length, index + query.length + 60);
+  return `${start > 0 ? "..." : ""}${source.slice(start, end)}${end < source.length ? "..." : ""}`;
+}
+
+function renderConversationSearchResults(matches, query) {
+  const results = $("conversationSearchResults");
+  if (!results) return;
+  results.innerHTML = "";
+  results.classList.add("open");
+  if (!matches.length) {
+    const empty = document.createElement("div");
+    empty.className = "conversation-search-empty";
+    empty.textContent = "没有找到相关对话";
+    results.appendChild(empty);
+    return;
+  }
+  for (const match of matches) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "conversation-search-result";
+    button.dataset.conversationId = match.conversationId;
+    button.dataset.messageIndex = match.messageIndex ?? "";
+
+    const title = document.createElement("span");
+    title.className = "conversation-search-title";
+    title.textContent = match.title || "新对话";
+
+    const snippet = document.createElement("span");
+    snippet.className = "conversation-search-snippet";
+    snippet.textContent = match.snippet || query;
+
+    const meta = document.createElement("span");
+    meta.className = "conversation-search-meta";
+    const role = match.role === "user" ? "你" : match.role === "assistant" ? "助手" : "标题";
+    meta.textContent = `${role}${match.time ? `｜${formatMessageTime(match.time)}` : ""}`;
+
+    button.append(title, snippet, meta);
+    button.addEventListener("click", () => jumpToSearchResult(match));
+    results.appendChild(button);
+  }
+}
+
+function renderCanvasSearchResults(matches, query) {
+  const results = $("conversationSearchResults");
+  if (!results) return;
+  results.innerHTML = "";
+  results.classList.add("open");
+  if (!state.currentCanvas) {
+    const empty = document.createElement("div");
+    empty.className = "conversation-search-empty";
+    empty.textContent = "当前没有打开的画布";
+    results.appendChild(empty);
+    return;
+  }
+  if (!matches.length) {
+    const empty = document.createElement("div");
+    empty.className = "conversation-search-empty";
+    empty.textContent = "没有找到相关节点";
+    results.appendChild(empty);
+    return;
+  }
+  for (const match of matches) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "conversation-search-result";
+    button.dataset.nodeId = match.nodeId;
+
+    const title = document.createElement("span");
+    title.className = "conversation-search-title";
+    title.textContent = match.title || "未命名节点";
+
+    const snippet = document.createElement("span");
+    snippet.className = "conversation-search-snippet";
+    snippet.textContent = match.snippet || query;
+
+    const meta = document.createElement("span");
+    meta.className = "conversation-search-meta";
+    meta.textContent = `${state.currentCanvas.title || "当前画布"} · ${match.typeLabel || "节点"}`;
+
+    button.append(title, snippet, meta);
+    button.addEventListener("click", () => jumpToCanvasSearchResult(match));
+    results.appendChild(button);
+  }
+}
+
+async function jumpToSearchResult(match) {
+  if (!match || !match.conversationId) return;
+  await loadConversation(match.conversationId);
+  closeConversationSearch();
+  const input = $("conversationSearch");
+  if (input) input.blur();
+  window.requestAnimationFrame(() => {
+    const box = $("messages");
+    const index = match.messageIndex;
+    const node = index === null || index === undefined || index === ""
+      ? null
+      : box.querySelector(`.message[data-message-index="${CSS.escape(String(index))}"]`);
+    if (!node) {
+      box.scrollTop = 0;
+      return;
+    }
+    node.scrollIntoView({ block: "center" });
+    node.classList.add("search-hit");
+    window.setTimeout(() => node.classList.remove("search-hit"), 1800);
+  });
+}
+
+function jumpToCanvasSearchResult(match) {
+  if (!match || !match.nodeId || !state.currentCanvas) return;
+  const node = currentCanvasNode(match.nodeId);
+  if (!node) return;
+  closeConversationSearch();
+  const input = $("conversationSearch");
+  if (input) input.blur();
+  state.selectedCanvasNodeId = node.id;
+  state.selectedCanvasEdgeId = "";
+  renderCanvas();
+  window.requestAnimationFrame(() => {
+    const item = document.querySelector(`.canvas-node[data-node-id="${CSS.escape(String(node.id))}"]`);
+    centerCanvasOnNode(node.id);
+    if (item) {
+      item.focus({ preventScroll: true });
+      item.classList.add("search-hit");
+      window.setTimeout(() => item.classList.remove("search-hit"), 1800);
+    }
+  });
+}
+
+function openContextMenu(event, item, row) {
+  state.contextItem = { item, row };
+  const menu = $("contextMenu");
+  menu.style.left = `${event.clientX}px`;
+  menu.style.top = `${event.clientY}px`;
+  menu.classList.add("open");
+  menu.setAttribute("aria-hidden", "false");
+}
+
+function closeContextMenu() {
+  const menu = $("contextMenu");
+  menu.classList.remove("open");
+  menu.setAttribute("aria-hidden", "true");
+}
+
+function startRenameConversation(item, row) {
+  const input = document.createElement("input");
+  input.className = "session-rename";
+  input.value = item.title || "新对话";
+  row.replaceChildren(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    const title = input.value.trim();
+    if (save && title && title !== item.title) {
+      try {
+        const renamed = await api("/api/conversation/rename", {
+          method: "POST",
+          body: JSON.stringify({ id: item.id, title }),
+        });
+        if (state.currentId === item.id) {
+          $("chatTitle").textContent = renamed.title;
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+    await loadConversations();
+  };
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") finish(true);
+    if (event.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(true));
+}
+
+async function loadConversation(id) {
+  const data = await api(`/api/conversation?id=${encodeURIComponent(id)}`);
+  state.currentId = data.id;
+  state.messages = data.messages || [];
+  state.currentRunName = data.runName || "";
+  state.workbenchRunName = state.currentRunName;
+  state.conversationCreatedAt = data.createdAt || data.updatedAt || "";
+  $("chatTitle").textContent = data.title || state.appName;
+  renderConversationList();
+  renderMessages();
+  if (state.workbenchOpen) loadWorkbench();
+}
+
+function startProjectRename(projectId) {
+  state.editingProjectId = projectId;
+  renderConversationList();
+}
+
+function cancelProjectRename() {
+  state.editingProjectId = "";
+  renderConversationList();
+}
+
+async function commitProjectRename(group, title) {
+  const currentTitle = group?.title || "无项目";
+  const nextTitle = String(title || "").trim();
+  if (!nextTitle || nextTitle === currentTitle) {
+    cancelProjectRename();
+    return;
+  }
+  const data = await api("/api/projects/rename", {
+    method: "POST",
+    body: JSON.stringify({ id: group.id, title: nextTitle }),
+  });
+  state.editingProjectId = "";
+  state.projects = data.projects || state.projects;
+  state.projectGroups = state.projectGroups.map((item) => (
+    item.id === group.id ? { ...item, title: data.project?.title || nextTitle } : item
+  ));
+  await loadConversations();
+}
+
+function renderNewConversationProjectOptions() {
+  const select = $("newConversationProject");
+  if (!select) return;
+  select.innerHTML = "";
+  for (const project of state.projects) {
+    const option = document.createElement("option");
+    option.value = project.id;
+    option.textContent = project.title || "无项目";
+    select.appendChild(option);
+  }
+  const createOption = document.createElement("option");
+  createOption.value = newProjectSelectValue;
+  createOption.textContent = "新建项目...";
+  select.appendChild(createOption);
+  select.value = state.currentProjectId && state.projects.some((project) => project.id === state.currentProjectId)
+    ? state.currentProjectId
+    : state.projects[0]?.id || newProjectSelectValue;
+  updateNewConversationProjectFields();
+}
+
+function updateNewConversationProjectFields() {
+  const select = $("newConversationProject");
+  const wrap = $("newConversationProjectNameWrap");
+  if (!select || !wrap) return;
+  const creating = select.value === newProjectSelectValue;
+  wrap.hidden = !creating;
+  if (creating) $("newConversationProjectName").focus();
+}
+
+function openNewConversationModal() {
+  const modal = $("newConversationModal");
+  if (!modal) return;
+  $("newConversationTitle").value = "新对话";
+  $("newConversationProjectName").value = "新项目";
+  renderNewConversationProjectOptions();
+  modal.classList.add("open");
+  modal.setAttribute("aria-hidden", "false");
+  $("newConversationTitle").focus();
+}
+
+function closeNewConversationModal() {
+  const modal = $("newConversationModal");
+  if (!modal) return;
+  modal.classList.remove("open");
+  modal.setAttribute("aria-hidden", "true");
+}
+
+async function createConversationFromModal() {
+  const title = $("newConversationTitle").value.trim() || "新对话";
+  const selectedProjectId = $("newConversationProject").value;
+  const payload = { title };
+  if (selectedProjectId === newProjectSelectValue) {
+    const newProjectTitle = $("newConversationProjectName").value.trim();
+    if (!newProjectTitle) {
+      $("newConversationProjectName").focus();
+      return;
+    }
+    payload.newProjectTitle = newProjectTitle;
+  } else {
+    payload.projectId = selectedProjectId;
+  }
+  closeNewConversationModal();
+  await newConversation(payload);
+}
+
+async function newConversation(options = {}) {
+  const data = await api("/api/conversations", {
+    method: "POST",
+    body: JSON.stringify({
+      title: options.title || "新对话",
+      projectId: options.projectId || state.currentProjectId,
+      newProjectTitle: options.newProjectTitle || "",
+    }),
+  });
+  state.currentId = data.id;
+  state.currentProjectId = data.projectId || options.projectId || state.currentProjectId;
+  state.messages = [];
+  state.currentRunName = data.runName || "";
+  state.workbenchRunName = state.currentRunName;
+  state.conversationCreatedAt = data.createdAt || "";
+  await loadConversations();
+  await loadConversation(data.id);
+}
+
+async function sendMessage(event) {
+  event.preventDefault();
+  const input = $("chatInput");
+  const text = input.value.trim();
+  const attachments = state.pendingAttachments.map((item) => ({ ...item }));
+  if (!canSendCurrentCompose(text, attachments)) {
+    updateSendState();
+    return;
+  }
+  const outgoingText = buildOutgoingText(text);
+  input.value = "";
+  autoGrowTextarea();
+  state.pendingAttachments = [];
+  renderPendingAttachments();
+  updateSendState();
+  appendMessage("user", outgoingText || "已上传附件。", true, null, null, attachments);
+  renderConversationOverview();
+  syncOverviewPosition();
+  const waiting = appendMessage("assistant", "正在思考...", false);
+  if (state.composeMode) {
+    const gradeLabel = state.scriptGrade === "A" ? "A级本" : "B级本";
+    waiting.textContent = state.composeMode === "storyboard"
+      ? `正在按${gradeLabel}标准流程生成分镜...`
+      : `正在按${gradeLabel}标准流程生成剧本...`;
+  }
+  try {
+    const data = await api("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        conversationId: state.currentId,
+        message: outgoingText,
+        attachments,
+        workflowIntent: state.composeMode || "",
+        scriptGrade: state.scriptGrade,
+      }),
+    });
+    state.currentId = data.id;
+    state.currentRunName = data.runName || state.currentRunName;
+    if (state.workbenchOpen && !state.workbenchRunName) {
+      state.workbenchRunName = state.currentRunName;
+    }
+    state.messages = data.messages || [];
+    $("chatTitle").textContent = data.title || state.appName;
+    waiting.textContent = data.content || "没有返回内容。";
+    await loadConversations();
+    renderMessages();
+    if (state.workbenchOpen) loadWorkbench();
+  } catch (error) {
+    waiting.textContent = error.message;
+  }
+}
+
+function setAppMode(mode) {
+  state.appMode = mode === "canvas" ? "canvas" : "chat";
+  $("chatShell").hidden = state.appMode !== "chat";
+  $("canvasShell").hidden = state.appMode !== "canvas";
+  $("sessionList").hidden = state.appMode !== "chat";
+  $("canvasList").hidden = state.appMode !== "canvas";
+  $("conversationOverview").hidden = state.appMode !== "chat";
+  $("newChat").title = state.appMode === "canvas" ? "新建画布" : "新建对话";
+  $("newChat").setAttribute("aria-label", state.appMode === "canvas" ? "新建画布" : "新建对话");
+  $("openConversationSearch").title = state.appMode === "canvas" ? "搜索当前画布" : "搜索全部对话";
+  $("openConversationSearch").setAttribute("aria-label", state.appMode === "canvas" ? "搜索当前画布" : "搜索全部对话");
+  const modeSwitch = $("appModeSwitch");
+  if (modeSwitch) {
+    const canvasActive = state.appMode === "canvas";
+    modeSwitch.dataset.mode = state.appMode;
+    modeSwitch.setAttribute("aria-checked", String(canvasActive));
+    modeSwitch.setAttribute("aria-label", `工作模式：${canvasActive ? "画布" : "对话"}`);
+    modeSwitch.title = canvasActive ? "切换到对话" : "切换到画布";
+  }
+  if (state.appMode === "canvas") {
+    loadCanvases();
+  } else {
+    renderConversationList();
+  }
+}
+
+async function handlePrimaryCreate() {
+  if (state.appMode === "canvas") {
+    await newCanvas();
+    return;
+  }
+  openNewConversationModal();
+}
+
+async function loadCanvases() {
+  const data = await api("/api/canvases");
+  state.canvases = data.canvases || [];
+  renderCanvasList();
+  if (!state.currentCanvasId) {
+    if (state.canvases.length) {
+      await loadCanvas(state.canvases[0].id);
+    } else {
+      await newCanvas("新画布");
+    }
+  }
+}
+
+function renderCanvasList() {
+  const list = $("canvasList");
+  if (!list) return;
+  list.innerHTML = "";
+  for (const item of state.canvases) {
+    const row = document.createElement("div");
+    row.className = "session-row";
+    const button = document.createElement("button");
+    button.className = `session-item${item.id === state.currentCanvasId ? " active" : ""}`;
+    button.textContent = item.title || "新画布";
+    button.title = `${item.nodeCount || 0} 个节点`;
+    let clickTimer = null;
+    button.addEventListener("click", () => {
+      if (clickTimer) window.clearTimeout(clickTimer);
+      clickTimer = window.setTimeout(() => loadCanvas(item.id), 180);
+    });
+    button.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      if (clickTimer) {
+        window.clearTimeout(clickTimer);
+        clickTimer = null;
+      }
+      startRenameCanvas(item, row);
+    });
+    row.appendChild(button);
+    list.appendChild(row);
+  }
+}
+
+function startRenameCanvas(item, row) {
+  const input = document.createElement("input");
+  input.className = "session-rename";
+  input.value = item.title || "新画布";
+  row.replaceChildren(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    const title = input.value.trim();
+    if (save && title && title !== item.title) {
+      try {
+        const canvas = state.currentCanvas?.id === item.id
+          ? { ...state.currentCanvas, title }
+          : { ...(await api(`/api/canvas?id=${encodeURIComponent(item.id)}`)), title };
+        const renamed = await api("/api/canvas/save", {
+          method: "POST",
+          body: JSON.stringify({ canvas }),
+        });
+        if (state.currentCanvasId === item.id) {
+          state.currentCanvas = renamed;
+          $("canvasTitle").textContent = renamed.title || "自由画布";
+        }
+        state.canvases = state.canvases.map((canvasItem) => canvasItem.id === item.id
+          ? { ...canvasItem, title: renamed.title || title }
+          : canvasItem);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+    renderCanvasList();
+  };
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") finish(true);
+    if (event.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(true));
+}
+
+async function newCanvas(defaultTitle = "") {
+  const title = defaultTitle || window.prompt("新画布名称", "新画布");
+  if (!title || !title.trim()) return;
+  const canvas = await api("/api/canvases", {
+    method: "POST",
+    body: JSON.stringify({ title }),
+  });
+  state.currentCanvasId = canvas.id;
+  state.currentCanvas = canvas;
+  await loadCanvases();
+  await loadCanvas(canvas.id);
+}
+
+async function loadCanvas(id) {
+  const canvas = await api(`/api/canvas?id=${encodeURIComponent(id)}`);
+  state.currentCanvasId = canvas.id;
+  state.currentCanvas = canvas;
+  state.activeCanvasNodeId = "";
+  $("canvasTitle").textContent = canvas.title || "自由画布";
+  renderCanvasList();
+  renderCanvas();
+}
+
+async function saveCurrentCanvas() {
+  if (!state.currentCanvas) return null;
+  const canvas = await api("/api/canvas/save", {
+    method: "POST",
+    body: JSON.stringify({ canvas: state.currentCanvas }),
+  });
+  state.currentCanvas = canvas;
+  return canvas;
+}
+
+function currentCanvasNode(nodeId) {
+  return state.currentCanvas?.nodes?.find((node) => node.id === nodeId) || null;
+}
+
+function currentCanvasEdge(edgeId) {
+  return state.currentCanvas?.edges?.find((edge) => edge.id === edgeId) || null;
+}
+
+function canvasStatus(text) {
+  const node = $("canvasStatus");
+  if (node) node.textContent = text;
+}
+
+function canvasZoom() {
+  return clamp(Number(state.canvasZoom || 1), canvasZoomMin, canvasZoomMax);
+}
+
+function canvasScreenX(x) {
+  return (canvasOriginX + Number(x || 0)) * canvasZoom();
+}
+
+function canvasScreenY(y) {
+  return (canvasOriginY + Number(y || 0)) * canvasZoom();
+}
+
+function canvasNodeBounds(node) {
+  return {
+    x: Number(node.x || 0),
+    y: Number(node.y || 0),
+    width: Number(node.width || 320),
+    height: Number(node.height || 220),
+  };
+}
+
+function canvasContentBounds(extraPadding = 120) {
+  const nodes = state.currentCanvas?.nodes || [];
+  if (!nodes.length) {
+    return { x: -extraPadding, y: -extraPadding, width: extraPadding * 2, height: extraPadding * 2 };
+  }
+  const minX = Math.min(...nodes.map((node) => canvasNodeBounds(node).x));
+  const minY = Math.min(...nodes.map((node) => canvasNodeBounds(node).y));
+  const maxX = Math.max(...nodes.map((node) => {
+    const bounds = canvasNodeBounds(node);
+    return bounds.x + bounds.width;
+  }));
+  const maxY = Math.max(...nodes.map((node) => {
+    const bounds = canvasNodeBounds(node);
+    return bounds.y + bounds.height;
+  }));
+  return {
+    x: minX - extraPadding,
+    y: minY - extraPadding,
+    width: Math.max(1, maxX - minX + extraPadding * 2),
+    height: Math.max(1, maxY - minY + extraPadding * 2),
+  };
+}
+
+function updateCanvasZoomLabel() {
+  const label = $("canvasZoomLabel");
+  if (label) label.textContent = `${Math.round(canvasZoom() * 100)}%`;
+}
+
+function easeCanvasViewport(t) {
+  const clean = clamp(Number(t || 0), 0, 1);
+  return 1 - Math.pow(1 - clean, 3);
+}
+
+function cancelCanvasViewportAnimation() {
+  if (state.canvasViewportAnimation) {
+    window.cancelAnimationFrame(state.canvasViewportAnimation.frameId);
+    state.canvasViewportAnimation = null;
+  }
+  $("canvasShell")?.classList.remove("canvas-viewport-animating");
+}
+
+function animateCanvasViewportTo({ zoom, left, top, duration = canvasFitAnimationMs }) {
+  const stage = $("canvasStage");
+  const shell = $("canvasShell");
+  if (!stage) return;
+  cancelCanvasViewportAnimation();
+  const start = {
+    zoom: canvasZoom(),
+    left: stage.scrollLeft,
+    top: stage.scrollTop,
+    time: performance.now(),
+  };
+  const target = {
+    zoom: clamp(Number(zoom || start.zoom), canvasZoomMin, canvasZoomMax),
+    left: Math.max(0, Number(left || 0)),
+    top: Math.max(0, Number(top || 0)),
+  };
+  shell?.classList.add("canvas-viewport-animating");
+  const step = (now) => {
+    const progress = duration <= 0 ? 1 : clamp((now - start.time) / duration, 0, 1);
+    const eased = easeCanvasViewport(progress);
+    state.canvasZoom = start.zoom + (target.zoom - start.zoom) * eased;
+    renderCanvas();
+    stage.scrollLeft = start.left + (target.left - start.left) * eased;
+    stage.scrollTop = start.top + (target.top - start.top) * eased;
+    updateCanvasViewportTools();
+    if (progress < 1) {
+      state.canvasViewportAnimation = {
+        frameId: window.requestAnimationFrame(step),
+      };
+    } else {
+      state.canvasZoom = target.zoom;
+      stage.scrollLeft = target.left;
+      stage.scrollTop = target.top;
+      state.canvasViewportAnimation = null;
+      shell?.classList.remove("canvas-viewport-animating");
+      renderCanvas();
+    }
+  };
+  state.canvasViewportAnimation = {
+    frameId: window.requestAnimationFrame(step),
+  };
+}
+
+function setCanvasZoom(nextZoom, options = {}) {
+  const stage = $("canvasStage");
+  cancelCanvasViewportAnimation();
+  const previousZoom = canvasZoom();
+  const cleanZoom = clamp(Number(nextZoom || 1), canvasZoomMin, canvasZoomMax);
+  const center = options.logicalCenter || (stage
+    ? {
+        x: (stage.scrollLeft + stage.clientWidth / 2) / previousZoom,
+        y: (stage.scrollTop + stage.clientHeight / 2) / previousZoom,
+      }
+    : { x: canvasOriginX, y: canvasOriginY });
+  state.canvasZoom = cleanZoom;
+  renderCanvas();
+  if (stage) {
+    window.requestAnimationFrame(() => {
+      stage.scrollLeft = center.x * cleanZoom - stage.clientWidth / 2;
+      stage.scrollTop = center.y * cleanZoom - stage.clientHeight / 2;
+      updateCanvasViewportTools();
+    });
+  } else {
+    updateCanvasViewportTools();
+  }
+}
+
+function canvasViewportLogicalRect() {
+  const stage = $("canvasStage");
+  const zoom = canvasZoom();
+  if (!stage) return { x: 0, y: 0, width: 1, height: 1 };
+  return {
+    x: stage.scrollLeft / zoom - canvasOriginX,
+    y: stage.scrollTop / zoom - canvasOriginY,
+    width: stage.clientWidth / zoom,
+    height: stage.clientHeight / zoom,
+  };
+}
+
+function scrollCanvasToLogicalRect(rect, zoom = canvasZoom()) {
+  const stage = $("canvasStage");
+  if (!stage || !rect) return;
+  stage.scrollTo({
+    left: (canvasOriginX + rect.x) * zoom,
+    top: (canvasOriginY + rect.y) * zoom,
+    behavior: "smooth",
+  });
+}
+
+function canvasCenteredScrollForBounds(bounds, zoom = canvasZoom()) {
+  const stage = $("canvasStage");
+  if (!stage || !bounds) return { left: 0, top: 0 };
+  return {
+    left: Math.max(0, (canvasOriginX + bounds.x + bounds.width / 2) * zoom - stage.clientWidth / 2),
+    top: Math.max(0, (canvasOriginY + bounds.y + bounds.height / 2) * zoom - stage.clientHeight / 2),
+  };
+}
+
+function centerCanvasOnNode(nodeId = state.selectedCanvasNodeId) {
+  const node = currentCanvasNode(nodeId);
+  const stage = $("canvasStage");
+  if (!node || !stage) return;
+  const bounds = canvasNodeBounds(node);
+  const zoom = canvasZoom();
+  stage.scrollTo({
+    left: (canvasOriginX + bounds.x + bounds.width / 2) * zoom - stage.clientWidth / 2,
+    top: (canvasOriginY + bounds.y + bounds.height / 2) * zoom - stage.clientHeight / 2,
+    behavior: "smooth",
+  });
+}
+
+function fitCanvasToContent() {
+  const stage = $("canvasStage");
+  if (!stage || !state.currentCanvas) return;
+  const bounds = canvasContentBounds(160);
+  const nextZoom = clamp(
+    Math.min(stage.clientWidth / bounds.width, stage.clientHeight / bounds.height),
+    canvasZoomMin,
+    canvasZoomMax
+  );
+  const targetScroll = canvasCenteredScrollForBounds(bounds, nextZoom);
+  animateCanvasViewportTo({
+    zoom: nextZoom,
+    left: targetScroll.left,
+    top: targetScroll.top,
+  });
+}
+
+function toggleCanvasMiniMap() {
+  const panel = $("canvasMiniMap");
+  const button = $("toggleCanvasMiniMap");
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  button?.classList.toggle("active", !panel.hidden);
+  updateCanvasViewportTools();
+}
+
+function updateCanvasMiniMap() {
+  const panel = $("canvasMiniMap");
+  const svg = $("canvasMiniMapSvg");
+  if (!panel || !svg || panel.hidden) return;
+  const nodes = state.currentCanvas?.nodes || [];
+  const viewport = canvasViewportLogicalRect();
+  const content = canvasContentBounds(160);
+  const minX = Math.min(content.x, viewport.x);
+  const minY = Math.min(content.y, viewport.y);
+  const maxX = Math.max(content.x + content.width, viewport.x + viewport.width);
+  const maxY = Math.max(content.y + content.height, viewport.y + viewport.height);
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  svg.setAttribute("viewBox", `${minX} ${minY} ${width} ${height}`);
+  svg.innerHTML = "";
+  for (const node of nodes) {
+    const bounds = canvasNodeBounds(node);
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("class", `canvas-minimap-node${state.selectedCanvasNodeId === node.id ? " selected" : ""}`);
+    rect.setAttribute("x", String(bounds.x));
+    rect.setAttribute("y", String(bounds.y));
+    rect.setAttribute("width", String(bounds.width));
+    rect.setAttribute("height", String(bounds.height));
+    rect.setAttribute("rx", "18");
+    svg.appendChild(rect);
+  }
+  const viewRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  viewRect.setAttribute("class", "canvas-minimap-viewport");
+  viewRect.setAttribute("x", String(viewport.x));
+  viewRect.setAttribute("y", String(viewport.y));
+  viewRect.setAttribute("width", String(viewport.width));
+  viewRect.setAttribute("height", String(viewport.height));
+  viewRect.setAttribute("rx", "12");
+  svg.appendChild(viewRect);
+}
+
+function canvasMiniMapPoint(event) {
+  const svg = $("canvasMiniMapSvg");
+  const rect = svg?.getBoundingClientRect();
+  const viewBox = svg?.viewBox?.baseVal;
+  if (!svg || !rect || !viewBox || rect.width <= 0 || rect.height <= 0) return null;
+  return {
+    x: viewBox.x + ((event.clientX - rect.left) / rect.width) * viewBox.width,
+    y: viewBox.y + ((event.clientY - rect.top) / rect.height) * viewBox.height,
+  };
+}
+
+function moveCanvasViewportFromMiniMap(event) {
+  const point = canvasMiniMapPoint(event);
+  const stage = $("canvasStage");
+  if (!point || !stage) return;
+  cancelCanvasViewportAnimation();
+  const zoom = canvasZoom();
+  const viewport = canvasViewportLogicalRect();
+  stage.scrollLeft = Math.max(0, (canvasOriginX + point.x - viewport.width / 2) * zoom);
+  stage.scrollTop = Math.max(0, (canvasOriginY + point.y - viewport.height / 2) * zoom);
+  updateCanvasViewportTools();
+}
+
+function beginCanvasMiniMapDrag(event) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  state.canvasMiniMapDrag = {
+    pointerId: event.pointerId,
+    trigger: event.currentTarget,
+  };
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  $("canvasMiniMap")?.classList.add("dragging");
+  moveCanvasViewportFromMiniMap(event);
+}
+
+function updateCanvasMiniMapDrag(event) {
+  const drag = state.canvasMiniMapDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  event.preventDefault();
+  moveCanvasViewportFromMiniMap(event);
+}
+
+function endCanvasMiniMapDrag(event) {
+  const drag = state.canvasMiniMapDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  drag.trigger?.releasePointerCapture?.(drag.pointerId);
+  state.canvasMiniMapDrag = null;
+  $("canvasMiniMap")?.classList.remove("dragging");
+}
+
+function updateCanvasViewportTools() {
+  updateCanvasZoomLabel();
+  const centerButton = $("centerSelectedCanvasNode");
+  if (centerButton) centerButton.disabled = !state.selectedCanvasNodeId;
+  const zoom = canvasZoom();
+  const zoomOut = $("canvasZoomOut");
+  const zoomIn = $("canvasZoomIn");
+  if (zoomOut) zoomOut.disabled = zoom <= canvasZoomMin + 0.001;
+  if (zoomIn) zoomIn.disabled = zoom >= canvasZoomMax - 0.001;
+  updateCanvasMiniMap();
+}
+
+async function addNodeToCanvas(type, position = null) {
+  if (!state.currentCanvas) await newCanvas("新画布");
+  const cleanType = canvasTypeLabels[type] ? type : "label";
+  const nodes = state.currentCanvas.nodes || [];
+  if (cleanType === "novel" && nodes.some((node) => node.type === "novel")) {
+    canvasStatus("一个画布只能有一个小说节点");
+    return;
+  }
+  const index = nodes.length;
+  const point = position || {
+    x: 140 + (index % 4) * 70,
+    y: 140 + index * 44,
+  };
+  const node = {
+    id: `node-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    type: cleanType,
+    title: canvasTypeLabels[cleanType] || "标识",
+    content: "",
+    x: Number(point.x || 0),
+    y: Number(point.y || 0),
+    width: cleanType === "label" ? 260 : 360,
+    height: cleanType === "label" ? 140 : 240,
+    meta: {},
+  };
+  state.currentCanvas.nodes = [...nodes, node];
+  await saveCurrentCanvas();
+  state.selectedCanvasNodeId = node.id;
+  state.selectedCanvasEdgeId = "";
+  renderCanvas();
+}
+
+function renderCanvas() {
+  const canvas = state.currentCanvas;
+  const layer = $("canvasNodes");
+  if (!layer) return;
+  layer.innerHTML = "";
+  if (!canvas) {
+    canvasStatus("还没有画布");
+    return;
+  }
+  applyCanvasSurfaceSize(canvas);
+  for (const node of canvas.nodes || []) {
+    layer.appendChild(renderCanvasNode(node));
+  }
+  renderCanvasEdges();
+  updateCanvasViewportTools();
+  canvasStatus(`节点 ${canvas.nodes.length} 个｜连线 ${(canvas.edges || []).length} 条${state.canvasDrag?.type === "connect" ? "｜拖到目标节点松开" : ""}`);
+}
+
+function applyCanvasSurfaceSize(canvas) {
+  const nodes = canvas?.nodes || [];
+  const zoom = canvasZoom();
+  const maxRight = nodes.reduce((max, node) => Math.max(max, canvasOriginX + Number(node.x || 0) + Number(node.width || 320)), 0);
+  const maxBottom = nodes.reduce((max, node) => Math.max(max, canvasOriginY + Number(node.y || 0) + Number(node.height || 220)), 0);
+  const width = Math.max(canvasSurfaceMinWidth, Math.ceil(maxRight + canvasSurfacePadding)) * zoom;
+  const height = Math.max(canvasSurfaceMinHeight, Math.ceil(maxBottom + canvasSurfacePadding)) * zoom;
+  const stage = $("canvasStage");
+  const edges = $("canvasEdges");
+  const nodesLayer = $("canvasNodes");
+  stage?.style.setProperty("--canvas-surface-width", `${width}px`);
+  stage?.style.setProperty("--canvas-surface-height", `${height}px`);
+  if (edges) {
+    edges.style.width = `${width}px`;
+    edges.style.height = `${height}px`;
+    edges.setAttribute("width", String(width));
+    edges.setAttribute("height", String(height));
+  }
+  if (nodesLayer) {
+    nodesLayer.style.width = `${width}px`;
+    nodesLayer.style.height = `${height}px`;
+  }
+  ensureCanvasViewportOrigin(canvas);
+}
+
+function ensureCanvasViewportOrigin(canvas) {
+  const stage = $("canvasStage");
+  const canvasId = canvas?.id || "";
+  if (!stage || !canvasId || stage.dataset.canvasViewportId === canvasId) return;
+  stage.dataset.canvasViewportId = canvasId;
+  window.requestAnimationFrame(() => {
+    stage.scrollLeft = canvasOriginX * canvasZoom();
+    stage.scrollTop = canvasOriginY * canvasZoom();
+    updateCanvasViewportTools();
+  });
+}
+
+function renderCanvasNode(node) {
+  const item = document.createElement("article");
+  item.className = `canvas-node ${node.type || "label"}${state.selectedCanvasNodeId === node.id ? " selected" : ""}`;
+  item.dataset.nodeId = node.id;
+  item.tabIndex = 0;
+  item.style.left = `${canvasScreenX(node.x)}px`;
+  item.style.top = `${canvasScreenY(node.y)}px`;
+  item.style.width = `${Number(node.width || 320)}px`;
+  item.style.height = `${Number(node.height || 220)}px`;
+  item.style.transform = `scale(${canvasZoom()})`;
+  item.style.transformOrigin = "top left";
+  item.addEventListener("contextmenu", (event) => openCanvasContextMenu(event, node.id));
+  item.addEventListener("pointerenter", () => {
+    window.clearTimeout(item.canvasHoverTimer);
+    item.classList.add("hovering");
+  });
+  item.addEventListener("pointerleave", () => {
+    window.clearTimeout(item.canvasHoverTimer);
+    item.canvasHoverTimer = window.setTimeout(() => {
+      if (!$("canvasActionMenu")?.classList.contains("open")) item.classList.remove("hovering");
+    }, 260);
+  });
+  item.addEventListener("focusin", () => item.classList.add("hovering"));
+  item.addEventListener("focusout", () => item.classList.remove("hovering"));
+
+  const head = document.createElement("div");
+  head.className = "canvas-node-headline";
+  head.innerHTML = `<span class="canvas-node-type-icon ${escapeHtml(node.type || "label")}" title="${escapeHtml(canvasTypeLabels[node.type] || "标识")}" aria-hidden="true">${canvasTypeIcon(node.type)}</span><span class="canvas-node-title-text">${escapeHtml(node.title || "未命名节点")}</span>`;
+  let titleClickTimer = null;
+  head.addEventListener("pointerdown", (event) => {
+    if (event.button === 0 && event.detail >= 2) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (titleClickTimer) {
+        window.clearTimeout(titleClickTimer);
+        titleClickTimer = null;
+      }
+      editCanvasNodeTitle(node.id);
+      return;
+    }
+    event.stopPropagation();
+    selectCanvasNode(node.id);
+  });
+  head.addEventListener("pointerup", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (state.suppressCanvasTitleClick) return;
+    if (titleClickTimer) {
+      window.clearTimeout(titleClickTimer);
+      titleClickTimer = null;
+      editCanvasNodeTitle(node.id);
+      return;
+    }
+    titleClickTimer = window.setTimeout(() => {
+      titleClickTimer = null;
+    }, 800);
+  });
+  head.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  item.appendChild(head);
+  if (state.editingCanvasNodeId === node.id) {
+    head.innerHTML = `<span class="canvas-node-type-icon ${escapeHtml(node.type || "label")}" title="${escapeHtml(canvasTypeLabels[node.type] || "标识")}" aria-hidden="true">${canvasTypeIcon(node.type)}</span>`;
+    const titleInput = document.createElement("input");
+    titleInput.className = "canvas-node-title-input";
+    titleInput.value = node.title || "";
+    titleInput.setAttribute("aria-label", "节点标题");
+    titleInput.addEventListener("pointerdown", (event) => event.stopPropagation());
+    titleInput.addEventListener("pointerup", (event) => event.stopPropagation());
+    titleInput.addEventListener("click", (event) => event.stopPropagation());
+    titleInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commitCanvasNodeTitleEdit(node.id, titleInput.value);
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelCanvasNodeTitleEdit();
+      }
+    });
+    titleInput.addEventListener("blur", () => commitCanvasNodeTitleEdit(node.id, titleInput.value));
+    head.appendChild(titleInput);
+    window.setTimeout(() => {
+      titleInput.focus();
+      titleInput.select();
+    }, 0);
+  }
+
+  const body = document.createElement("textarea");
+  body.className = "canvas-node-body";
+  body.value = node.content || "";
+  body.dataset.savedContent = node.content || "";
+  body.placeholder = "点击编辑节点内容。";
+  body.setAttribute("aria-label", `${node.title || "节点"}内容`);
+  body.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+    selectCanvasNode(node.id);
+    startCanvasNodeDrag(event, node.id, { pending: true, textarea: body });
+  });
+  body.addEventListener("click", (event) => {
+    event.stopPropagation();
+    selectCanvasNode(node.id);
+  });
+  body.addEventListener("input", () => updateCanvasNodeDraft(node.id, body.value));
+  body.addEventListener("blur", async () => {
+    if (body.dataset.savedContent === body.value) return;
+    await saveCanvasNodeDraft(node.id, body.value);
+    body.dataset.savedContent = body.value;
+  });
+  item.appendChild(body);
+
+  const plusSides = node.type === "novel" ? ["right"] : ["left", "right"];
+  for (const side of plusSides) {
+    item.appendChild(canvasHoverBridge(side));
+    item.appendChild(canvasPlusButton(node.id, side));
+  }
+
+  const resize = document.createElement("div");
+  resize.className = "canvas-resize";
+  resize.addEventListener("pointerdown", (event) => startCanvasNodeResize(event, node.id));
+  item.appendChild(resize);
+  return item;
+}
+
+function canvasTypeIcon(type = "label") {
+  const safeType = canvasTypeIconPaths[type] ? type : "label";
+  return `<svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">${canvasTypeIconPaths[safeType]}</svg>`;
+}
+
+function renderCanvasToolbarIcons() {
+  document.querySelectorAll(".canvas-toolbar [data-add-node]").forEach((button) => {
+    const type = canvasTypeIconPaths[button.dataset.addNode] ? button.dataset.addNode : "label";
+    const label = button.dataset.label || button.textContent.trim() || canvasTypeLabels[type] || "节点";
+    button.dataset.label = label;
+    button.innerHTML = `<span class="canvas-node-type-icon canvas-toolbar-icon ${escapeHtml(type)}" aria-hidden="true">${canvasTypeIcon(type)}</span><span>${escapeHtml(label)}</span>`;
+    button.title = canvasTypeLabels[type] || label;
+  });
+}
+
+function selectCanvasNode(nodeId) {
+  state.selectedCanvasNodeId = nodeId;
+  state.selectedCanvasEdgeId = "";
+  document.querySelectorAll(".canvas-node").forEach((node) => {
+    node.classList.toggle("selected", node.dataset.nodeId === nodeId);
+  });
+  document.querySelectorAll(".canvas-edge").forEach((edge) => {
+    edge.classList.remove("selected");
+  });
+  updateCanvasViewportTools();
+}
+
+function selectCanvasEdge(edgeId) {
+  state.selectedCanvasEdgeId = edgeId;
+  state.selectedCanvasNodeId = "";
+  document.querySelectorAll(".canvas-node").forEach((node) => {
+    node.classList.remove("selected");
+  });
+  document.querySelectorAll(".canvas-edge").forEach((edge) => {
+    edge.classList.toggle("selected", edge.dataset.edgeId === edgeId);
+  });
+  updateCanvasViewportTools();
+}
+
+function updateCanvasNodeDraft(nodeId, content) {
+  if (!state.currentCanvas) return;
+  state.currentCanvas.nodes = (state.currentCanvas.nodes || []).map((node) => node.id === nodeId
+    ? { ...node, content }
+    : node);
+}
+
+async function saveCanvasNodeDraft(nodeId, content) {
+  const node = currentCanvasNode(nodeId);
+  if (!node) return;
+  updateCanvasNodeDraft(nodeId, content);
+  await saveCurrentCanvas();
+}
+
+function clearCanvasSelection() {
+  state.selectedCanvasNodeId = "";
+  state.selectedCanvasEdgeId = "";
+  document.querySelectorAll(".canvas-node.selected, .canvas-node.hovering").forEach((node) => {
+    node.classList.remove("selected");
+    node.classList.remove("hovering");
+  });
+  document.querySelectorAll(".canvas-edge.selected").forEach((edge) => {
+    edge.classList.remove("selected");
+  });
+  updateCanvasViewportTools();
+}
+
+function handleCanvasStageClick(event) {
+  if (
+    event.target.closest?.(".canvas-node, .canvas-edge, .canvas-node-plus, .canvas-action-menu, .canvas-context-menu")
+  ) {
+    return;
+  }
+  closeCanvasMenus();
+  if (document.activeElement?.closest?.(".canvas-node")) {
+    document.activeElement.blur();
+  }
+  clearCanvasSelection();
+}
+
+async function editCanvasNodeTitle(nodeId) {
+  const node = currentCanvasNode(nodeId);
+  if (!node || !state.currentCanvas) return;
+  const nextTitle = window.prompt("节点标题", node.title || "");
+  if (nextTitle === null) return;
+  const cleanTitle = nextTitle.trim();
+  if (!cleanTitle || cleanTitle === node.title) return;
+  state.currentCanvas.nodes = (state.currentCanvas.nodes || []).map((item) => item.id === nodeId
+    ? { ...item, title: cleanTitle }
+    : item);
+  await saveCurrentCanvas();
+  state.selectedCanvasNodeId = nodeId;
+  renderCanvas();
+}
+
+function editCanvasNodeTitle(nodeId) {
+  const node = currentCanvasNode(nodeId);
+  if (!node || !state.currentCanvas) return;
+  state.editingCanvasNodeId = nodeId;
+  state.selectedCanvasNodeId = nodeId;
+  state.selectedCanvasEdgeId = "";
+  renderCanvas();
+}
+
+async function commitCanvasNodeTitleEdit(nodeId, title) {
+  const node = currentCanvasNode(nodeId);
+  if (!node || !state.currentCanvas || state.editingCanvasNodeId !== nodeId) return;
+  const cleanTitle = String(title || "").trim();
+  state.editingCanvasNodeId = "";
+  if (!cleanTitle || cleanTitle === node.title) {
+    renderCanvas();
+    return;
+  }
+  state.currentCanvas.nodes = (state.currentCanvas.nodes || []).map((item) => item.id === nodeId
+    ? { ...item, title: cleanTitle }
+    : item);
+  await saveCurrentCanvas();
+  state.selectedCanvasNodeId = nodeId;
+  state.selectedCanvasEdgeId = "";
+  renderCanvas();
+}
+
+function cancelCanvasNodeTitleEdit() {
+  if (!state.editingCanvasNodeId) return;
+  state.editingCanvasNodeId = "";
+  renderCanvas();
+}
+
+function canvasHoverBridge(side) {
+  const bridge = document.createElement("div");
+  bridge.className = `canvas-node-hover-bridge ${side}`;
+  bridge.setAttribute("aria-hidden", "true");
+  return bridge;
+}
+
+function canvasPlusButton(nodeId, side) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `canvas-node-plus ${side}`;
+  button.textContent = "+";
+  button.title = side === "left" ? "拖拽连接到其他节点右侧" : "单击生成，拖拽连接到其他节点左侧";
+  button.setAttribute("aria-label", button.title);
+  button.addEventListener("pointerdown", (event) => beginCanvasEdgeDraft(event, nodeId, side));
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (state.suppressCanvasPlusClick) {
+      state.suppressCanvasPlusClick = false;
+      event.preventDefault();
+      return;
+    }
+    openCanvasActionMenu(event, nodeId, side);
+  });
+  return button;
+}
+
+function canvasMenuButton(label, action, meta = "") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.canvasAction = action;
+  button.innerHTML = `<span>${escapeHtml(label)}</span>${meta ? `<small>${escapeHtml(meta)}</small>` : ""}`;
+  return button;
+}
+
+function canvasNodeCreateOptions(node) {
+  if (node.type === "novel") {
+    return [
+      { label: "剧本", action: "generate-script", meta: "按小说生成" },
+      { label: "标识", action: "add-label", meta: "补充说明" },
+    ];
+  }
+  if (node.type === "script") {
+    return [
+      { label: "分镜脚本", action: "generate-storyboard-all", meta: "一键生成所有集数分镜" },
+      { label: "标识", action: "add-label", meta: "补充说明" },
+    ];
+  }
+  return [
+    { label: "标识", action: "add-label", meta: "补充说明" },
+  ];
+}
+
+function openCanvasActionMenu(event, nodeId, side = "right") {
+  event.preventDefault();
+  const node = currentCanvasNode(nodeId);
+  const menu = $("canvasActionMenu");
+  if (!node || !menu) return;
+  selectCanvasNode(nodeId);
+  closeCanvasContextMenu();
+  menu.dataset.nodeId = nodeId;
+  menu.dataset.edgeId = "";
+  menu.dataset.side = side;
+  menu.innerHTML = "";
+
+  const title = document.createElement("div");
+  title.className = "canvas-menu-title";
+  title.textContent = side === "left" ? "添加到该节点附近" : "引用该节点生成";
+  menu.appendChild(title);
+
+  for (const option of canvasNodeCreateOptions(node)) {
+    menu.appendChild(canvasMenuButton(option.label, option.action, option.meta || ""));
+  }
+  positionFloatingMenu(menu, event.clientX + (side === "left" ? -12 : 12), event.clientY);
+}
+
+function openCanvasContextMenu(event, nodeId) {
+  event.preventDefault();
+  event.stopPropagation();
+  const node = currentCanvasNode(nodeId);
+  const menu = $("canvasContextMenu");
+  if (!node || !menu) return;
+  closeCanvasActionMenu();
+  menu.dataset.nodeId = nodeId;
+  menu.dataset.edgeId = "";
+  menu.innerHTML = "";
+  menu.appendChild(canvasMenuButton("复制节点", "copy-node", "Ctrl+C"));
+  menu.appendChild(canvasMenuButton("复制文本", "copy-text"));
+  if (node.type === "novel") menu.appendChild(canvasMenuButton("创建剧本", "generate-script"));
+  if (node.type === "script") menu.appendChild(canvasMenuButton("创建分镜脚本", "generate-storyboard-all", "全部集数"));
+  menu.appendChild(canvasMenuButton("编辑", "edit"));
+  menu.appendChild(canvasMenuButton("删除", "delete", "Delete"));
+  positionFloatingMenu(menu, event.clientX, event.clientY);
+}
+
+function openCanvasBoardContextMenu(event) {
+  if (!state.currentCanvas) return;
+  if (event.target.closest?.(".canvas-node, .canvas-edge")) return;
+  event.preventDefault();
+  closeCanvasActionMenu();
+  const menu = $("canvasContextMenu");
+  if (!menu) return;
+  const point = canvasStagePoint(event.clientX, event.clientY);
+  menu.dataset.nodeId = "";
+  menu.dataset.edgeId = "";
+  menu.dataset.canvasX = String(point.x);
+  menu.dataset.canvasY = String(point.y);
+  menu.innerHTML = "";
+
+  const title = document.createElement("div");
+  title.className = "canvas-menu-title";
+  title.textContent = "新增节点";
+  menu.appendChild(title);
+
+  const hasNovel = (state.currentCanvas.nodes || []).some((node) => node.type === "novel");
+  const options = [
+    { label: hasNovel ? "小说（已存在）" : "小说", action: "canvas-add-novel", disabled: hasNovel, meta: hasNovel ? "每个画布仅允许一个" : "原始材料" },
+    { label: "剧本", action: "canvas-add-script" },
+    { label: "分镜脚本", action: "canvas-add-storyboard" },
+    { label: "标识", action: "canvas-add-label" },
+  ];
+  for (const option of options) {
+    const button = canvasMenuButton(option.label, option.action, option.meta || "");
+    button.disabled = Boolean(option.disabled);
+    menu.appendChild(button);
+  }
+  positionFloatingMenu(menu, event.clientX, event.clientY);
+}
+
+function openCanvasEdgeMenu(event, edgeId) {
+  event.preventDefault();
+  event.stopPropagation();
+  const edge = currentCanvasEdge(edgeId);
+  const menu = $("canvasContextMenu");
+  if (!edge || !menu) return;
+  selectCanvasEdge(edgeId);
+  closeCanvasActionMenu();
+  menu.dataset.nodeId = "";
+  menu.dataset.edgeId = edgeId;
+  menu.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "canvas-menu-title";
+  title.textContent = "连线";
+  menu.appendChild(title);
+  menu.appendChild(canvasMenuButton(edge.label ? "修改注释" : "添加注释", "edge-label"));
+  menu.appendChild(canvasMenuButton("删除连线", "edge-delete", "Delete"));
+  positionFloatingMenu(menu, event.clientX, event.clientY);
+}
+
+function positionFloatingMenu(menu, x, y) {
+  menu.classList.add("open");
+  menu.setAttribute("aria-hidden", "false");
+  menu.style.left = "0px";
+  menu.style.top = "0px";
+  const rect = menu.getBoundingClientRect();
+  const nextX = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+  const nextY = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+  menu.style.left = `${nextX}px`;
+  menu.style.top = `${nextY}px`;
+}
+
+function closeCanvasActionMenu() {
+  const menu = $("canvasActionMenu");
+  if (!menu) return;
+  menu.classList.remove("open");
+  menu.setAttribute("aria-hidden", "true");
+  menu.innerHTML = "";
+}
+
+function closeCanvasContextMenu() {
+  const menu = $("canvasContextMenu");
+  if (!menu) return;
+  menu.classList.remove("open");
+  menu.setAttribute("aria-hidden", "true");
+  menu.dataset.edgeId = "";
+  menu.dataset.nodeId = "";
+  menu.dataset.canvasX = "";
+  menu.dataset.canvasY = "";
+  menu.innerHTML = "";
+}
+
+function closeCanvasMenus() {
+  closeCanvasActionMenu();
+  closeCanvasContextMenu();
+}
+
+async function handleCanvasMenuAction(event) {
+  const button = event.target.closest("button[data-canvas-action]");
+  if (!button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const menu = event.currentTarget;
+  const nodeId = menu.dataset.nodeId;
+  const edgeId = menu.dataset.edgeId;
+  const action = button.dataset.canvasAction;
+  const point = {
+    x: Number(menu.dataset.canvasX || 0),
+    y: Number(menu.dataset.canvasY || 0),
+  };
+  if (edgeId && action === "edge-label") {
+    openCanvasEdgeLabelEditor(menu, edgeId);
+    return;
+  }
+  closeCanvasMenus();
+  if (edgeId) {
+    await runCanvasEdgeAction(edgeId, action);
+    return;
+  }
+  if (!nodeId && action.startsWith("canvas-add-")) {
+    await addNodeToCanvas(action.replace("canvas-add-", ""), point);
+    return;
+  }
+  await runCanvasNodeAction(nodeId, action);
+}
+
+async function runCanvasNodeAction(nodeId, action) {
+  if (!nodeId) return;
+  if (action === "generate-script") return generateScriptFromNode(nodeId);
+  if (action === "generate-storyboard") return planStoryboardsFromNode(nodeId);
+  if (action === "generate-storyboard-all") return generateAllStoryboardsFromNode(nodeId);
+  if (action === "edit") {
+    openCanvasNodeModal(nodeId);
+    return;
+  }
+  if (action === "copy-node") return copyCanvasNode(nodeId);
+  if (action === "copy-text") return copyCanvasNodeText(nodeId);
+  if (action === "delete") return deleteCanvasNode(nodeId);
+  if (action.startsWith("add-")) return addDerivedCanvasNode(nodeId, action.replace("add-", ""));
+}
+
+async function runCanvasEdgeAction(edgeId, action) {
+  if (action === "edge-label") return editCanvasEdgeLabel(edgeId);
+  if (action === "edge-delete") return deleteCanvasEdge(edgeId);
+}
+
+function openCanvasEdgeLabelEditor(menu, edgeId) {
+  const edge = currentCanvasEdge(edgeId);
+  if (!edge || !menu) return;
+  menu.dataset.nodeId = "";
+  menu.dataset.edgeId = edgeId;
+  menu.innerHTML = "";
+
+  const title = document.createElement("div");
+  title.className = "canvas-menu-title";
+  title.textContent = "连线注释";
+  menu.appendChild(title);
+
+  const input = document.createElement("input");
+  input.className = "canvas-edge-label-input";
+  input.value = edge.label || "";
+  input.placeholder = "输入注释，Enter 保存";
+  input.setAttribute("aria-label", "连线注释");
+  input.addEventListener("pointerdown", (event) => event.stopPropagation());
+  input.addEventListener("click", (event) => event.stopPropagation());
+  input.addEventListener("keydown", async (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      await saveCanvasEdgeLabel(edgeId, input.value);
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeCanvasContextMenu();
+    }
+  });
+  menu.appendChild(input);
+
+  const actions = document.createElement("div");
+  actions.className = "canvas-menu-inline-actions";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.textContent = "保存";
+  save.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    await saveCanvasEdgeLabel(edgeId, input.value);
+  });
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "取消";
+  cancel.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeCanvasContextMenu();
+  });
+  actions.append(save, cancel);
+  menu.appendChild(actions);
+
+  window.setTimeout(() => {
+    input.focus();
+    input.select();
+  }, 0);
+}
+
+async function saveCanvasEdgeLabel(edgeId, label) {
+  if (!state.currentCanvas) return;
+  const cleanLabel = String(label || "").trim();
+  state.currentCanvas.edges = (state.currentCanvas.edges || []).map((item) => item.id === edgeId
+    ? { ...item, label: cleanLabel }
+    : item);
+  state.selectedCanvasEdgeId = edgeId;
+  state.selectedCanvasNodeId = "";
+  closeCanvasContextMenu();
+  await saveCurrentCanvas();
+  renderCanvas();
+}
+
+async function addDerivedCanvasNode(sourceNodeId, kind) {
+  if (!state.currentCanvas) return;
+  const source = currentCanvasNode(sourceNodeId);
+  if (!source) return;
+  const typeByKind = {
+    label: "label",
+    text: "label",
+    image: "label",
+    video: "label",
+    audio: "label",
+    role: "label",
+    scene: "label",
+  };
+  const titleByKind = {
+    label: "标识",
+    text: "文本",
+    image: "图片",
+    video: "视频",
+    audio: "音频",
+    role: "角色",
+    scene: "场景",
+  };
+  const offset = (state.currentCanvas.nodes || []).filter((node) => node.meta?.sourceNodeId === sourceNodeId).length * 34;
+  const node = {
+    id: `node-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    type: typeByKind[kind] || "label",
+    title: titleByKind[kind] || "文本",
+    content: "",
+    x: Number(source.x || 0) + Number(source.width || 320) + 120,
+    y: Number(source.y || 0) + offset,
+    width: 300,
+    height: 168,
+    meta: { kind, sourceNodeId },
+  };
+  state.currentCanvas.nodes = [...(state.currentCanvas.nodes || []), node];
+  state.currentCanvas.edges = [
+    ...(state.currentCanvas.edges || []),
+    { id: `edge-${Date.now()}`, from: sourceNodeId, to: node.id, label: titleByKind[kind] || "" },
+  ];
+  await saveCurrentCanvas();
+  renderCanvas();
+}
+
+async function copyCanvasNode(nodeId) {
+  if (!state.currentCanvas) return;
+  const source = currentCanvasNode(nodeId);
+  if (!source) return;
+  const node = {
+    ...source,
+    id: `node-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    title: `${source.title || "节点"} 副本`,
+    x: Number(source.x || 0) + 36,
+    y: Number(source.y || 0) + 36,
+    meta: { ...(source.meta || {}), copiedFrom: source.id },
+  };
+  state.currentCanvas.nodes = [...(state.currentCanvas.nodes || []), node];
+  await saveCurrentCanvas();
+  renderCanvas();
+}
+
+async function copyCanvasNodeText(nodeId) {
+  const node = currentCanvasNode(nodeId);
+  if (!node) return;
+  const ok = await copyText(node.content || node.title || "");
+  canvasStatus(ok ? "节点文本已复制" : "复制失败");
+}
+
+function canvasStagePoint(clientX, clientY) {
+  const stage = $("canvasStage");
+  const rect = stage?.getBoundingClientRect();
+  if (!stage || !rect) return { x: clientX, y: clientY };
+  const zoom = canvasZoom();
+  return {
+    x: (clientX - rect.left + stage.scrollLeft) / zoom - canvasOriginX,
+    y: (clientY - rect.top + stage.scrollTop) / zoom - canvasOriginY,
+  };
+}
+
+function canvasNodeEndpoint(node, side = "right") {
+  const zoom = canvasZoom();
+  const x = (canvasOriginX + Number(node.x || 0)) * zoom;
+  const y = (canvasOriginY + Number(node.y || 0)) * zoom;
+  const width = Number(node.width || 0) * zoom;
+  const height = Number(node.height || 0) * zoom;
+  const cleanSide = side === "left" ? "left" : "right";
+  return {
+    x: cleanSide === "left" ? x - 2 : x + width + 2,
+    y: y + height / 2,
+    side: cleanSide,
+  };
+}
+
+function canvasEdgePath(start, end) {
+  const distance = Math.max(80, Math.abs(end.x - start.x) * 0.5);
+  const startDirection = start.side === "left" ? -1 : 1;
+  const endDirection = end.side === "left" ? -1 : 1;
+  const c1 = { x: start.x + distance * startDirection, y: start.y };
+  const c2 = { x: end.x + distance * endDirection, y: end.y };
+  return `M ${start.x} ${start.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${end.x} ${end.y}`;
+}
+
+function edgeMidpoint(start, end) {
+  return {
+    x: (start.x + end.x) / 2,
+    y: (start.y + end.y) / 2,
+  };
+}
+
+function renderCanvasEdges() {
+  const svg = $("canvasEdges");
+  if (!svg || !state.currentCanvas) return;
+  svg.innerHTML = "";
+  const stage = $("canvasStage");
+  const surfaceWidth = parseInt(stage?.style.getPropertyValue("--canvas-surface-width"), 10) || canvasSurfaceMinWidth;
+  const surfaceHeight = parseInt(stage?.style.getPropertyValue("--canvas-surface-height"), 10) || canvasSurfaceMinHeight;
+  svg.setAttribute("width", String(surfaceWidth));
+  svg.setAttribute("height", String(surfaceHeight));
+  const nodes = new Map((state.currentCanvas.nodes || []).map((node) => [node.id, node]));
+  for (const edge of state.currentCanvas.edges || []) {
+    const from = nodes.get(edge.from);
+    const to = nodes.get(edge.to);
+    if (!from || !to) continue;
+    const start = canvasNodeEndpoint(from, edge.fromSide || "right");
+    const end = canvasNodeEndpoint(to, edge.toSide || "left");
+    svg.appendChild(renderCanvasEdge(edge, start, end));
+  }
+  if (state.canvasDrag?.type === "connect" && state.canvasDrag.active) {
+    const source = nodes.get(state.canvasDrag.nodeId);
+    if (source) {
+      const start = canvasNodeEndpoint(source, state.canvasDrag.sourceSide);
+      const current = state.canvasDrag.current;
+      const end = current
+        ? { x: canvasScreenX(current.x), y: canvasScreenY(current.y), side: state.canvasDrag.targetSide }
+        : start;
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("class", "canvas-edge-draft");
+      path.setAttribute("d", canvasEdgePath(start, end));
+      svg.appendChild(path);
+    }
+  }
+}
+
+function renderCanvasEdge(edge, start, end) {
+  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  group.setAttribute("class", `canvas-edge${state.selectedCanvasEdgeId === edge.id ? " selected" : ""}`);
+  group.dataset.edgeId = edge.id;
+
+  const pathText = canvasEdgePath(start, end);
+  const hit = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  hit.setAttribute("class", "canvas-edge-hit");
+  hit.setAttribute("d", pathText);
+  group.appendChild(hit);
+
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  line.setAttribute("class", "canvas-edge-line");
+  line.setAttribute("d", pathText);
+  group.appendChild(line);
+
+  if (edge.label) {
+    const mid = edgeMidpoint(start, end);
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("class", "canvas-edge-label");
+    label.setAttribute("x", String(mid.x));
+    label.setAttribute("y", String(mid.y - 10));
+    label.textContent = String(edge.label).slice(0, 24);
+    group.appendChild(label);
+  }
+
+  group.addEventListener("click", (event) => openCanvasEdgeMenu(event, edge.id));
+  group.addEventListener("contextmenu", (event) => openCanvasEdgeMenu(event, edge.id));
+  return group;
+}
+
+function activateCanvasEdgeDraft(drag) {
+  if (!drag || state.canvasDrag !== drag || drag.active) return;
+  drag.active = true;
+  if (drag.holdTimer) {
+    window.clearTimeout(drag.holdTimer);
+    drag.holdTimer = null;
+  }
+  closeCanvasMenus();
+  renderCanvasEdges();
+}
+
+function clearCanvasDragHoldTimer(drag) {
+  if (!drag?.holdTimer) return;
+  window.clearTimeout(drag.holdTimer);
+  drag.holdTimer = null;
+}
+
+function captureCanvasPointer(target, pointerId) {
+  try {
+    target?.setPointerCapture?.(pointerId);
+  } catch {
+    // Pointer capture can fail if the pointer has already ended.
+  }
+}
+
+function releaseCanvasPointer(target, pointerId) {
+  try {
+    target?.releasePointerCapture?.(pointerId);
+  } catch {
+    // Pointer release is best-effort across browser implementations.
+  }
+}
+
+function activatePendingCanvasNodeDrag(drag) {
+  if (!drag || state.canvasDrag !== drag || drag.type !== "move" || !drag.pending) return;
+  clearCanvasDragHoldTimer(drag);
+  drag.pending = false;
+  drag.active = true;
+  drag.textarea?.blur?.();
+  captureCanvasPointer(drag.trigger, drag.pointerId);
+  document.body.classList.add("canvas-node-dragging");
+}
+
+function activateCanvasPan(drag) {
+  if (!drag || state.canvasDrag !== drag || drag.type !== "pan" || !drag.pending) return;
+  clearCanvasDragHoldTimer(drag);
+  drag.pending = false;
+  drag.active = true;
+  captureCanvasPointer(drag.trigger, drag.pointerId);
+  document.body.classList.add("canvas-panning");
+}
+
+function beginCanvasEdgeDraft(event, nodeId, side) {
+  if (!state.currentCanvas || event.button !== 0) return;
+  event.stopPropagation();
+  const node = currentCanvasNode(nodeId);
+  if (!node) return;
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  const draft = {
+    type: "connect",
+    nodeId,
+    pointerId: event.pointerId,
+    sourceSide: side === "left" ? "left" : "right",
+    targetSide: side === "left" ? "right" : "left",
+    startX: event.clientX,
+    startY: event.clientY,
+    current: canvasStagePoint(event.clientX, event.clientY),
+    active: false,
+    moved: false,
+    holdTimer: null,
+    trigger: event.currentTarget,
+  };
+  draft.holdTimer = window.setTimeout(() => activateCanvasEdgeDraft(draft), canvasConnectHoldMs);
+  state.canvasDrag = draft;
+}
+
+function findCanvasNodeAtPoint(clientX, clientY, exceptNodeId = "") {
+  const element = document.elementFromPoint(clientX, clientY);
+  const nodeElement = element?.closest?.(".canvas-node");
+  if (!nodeElement || nodeElement.dataset.nodeId === exceptNodeId) return null;
+  return currentCanvasNode(nodeElement.dataset.nodeId);
+}
+
+async function finishCanvasEdgeDraft(event, draft) {
+  if (!draft.active) return;
+  const target = findCanvasNodeAtPoint(event.clientX, event.clientY, draft.nodeId);
+  if (!target) {
+    canvasStatus("未连接：请拖到目标节点后松开");
+    return;
+  }
+  const duplicate = (state.currentCanvas.edges || []).some((edge) =>
+    edge.from === draft.nodeId &&
+    edge.to === target.id &&
+    (edge.fromSide || "right") === draft.sourceSide &&
+    (edge.toSide || "left") === draft.targetSide
+  );
+  if (!duplicate) {
+    state.currentCanvas.edges = [
+      ...(state.currentCanvas.edges || []),
+      {
+        id: `edge-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+        from: draft.nodeId,
+        to: target.id,
+        label: "",
+        fromSide: draft.sourceSide,
+        toSide: draft.targetSide,
+      },
+    ];
+    await saveCurrentCanvas();
+  }
+  state.selectedCanvasEdgeId = "";
+}
+
+async function editCanvasEdgeLabel(edgeId) {
+  const edge = currentCanvasEdge(edgeId);
+  if (!edge || !state.currentCanvas) return;
+  const nextLabel = window.prompt("连线注释", edge.label || "");
+  if (nextLabel === null) return;
+  state.currentCanvas.edges = (state.currentCanvas.edges || []).map((item) => item.id === edgeId
+    ? { ...item, label: nextLabel.trim() }
+    : item);
+  await saveCurrentCanvas();
+  state.selectedCanvasEdgeId = edgeId;
+  renderCanvas();
+}
+
+function closeCanvasDeleteConfirm(confirmed = false) {
+  const modal = $("canvasDeleteConfirm");
+  if (modal) {
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+  }
+  const pending = state.canvasDeleteConfirm;
+  state.canvasDeleteConfirm = null;
+  if (pending?.resolve) pending.resolve(Boolean(confirmed));
+}
+
+function requestCanvasDeleteConfirm(options) {
+  const modal = $("canvasDeleteConfirm");
+  if (!modal) return Promise.resolve(false);
+  if (state.canvasDeleteConfirm?.resolve) {
+    state.canvasDeleteConfirm.resolve(false);
+  }
+  $("canvasDeleteConfirmTitle").textContent = options.title || "确认删除";
+  $("canvasDeleteConfirmMessage").textContent = options.message || "删除后无法撤回。";
+  $("canvasDeleteConfirmDetail").textContent = options.detail || "";
+  $("confirmCanvasDelete").textContent = options.confirmText || "删除";
+  modal.classList.add("open");
+  modal.setAttribute("aria-hidden", "false");
+  closeCanvasMenus();
+  return new Promise((resolve) => {
+    state.canvasDeleteConfirm = { resolve };
+    window.requestAnimationFrame(() => $("cancelCanvasDelete")?.focus());
+  });
+}
+
+async function deleteCanvasEdge(edgeId) {
+  const edge = currentCanvasEdge(edgeId);
+  if (!state.currentCanvas || !edge) return;
+  const confirmed = await requestCanvasDeleteConfirm({
+    title: "删除连线？",
+    message: "删除后，这条连线及它的注释会从画布中移除。",
+    detail: edge.label ? `注释：${edge.label}` : "该操作不会删除两端节点。",
+    confirmText: "删除连线",
+  });
+  if (!confirmed) return;
+  state.currentCanvas.edges = (state.currentCanvas.edges || []).filter((edge) => edge.id !== edgeId);
+  state.selectedCanvasEdgeId = "";
+  await saveCurrentCanvas();
+  renderCanvas();
+}
+
+function startCanvasNodeDrag(event, nodeId, options = {}) {
+  if (!state.currentCanvas || event.button !== 0) return;
+  if (!options.pending || options.preventSelection) event.preventDefault();
+  const node = currentCanvasNode(nodeId);
+  if (!node) return;
+  const drag = {
+    type: "move",
+    nodeId,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    nodeX: Number(node.x || 0),
+    nodeY: Number(node.y || 0),
+    pending: Boolean(options.pending),
+    active: !options.pending,
+    holdTimer: null,
+    trigger: event.currentTarget,
+    textarea: options.textarea || null,
+  };
+  if (drag.pending) {
+    drag.holdTimer = window.setTimeout(() => activatePendingCanvasNodeDrag(drag), canvasNodeHoldMs);
+  } else {
+    captureCanvasPointer(event.currentTarget, event.pointerId);
+    document.body.classList.add("canvas-node-dragging");
+  }
+  state.canvasDrag = drag;
+}
+
+function startCanvasNodeResize(event, nodeId) {
+  if (!state.currentCanvas) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const node = currentCanvasNode(nodeId);
+  if (!node) return;
+  event.currentTarget.setPointerCapture(event.pointerId);
+  state.canvasDrag = {
+    type: "resize",
+    nodeId,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    width: Number(node.width || 320),
+    height: Number(node.height || 220),
+    trigger: event.currentTarget,
+  };
+}
+
+function beginCanvasPan(event) {
+  if (!state.currentCanvas || event.button !== 1) return;
+  if (event.target?.closest?.(".canvas-context-menu, .canvas-action-menu, .modal, button, input, textarea, select")) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const stage = $("canvasStage");
+  const drag = {
+    type: "pan",
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    scrollLeft: stage.scrollLeft,
+    scrollTop: stage.scrollTop,
+    pending: true,
+    active: false,
+    holdTimer: null,
+    trigger: stage,
+  };
+  drag.holdTimer = window.setTimeout(() => activateCanvasPan(drag), canvasPanHoldMs);
+  state.canvasDrag = drag;
+}
+
+function updateCanvasPointer(event) {
+  const drag = state.canvasDrag;
+  if (!drag || !state.currentCanvas) return;
+  const dx = event.clientX - drag.startX;
+  const dy = event.clientY - drag.startY;
+  const canvasDx = dx / canvasZoom();
+  const canvasDy = dy / canvasZoom();
+  if (drag.type === "connect") {
+    drag.current = canvasStagePoint(event.clientX, event.clientY);
+    if (Math.hypot(dx, dy) > canvasConnectMovePx) {
+      drag.moved = true;
+    }
+    if (drag.active) renderCanvasEdges();
+    return;
+  }
+  if (drag.type === "pan") {
+    if (!drag.active) return;
+    const stage = $("canvasStage");
+    stage.scrollLeft = drag.scrollLeft - dx;
+    stage.scrollTop = drag.scrollTop - dy;
+    return;
+  }
+  if (drag.type === "move" && !drag.active) {
+    if (Math.hypot(dx, dy) < canvasNodeMovePx) return;
+    activatePendingCanvasNodeDrag(drag);
+  }
+  state.currentCanvas.nodes = (state.currentCanvas.nodes || []).map((node) => {
+    if (node.id !== drag.nodeId) return node;
+    if (drag.type === "move") {
+      return { ...node, x: drag.nodeX + canvasDx, y: drag.nodeY + canvasDy };
+    }
+    return {
+      ...node,
+      width: Math.max(220, drag.width + canvasDx),
+      height: Math.max(120, drag.height + canvasDy),
+    };
+  });
+  renderCanvas();
+}
+
+async function endCanvasPointer(event) {
+  if (!state.canvasDrag) return;
+  const drag = state.canvasDrag;
+  state.canvasDrag = null;
+  clearCanvasDragHoldTimer(drag);
+  if (drag.type === "connect") {
+    releaseCanvasPointer(drag.trigger, drag.pointerId);
+    if (!drag.active) {
+      state.suppressCanvasPlusClick = false;
+      return;
+    }
+    state.suppressCanvasPlusClick = true;
+    await finishCanvasEdgeDraft(event, drag);
+    renderCanvas();
+    return;
+  }
+  if (drag.type === "pan") {
+    releaseCanvasPointer(drag.trigger, drag.pointerId);
+    document.body.classList.remove("canvas-panning");
+    return;
+  }
+  if (drag.type === "move") {
+    releaseCanvasPointer(drag.trigger, drag.pointerId);
+    document.body.classList.remove("canvas-node-dragging");
+    if (!drag.active) return;
+    state.suppressCanvasTitleClick = true;
+    window.setTimeout(() => {
+      state.suppressCanvasTitleClick = false;
+    }, 350);
+  }
+  if (drag.type === "resize") {
+    releaseCanvasPointer(drag.trigger, drag.pointerId);
+  }
+  await saveCurrentCanvas();
+  renderCanvas();
+}
+
+function openCanvasNodeModal(nodeId) {
+  const node = currentCanvasNode(nodeId);
+  if (!node) return;
+  state.activeCanvasNodeId = nodeId;
+  $("canvasNodeTitle").value = node.title || "";
+  $("canvasNodeContent").value = node.content || "";
+  $("generateScriptFromNode").hidden = node.type !== "novel";
+  $("generateStoryboardsFromNode").hidden = node.type !== "script";
+  $("canvasNodeModal").classList.add("open");
+  $("canvasNodeModal").setAttribute("aria-hidden", "false");
+}
+
+function closeCanvasNodeModal() {
+  $("canvasNodeModal").classList.remove("open");
+  $("canvasNodeModal").setAttribute("aria-hidden", "true");
+}
+
+async function saveActiveCanvasNode() {
+  const nodeId = state.activeCanvasNodeId;
+  if (!nodeId || !state.currentCanvas) return;
+  state.currentCanvas.nodes = state.currentCanvas.nodes.map((node) => node.id === nodeId
+    ? { ...node, title: $("canvasNodeTitle").value.trim() || node.title, content: $("canvasNodeContent").value }
+    : node);
+  await saveCurrentCanvas();
+  renderCanvas();
+}
+
+async function deleteCanvasNode(nodeId) {
+  if (!state.currentCanvas) return;
+  const node = currentCanvasNode(nodeId);
+  if (!node) return;
+  const connectedCount = (state.currentCanvas.edges || []).filter((edge) => edge.from === nodeId || edge.to === nodeId).length;
+  const confirmed = await requestCanvasDeleteConfirm({
+    title: "删除节点？",
+    message: connectedCount > 0
+      ? `删除后，该节点和 ${connectedCount} 条关联连线会一起移除。`
+      : "删除后，该节点会从画布中移除。",
+    detail: `${canvasTypeLabels[node.type] || "节点"}：${node.title || "未命名节点"}`,
+    confirmText: "删除节点",
+  });
+  if (!confirmed) return;
+  state.currentCanvas.nodes = (state.currentCanvas.nodes || []).filter((node) => node.id !== nodeId);
+  state.currentCanvas.edges = (state.currentCanvas.edges || []).filter((edge) => edge.from !== nodeId && edge.to !== nodeId);
+  await saveCurrentCanvas();
+  renderCanvas();
+}
+
+async function generateScriptFromNode(nodeId = state.activeCanvasNodeId) {
+  if (nodeId === state.activeCanvasNodeId) await saveActiveCanvasNode();
+  canvasStatus("正在从小说节点生成剧本...");
+  try {
+    const data = await api("/api/canvas/generate-script", {
+      method: "POST",
+      body: JSON.stringify({ canvasId: state.currentCanvasId, nodeId, scriptGrade: state.scriptGrade }),
+    });
+    state.currentCanvas = data.canvas;
+    closeCanvasNodeModal();
+    renderCanvas();
+    canvasStatus("剧本节点已生成");
+  } catch (error) {
+    canvasStatus(error.message);
+  }
+}
+
+async function planStoryboardsFromNode(nodeId = state.activeCanvasNodeId) {
+  if (nodeId === state.activeCanvasNodeId) await saveActiveCanvasNode();
+  canvasStatus("正在识别剧本分集...");
+  try {
+    const data = await api("/api/canvas/plan-storyboards", {
+      method: "POST",
+      body: JSON.stringify({ canvasId: state.currentCanvasId, nodeId }),
+    });
+    state.pendingEpisodes = data;
+    renderEpisodeConfirm(data.episodes || []);
+  } catch (error) {
+    canvasStatus(error.message);
+  }
+}
+
+async function generateAllStoryboardsFromNode(nodeId) {
+  if (!nodeId) return;
+  canvasStatus("正在识别分集并生成全部分镜...");
+  try {
+    const plan = await api("/api/canvas/plan-storyboards", {
+      method: "POST",
+      body: JSON.stringify({ canvasId: state.currentCanvasId, nodeId }),
+    });
+    const episodes = Array.isArray(plan.episodes) ? plan.episodes : [];
+    if (!episodes.length) {
+      canvasStatus("没有识别到可生成的分集");
+      return;
+    }
+    const data = await api("/api/canvas/generate-storyboards", {
+      method: "POST",
+      body: JSON.stringify({
+        canvasId: state.currentCanvasId,
+        nodeId: plan.scriptNodeId || nodeId,
+        episodes,
+        scriptGrade: state.scriptGrade,
+      }),
+    });
+    state.currentCanvas = data.canvas;
+    state.pendingEpisodes = null;
+    closeCanvasNodeModal();
+    renderCanvas();
+    canvasStatus(`已生成 ${data.nodes?.length || episodes.length} 个分镜脚本节点`);
+  } catch (error) {
+    canvasStatus(error.message);
+  }
+}
+
+function renderEpisodeConfirm(episodes) {
+  const list = $("episodeConfirmList");
+  list.innerHTML = "";
+  episodes.forEach((episode, index) => {
+    const row = document.createElement("label");
+    row.className = "episode-item";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = true;
+    checkbox.dataset.index = String(index);
+    const body = document.createElement("div");
+    body.innerHTML = `<strong>${escapeHtml(episode.title || `第${index + 1}集`)}</strong><small>${escapeHtml((episode.content || "").slice(0, 160))}</small>`;
+    row.appendChild(checkbox);
+    row.appendChild(body);
+    list.appendChild(row);
+  });
+  $("episodeConfirmModal").classList.add("open");
+  $("episodeConfirmModal").setAttribute("aria-hidden", "false");
+}
+
+function closeEpisodeConfirm() {
+  $("episodeConfirmModal").classList.remove("open");
+  $("episodeConfirmModal").setAttribute("aria-hidden", "true");
+}
+
+async function generateConfirmedStoryboards() {
+  if (!state.pendingEpisodes) return;
+  const selected = Array.from($("episodeConfirmList").querySelectorAll("input[type='checkbox']"))
+    .filter((input) => input.checked)
+    .map((input) => state.pendingEpisodes.episodes[Number(input.dataset.index)])
+    .filter(Boolean);
+  if (!selected.length) {
+    canvasStatus("请至少选择一集");
+    return;
+  }
+  closeEpisodeConfirm();
+  closeCanvasNodeModal();
+  canvasStatus(`正在生成 ${selected.length} 个分镜节点...`);
+  try {
+    const data = await api("/api/canvas/generate-storyboards", {
+      method: "POST",
+      body: JSON.stringify({
+        canvasId: state.currentCanvasId,
+        nodeId: state.pendingEpisodes.scriptNodeId,
+        episodes: selected,
+        scriptGrade: state.scriptGrade,
+      }),
+    });
+    state.currentCanvas = data.canvas;
+    state.pendingEpisodes = null;
+    renderCanvas();
+    canvasStatus(`已生成 ${data.nodes?.length || selected.length} 个分镜节点`);
+  } catch (error) {
+    canvasStatus(error.message);
+  }
+}
+
+function openWorkbench() {
+  state.workbenchOpen = true;
+  state.workbenchRunName = state.currentRunName || state.workbenchRunName;
+  $("workbench").classList.add("open");
+  $("workbench").setAttribute("aria-hidden", "false");
+  loadWorkbench();
+}
+
+function closeWorkbench() {
+  state.workbenchOpen = false;
+  $("workbench").classList.remove("open");
+  $("workbench").setAttribute("aria-hidden", "true");
+}
+
+async function loadWorkbench() {
+  const status = $("workbenchStatus");
+  const list = $("workbenchStages");
+  const runNode = $("workbenchRunName");
+  if (!status || !list || !runNode) return;
+  await loadWorkbenchRuns();
+  const activeRun = state.workbenchRunName || state.currentRunName;
+  runNode.textContent = activeRun ? `当前对话：${formatWorkbenchRunLabel(activeRun)}` : "尚未选择对话";
+  runNode.title = activeRun || "";
+  hideArtifactPreview();
+  if (!activeRun) {
+    status.textContent = "还没有可查看的对话，请先新建或打开一个对话。";
+    list.innerHTML = "";
+    return;
+  }
+  status.textContent = "读取中...";
+  list.innerHTML = "";
+  state.workbenchLoading = true;
+  try {
+    const data = await api(`/api/workbench?run=${encodeURIComponent(activeRun)}`);
+    renderWorkbench(data);
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    state.workbenchLoading = false;
+  }
+}
+
+async function loadWorkbenchRuns() {
+  const select = $("workbenchRunSelect");
+  if (!select) return;
+  const data = await api("/api/runs");
+  state.runs = data.runs || [];
+  if (!state.workbenchRunName && state.currentRunName) {
+    state.workbenchRunName = state.currentRunName;
+  }
+  select.innerHTML = "";
+  for (const run of state.runs) {
+    const option = document.createElement("option");
+    option.value = run.name;
+    option.textContent = run.title && run.title !== run.name ? run.title : formatWorkbenchRunLabel(run.name);
+    option.title = run.name;
+    select.appendChild(option);
+  }
+  select.disabled = state.runs.length === 0;
+  if (state.workbenchRunName && state.runs.some((run) => run.name === state.workbenchRunName)) {
+    select.value = state.workbenchRunName;
+  } else if (state.runs.length) {
+    state.workbenchRunName = select.value || state.runs[0].name;
+  }
+}
+
+function formatWorkbenchRunLabel(runName) {
+  const text = String(runName || "").trim();
+  const match = text.match(/^(\d{8})-(\d{6})-\w+-web-chat-(.+)$/);
+  if (!match) return text || "未命名对话";
+  const [, date, time, title] = match;
+  const month = date.slice(4, 6);
+  const day = date.slice(6, 8);
+  const hour = time.slice(0, 2);
+  const minute = time.slice(2, 4);
+  return `${month}月${day}日 ${hour}:${minute}｜${title || "未命名对话"}`;
+}
+
+function renderWorkbench(data) {
+  const status = $("workbenchStatus");
+  const list = $("workbenchStages");
+  if (!status || !list) return;
+  const nodeCount = Number(data.nodeCount || 0);
+  const candidates = Array.isArray(data.archiveCandidates) ? data.archiveCandidates.length : 0;
+  status.textContent = `流程节点 ${nodeCount} 个｜可归档节点 ${candidates} 个${data.inputAvailable ? "｜已收到输入材料" : "｜还没有输入材料"}`;
+  list.innerHTML = "";
+  if (!data.tree) {
+    list.innerHTML = `<div class="empty-state">当前运行还没有可查看的流程节点。</div>`;
+    renderArchiveSelections();
+    return;
+  }
+  list.appendChild(renderMindMapTree(data.tree));
+  renderArchiveSelections();
+}
+
+function renderMindMapTree(root) {
+  const wrap = document.createElement("div");
+  wrap.className = "mind-map-tree";
+  wrap.appendChild(renderMindMapNode(root, 0));
+  return wrap;
+}
+
+function renderMindMapNode(node, depth) {
+  const item = document.createElement("div");
+  item.className = `mind-node depth-${depth} ${node.status || ""} ${node.file ? "clickable" : ""}`;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "mind-node-card";
+  button.disabled = !node.file && !(node.emptyText && node.status === "empty");
+  const title = document.createElement("span");
+  title.className = "mind-node-title";
+  title.textContent = node.title || "未命名节点";
+  button.appendChild(title);
+  const meta = document.createElement("span");
+  meta.className = "mind-node-meta";
+  if (node.file) {
+    meta.textContent = `${node.file}｜${formatFileSize(node.size)}${node.updatedAt ? `｜${formatMessageTime(node.updatedAt)}` : ""}`;
+  } else {
+    const count = Array.isArray(node.children) ? node.children.length : 0;
+    meta.textContent = node.type === "root" ? "点击子节点查看内容" : count ? `${count} 个节点` : node.emptyText || "暂无内容";
+  }
+  button.appendChild(meta);
+  button.addEventListener("click", () => previewWorkbenchNode(node));
+  item.appendChild(button);
+
+  if (Array.isArray(node.children) && node.children.length) {
+    const children = document.createElement("div");
+    children.className = "mind-node-children";
+    for (const child of node.children) {
+      children.appendChild(renderMindMapNode(child, depth + 1));
+    }
+    item.appendChild(children);
+  }
+  return item;
+}
+
+async function previewWorkbenchNode(node) {
+  state.activeWorkbenchNode = node;
+  const addButton = $("addArchiveSelection");
+  if (addButton) {
+    addButton.hidden = !node.archiveEligible;
+  }
+  if (!node.file) {
+    const panel = $("artifactPreview");
+    const titleNode = $("artifactPreviewTitle");
+    const body = $("artifactPreviewBody");
+    if (!panel || !titleNode || !body) return;
+    panel.hidden = false;
+    titleNode.textContent = node.title || "节点内容";
+    body.textContent = node.emptyText || "这个节点用于组织流程，没有单独的产物文件。";
+    return;
+  }
+  await previewWorkbenchArtifact(node.file, node.title, node);
+}
+
+async function previewWorkbenchArtifact(file, title, sourceNode = null) {
+  const activeRun = state.workbenchRunName || state.currentRunName;
+  if (!activeRun || !file) return;
+  const panel = $("artifactPreview");
+  const titleNode = $("artifactPreviewTitle");
+  const body = $("artifactPreviewBody");
+  if (!panel || !titleNode || !body) return;
+  state.activeWorkbenchNode = sourceNode || { file, title, archiveEligible: true };
+  const addButton = $("addArchiveSelection");
+  if (addButton) addButton.hidden = sourceNode ? !sourceNode.archiveEligible : false;
+  panel.hidden = false;
+  titleNode.textContent = `${title || "节点内容"}｜${file}`;
+  body.textContent = "读取中...";
+  try {
+    const data = await api(`/api/artifact?run=${encodeURIComponent(activeRun)}&file=${encodeURIComponent(file)}`);
+    const content = data.raw || "";
+    if (window.MbhMarkdown && typeof window.MbhMarkdown.renderMarkdown === "function") {
+      body.innerHTML = window.MbhMarkdown.renderMarkdown(content);
+    } else {
+      body.textContent = content;
+    }
+  } catch (error) {
+    body.textContent = error.message;
+  }
+}
+
+function hideArtifactPreview() {
+  const panel = $("artifactPreview");
+  const body = $("artifactPreviewBody");
+  if (panel) panel.hidden = true;
+  if (body) body.textContent = "";
+  state.activeWorkbenchNode = null;
+}
+
+function addActiveNodeToArchive() {
+  const node = state.activeWorkbenchNode;
+  if (!node || !node.file || !node.archiveEligible) return;
+  if (state.archiveSelections.some((item) => item.file === node.file)) {
+    const stateNode = $("archiveState");
+    if (stateNode) stateNode.textContent = "这个节点已经在采纳清单里。";
+    return;
+  }
+  state.archiveSelections.push({
+    title: node.title || node.file,
+    file: node.file,
+    scope: "",
+    decision: "采纳",
+    reason: "",
+  });
+  renderArchiveSelections();
+  const stateNode = $("archiveState");
+  if (stateNode) stateNode.textContent = "已加入采纳清单。";
+}
+
+function renderArchiveSelections() {
+  const list = $("archiveSelectionList");
+  const stateNode = $("archiveState");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!state.archiveSelections.length) {
+    list.innerHTML = `<div class="empty-state">还没有采纳项。</div>`;
+    if (stateNode) stateNode.textContent = "从思维导图里点击节点，再加入归档。";
+    return;
+  }
+  state.archiveSelections.forEach((item, index) => {
+    const row = document.createElement("article");
+    row.className = "archive-selection";
+    const head = document.createElement("div");
+    head.className = "archive-selection-head";
+    const title = document.createElement("strong");
+    title.textContent = item.title;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost";
+    remove.textContent = "移除";
+    remove.addEventListener("click", () => {
+      state.archiveSelections.splice(index, 1);
+      renderArchiveSelections();
+    });
+    head.append(title, remove);
+
+    const file = document.createElement("small");
+    file.textContent = item.file;
+    const scope = document.createElement("input");
+    scope.placeholder = "采纳范围，如：第1-2集 / 开场镜头 / 某条规则";
+    scope.value = item.scope;
+    scope.addEventListener("input", () => {
+      item.scope = scope.value;
+    });
+    const reason = document.createElement("input");
+    reason.placeholder = "采纳原因，如：冲突更清楚、节奏更稳";
+    reason.value = item.reason;
+    reason.addEventListener("input", () => {
+      item.reason = reason.value;
+    });
+    row.append(head, file, scope, reason);
+    list.appendChild(row);
+  });
+  if (stateNode) stateNode.textContent = `已选择 ${state.archiveSelections.length} 条采纳项。`;
+}
+
+async function submitArchiveLearning() {
+  const activeRun = state.workbenchRunName || state.currentRunName;
+  const stateNode = $("archiveState");
+  if (!activeRun) {
+    if (stateNode) stateNode.textContent = "请先选择一次运行。";
+    return;
+  }
+  if (!state.archiveSelections.length) {
+    if (stateNode) stateNode.textContent = "请先加入至少一条采纳项。";
+    return;
+  }
+  if (stateNode) stateNode.textContent = "归档中...";
+  try {
+    const data = await api("/api/archive-learning", {
+      method: "POST",
+      body: JSON.stringify({ run: activeRun, selections: state.archiveSelections }),
+    });
+    state.archiveSelections = [];
+    renderArchiveSelections();
+    if (stateNode) stateNode.textContent = `已归档：${data.learningRecord}`;
+    await loadWorkbench();
+  } catch (error) {
+    if (stateNode) stateNode.textContent = error.message;
+  }
+}
+
+function openSettings(tab = "deepseek") {
+  $("settings").classList.add("open");
+  $("settings").setAttribute("aria-hidden", "false");
+  switchSettingsTab(tab);
+}
+
+function closeSettings() {
+  $("settings").classList.remove("open");
+  $("settings").setAttribute("aria-hidden", "true");
+}
+
+function openTrash() {
+  $("trash").classList.add("open");
+  $("trash").setAttribute("aria-hidden", "false");
+  renderTrashPanel();
+}
+
+function closeTrash() {
+  $("trash").classList.remove("open");
+  $("trash").setAttribute("aria-hidden", "true");
+}
+
+function switchSettingsTab(tab) {
+  const target = tab === "learning" ? "learning" : "deepseek";
+  document.querySelectorAll("[data-settings-tab]").forEach((button) => {
+    const active = button.dataset.settingsTab === target;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll("[data-settings-panel]").forEach((panel) => {
+    const active = panel.dataset.settingsPanel === target;
+    panel.classList.toggle("active", active);
+    panel.hidden = !active;
+  });
+  if (target === "learning") {
+    loadLearningPanel();
+  }
+  if (target === "deepseek") {
+    loadConfig();
+  }
+}
+
+async function loadConfig() {
+  const data = await api("/api/config");
+  applyAppName(data.appName);
+  $("configAppName").value = data.appName || state.appName;
+  $("configProvider").value = data.provider || "deepseek";
+  renderModelProviderFields(data.provider || "deepseek", data.model);
+  $("configBaseUrl").value = data.baseUrl || providerDefaults[data.provider || "deepseek"].baseUrl;
+  updateApiKeySavedState(data.hasEnvApiKey || data.hasStoredApiKey, data.hasEnvApiKey);
+  state.testedModelConfigSignature = data.hasEnvApiKey || data.hasStoredApiKey
+    ? modelConfigSignature(currentModelConfigPayload())
+    : "";
+  $("configState").textContent = data.hasEnvApiKey
+    ? `已检测到环境变量 ${providerDefaults[data.provider || "deepseek"].keyName}`
+    : data.hasStoredApiKey
+      ? `已保存本地 ${providerDefaults[data.provider || "deepseek"].keyName}`
+      : `尚未配置 ${providerDefaults[data.provider || "deepseek"].keyName}`;
+}
+
+function renderModelProviderFields(provider, selectedModel = "") {
+  const id = providerDefaults[provider] ? provider : "deepseek";
+  const defaults = providerDefaults[id];
+  const modelSelect = $("configModel");
+  modelSelect.innerHTML = "";
+  const models = defaults.models.includes(selectedModel) || !selectedModel
+    ? defaults.models
+    : [selectedModel, ...defaults.models];
+  for (const model of models) {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = model;
+    modelSelect.appendChild(option);
+  }
+  modelSelect.value = selectedModel || defaults.models[0];
+  $("configBaseUrl").placeholder = defaults.baseUrl;
+  if (!$("configBaseUrl").value || $("configBaseUrl").dataset.provider !== id) {
+    $("configBaseUrl").value = defaults.baseUrl;
+  }
+  $("configBaseUrl").dataset.provider = id;
+  const input = $("configApiKey");
+  if (input && input.dataset.masked !== "true") {
+    input.placeholder = `请输入 ${defaults.keyName}`;
+  }
+}
+
+function applyAppName(appName) {
+  const nextName = String(appName || "").trim() || "猫主子漫剧剧本分镜小助手";
+  const oldName = state.appName || "猫主子漫剧剧本分镜小助手";
+  state.appName = nextName;
+  document.title = nextName;
+  if (!$("chatTitle").textContent || $("chatTitle").textContent === oldName || $("chatTitle").textContent === "猫主子漫剧剧本分镜小助手") {
+    $("chatTitle").textContent = nextName;
+  }
+}
+
+async function loadLearningPanel() {
+  const statusBox = $("learningStatus");
+  const list = $("completenessList");
+  if (!statusBox || !list) return;
+  try {
+    const [status, completeness] = await Promise.all([
+      api("/api/learning-status"),
+      api("/api/product-completeness"),
+    ]);
+    statusBox.textContent = `runs ${status.runs}｜对话学习 ${status.conversationRecords}｜快照 ${status.snapshots}｜进化草案 ${status.skillEvolutionReports}`;
+    list.innerHTML = "";
+    for (const item of completeness.milestones || []) {
+      const row = document.createElement("div");
+      row.className = "completeness-item";
+      const title = document.createElement("div");
+      title.className = "completeness-title";
+      title.textContent = `${item.milestone} ${item.name}`;
+      const state = document.createElement("div");
+      state.className = "completeness-state";
+      state.textContent = item.webStatus || "";
+      row.append(title, state);
+      list.appendChild(row);
+    }
+  } catch (error) {
+    statusBox.textContent = error.message;
+  }
+}
+
+async function refreshLearningCycle() {
+  const statusBox = $("learningStatus");
+  if (statusBox) statusBox.textContent = "刷新中...";
+  try {
+    const data = await api("/api/learning-cycle", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    if (statusBox) {
+      statusBox.textContent = `候选 ${data.ConversationCandidateCount ?? data.conversationCandidateCount ?? "-"}｜回归 ${data.RegressionTaskCount ?? data.regressionTaskCount ?? "-"}｜记录 ${data.ConversationRecordCount ?? data.conversationRecordCount ?? "-"}`;
+    }
+    await loadLearningPanel();
+  } catch (error) {
+    if (statusBox) statusBox.textContent = error.message;
+  }
+}
+
+function updateApiKeyBadge(saved) {
+  const badge = $("apiKeySavedBadge");
+  if (!badge) return;
+  badge.textContent = saved ? "已保存 API Key" : "未保存 API Key";
+  badge.classList.toggle("saved", Boolean(saved));
+}
+
+function updateApiKeySavedState(saved, fromEnv = false) {
+  updateApiKeyBadge(saved);
+  const input = $("configApiKey");
+  if (!input) return;
+  const defaults = providerDefaults[$("configProvider")?.value || "deepseek"] || providerDefaults.deepseek;
+  input.dataset.saved = saved ? "true" : "false";
+  input.dataset.fromEnv = fromEnv ? "true" : "false";
+  if (saved) {
+    input.dataset.masked = "true";
+    input.value = fromEnv ? `环境变量 ${defaults.keyName} 已配置` : `本地 ${defaults.keyName} 已保存`;
+    input.placeholder = "输入新 Key 会覆盖当前配置";
+    input.classList.add("masked-key");
+  } else {
+    input.dataset.masked = "false";
+    input.value = "";
+    input.placeholder = `请输入 ${defaults.keyName}`;
+    input.classList.remove("masked-key");
+  }
+}
+
+function prepareApiKeyEdit() {
+  const input = $("configApiKey");
+  if (!input || input.dataset.masked !== "true") return;
+  input.value = "";
+  input.dataset.masked = "false";
+  const defaults = providerDefaults[$("configProvider")?.value || "deepseek"] || providerDefaults.deepseek;
+  input.placeholder = `输入新的 ${defaults.keyName}；留空则继续使用已保存配置`;
+  input.classList.remove("masked-key");
+}
+
+function restoreApiKeyMaskIfNeeded() {
+  const input = $("configApiKey");
+  if (!input) return;
+  window.setTimeout(() => {
+    if (input.dataset.saved === "true" && !input.value.trim()) {
+      updateApiKeySavedState(true, input.dataset.fromEnv === "true");
+    }
+  }, 0);
+}
+
+function currentModelConfigPayload() {
+  const provider = $("configProvider").value;
+  const apiKeyInput = $("configApiKey");
+  const apiKey = apiKeyInput.dataset.masked === "true" ? "" : apiKeyInput.value.trim();
+  return {
+    provider,
+    baseUrl: $("configBaseUrl").value.trim() || providerDefaults[provider].baseUrl,
+    model: $("configModel").value,
+    apiKey,
+  };
+}
+
+function fingerprintText(text) {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${text.length}:${(hash >>> 0).toString(16)}`;
+}
+
+function modelConfigSignature(payload) {
+  return JSON.stringify({
+    provider: payload.provider,
+    baseUrl: payload.baseUrl,
+    model: payload.model,
+    apiKeyToken: payload.apiKey ? "input:" + fingerprintText(payload.apiKey) : "stored-or-env",
+  });
+}
+
+function invalidateModelConfigTest(message) {
+  state.testedModelConfigSignature = "";
+  if (message) {
+    $("configState").textContent = message;
+  }
+}
+
+async function saveConfig() {
+  try {
+    const modelPayload = currentModelConfigPayload();
+    const signature = modelConfigSignature(modelPayload);
+    if (state.testedModelConfigSignature !== signature) {
+      $("configState").textContent = "请先测试连接，确认成功后再保存当前模型配置。";
+      return;
+    }
+    const data = await api("/api/config", {
+      method: "POST",
+      body: JSON.stringify({
+        appName: $("configAppName").value.trim(),
+        ...modelPayload,
+      }),
+    });
+    applyAppName(data.appName);
+    $("configAppName").value = data.appName || state.appName;
+    $("configProvider").value = data.provider || $("configProvider").value;
+    renderModelProviderFields(data.provider || $("configProvider").value, data.model);
+    $("configBaseUrl").value = data.baseUrl || $("configBaseUrl").value;
+    updateApiKeySavedState(data.hasStoredApiKey || data.hasEnvApiKey, data.hasEnvApiKey);
+    const keyName = providerDefaults[data.provider || $("configProvider").value].keyName;
+    $("configState").textContent = data.hasEnvApiKey
+      ? `配置已保存。已使用环境变量 ${keyName}，输入框不回显明文。`
+      : data.hasStoredApiKey
+        ? `配置已保存。输入框用占位符显示已保存 ${keyName} 状态，不回显明文。`
+        : `配置已保存，但未保存 ${keyName}`;
+    state.testedModelConfigSignature = modelConfigSignature(currentModelConfigPayload());
+  } catch (error) {
+    $("configState").textContent = error.message;
+  }
+}
+
+async function testApi() {
+  $("configState").textContent = "测试中...";
+  try {
+    const modelPayload = currentModelConfigPayload();
+    const data = await api("/api/deepseek-test", {
+      method: "POST",
+      body: JSON.stringify(modelPayload),
+    });
+    state.testedModelConfigSignature = modelConfigSignature(modelPayload);
+    $("configState").textContent = data.content || "连接成功";
+  } catch (error) {
+    state.testedModelConfigSignature = "";
+    $("configState").textContent = error.message;
+  }
+}
+
+function bindEvents() {
+  $("chatForm").addEventListener("submit", sendMessage);
+  $("attachBtn").addEventListener("click", () => $("fileInput").click());
+  $("fileInput").addEventListener("change", async (event) => {
+    await addPendingFiles(event.target.files);
+    event.target.value = "";
+  });
+  $("newChat").addEventListener("click", handlePrimaryCreate);
+  $("toggleSidebar").addEventListener("click", toggleSidebarCollapsed);
+  $("appModeSwitch").addEventListener("click", () => setAppMode(state.appMode === "canvas" ? "chat" : "canvas"));
+  $("sidebarResizeHandle").addEventListener("pointerdown", beginSidebarResize);
+  $("closeNewConversationModal").addEventListener("click", closeNewConversationModal);
+  $("cancelNewConversation").addEventListener("click", closeNewConversationModal);
+  $("confirmNewConversation").addEventListener("click", createConversationFromModal);
+  $("newConversationProject").addEventListener("change", updateNewConversationProjectFields);
+  $("newConversationModal").addEventListener("click", (event) => {
+    if (event.target === $("newConversationModal")) closeNewConversationModal();
+  });
+  $("newConversationTitle").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") createConversationFromModal();
+  });
+  $("newConversationProjectName").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") createConversationFromModal();
+  });
+  renderCanvasToolbarIcons();
+  document.querySelectorAll("[data-add-node]").forEach((button) => {
+    button.addEventListener("click", () => addNodeToCanvas(button.dataset.addNode));
+  });
+  window.addEventListener("pointermove", updateCanvasPointer);
+  window.addEventListener("pointermove", updateSidebarResize);
+  window.addEventListener("pointerup", endCanvasPointer);
+  window.addEventListener("pointerup", endSidebarResize);
+  $("saveCanvasNode").addEventListener("click", saveActiveCanvasNode);
+  $("closeCanvasNode").addEventListener("click", closeCanvasNodeModal);
+  $("canvasNodeModal").addEventListener("click", (event) => {
+    if (event.target === $("canvasNodeModal")) closeCanvasNodeModal();
+  });
+  $("generateScriptFromNode").addEventListener("click", () => generateScriptFromNode());
+  $("generateStoryboardsFromNode").addEventListener("click", () => planStoryboardsFromNode());
+  $("confirmEpisodeGenerate").addEventListener("click", generateConfirmedStoryboards);
+  $("closeEpisodeConfirm").addEventListener("click", closeEpisodeConfirm);
+  $("episodeConfirmModal").addEventListener("click", (event) => {
+    if (event.target === $("episodeConfirmModal")) closeEpisodeConfirm();
+  });
+  $("canvasActionMenu").addEventListener("click", handleCanvasMenuAction);
+  $("canvasContextMenu").addEventListener("click", handleCanvasMenuAction);
+  $("cancelCanvasDelete").addEventListener("click", () => closeCanvasDeleteConfirm(false));
+  $("confirmCanvasDelete").addEventListener("click", () => closeCanvasDeleteConfirm(true));
+  $("canvasDeleteConfirm").addEventListener("click", (event) => {
+    if (event.target === $("canvasDeleteConfirm")) closeCanvasDeleteConfirm(false);
+  });
+  $("canvasStage").addEventListener("pointerdown", beginCanvasPan);
+  $("canvasStage").addEventListener("click", handleCanvasStageClick);
+  $("canvasStage").addEventListener("contextmenu", openCanvasBoardContextMenu);
+  $("canvasStage").addEventListener("scroll", updateCanvasViewportTools);
+  $("toggleCanvasMiniMap").addEventListener("click", toggleCanvasMiniMap);
+  $("canvasMiniMapSvg").addEventListener("pointerdown", beginCanvasMiniMapDrag);
+  $("fitCanvasView").addEventListener("click", fitCanvasToContent);
+  $("centerSelectedCanvasNode").addEventListener("click", () => centerCanvasOnNode());
+  $("canvasZoomOut").addEventListener("click", () => setCanvasZoom(canvasZoom() - canvasZoomStep));
+  $("canvasZoomIn").addEventListener("click", () => setCanvasZoom(canvasZoom() + canvasZoomStep));
+  window.addEventListener("pointermove", updateCanvasMiniMapDrag);
+  window.addEventListener("pointerup", endCanvasMiniMapDrag);
+  window.addEventListener("pointercancel", endCanvasMiniMapDrag);
+  $("openConversationSearch").addEventListener("click", openConversationSearch);
+  $("closeConversationSearch").addEventListener("click", closeConversationSearch);
+  $("conversationSearch").addEventListener("input", queueConversationSearch);
+  $("conversationSearch").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeConversationSearch();
+    }
+    if (event.key === "Enter") {
+      const firstResult = $("conversationSearchResults").querySelector(".conversation-search-result");
+      if (firstResult) firstResult.click();
+    }
+  });
+  $("conversationSearchModal").addEventListener("click", (event) => {
+    if (event.target === $("conversationSearchModal")) closeConversationSearch();
+  });
+  $("openWorkbench").addEventListener("click", openWorkbench);
+  $("closeWorkbench").addEventListener("click", closeWorkbench);
+  $("closeArtifactPreview").addEventListener("click", hideArtifactPreview);
+  $("addArchiveSelection").addEventListener("click", addActiveNodeToArchive);
+  $("submitArchiveLearning").addEventListener("click", submitArchiveLearning);
+  $("workbenchRunSelect").addEventListener("change", (event) => {
+    state.workbenchRunName = event.target.value;
+    state.archiveSelections = [];
+    loadWorkbench();
+  });
+  $("workbench").addEventListener("click", (event) => {
+    if (event.target === $("workbench")) closeWorkbench();
+  });
+  $("openSettings").addEventListener("click", () => openSettings("deepseek"));
+  $("openTrash").addEventListener("click", openTrash);
+  $("closeTrash").addEventListener("click", closeTrash);
+  $("trash").addEventListener("click", (event) => {
+    if (event.target === $("trash")) closeTrash();
+  });
+  $("closeSettings").addEventListener("click", closeSettings);
+  $("saveConfig").addEventListener("click", saveConfig);
+  $("testApi").addEventListener("click", testApi);
+  $("refreshLearning").addEventListener("click", refreshLearningCycle);
+  document.querySelectorAll("[data-compose-mode]").forEach((button) => {
+    button.addEventListener("click", () => setComposeMode(button.dataset.composeMode));
+  });
+  document.querySelectorAll("[data-script-grade]").forEach((button) => {
+    button.addEventListener("click", () => setScriptGrade(button.dataset.scriptGrade));
+  });
+  document.querySelectorAll("[data-settings-tab]").forEach((button) => {
+    button.addEventListener("click", () => switchSettingsTab(button.dataset.settingsTab));
+  });
+  $("configApiKey").addEventListener("pointerdown", prepareApiKeyEdit);
+  $("configApiKey").addEventListener("focus", prepareApiKeyEdit);
+  $("configApiKey").addEventListener("keydown", prepareApiKeyEdit);
+  $("configApiKey").addEventListener("blur", restoreApiKeyMaskIfNeeded);
+  $("configProvider").addEventListener("change", () => {
+    renderModelProviderFields($("configProvider").value);
+    updateApiKeySavedState(false, false);
+    invalidateModelConfigTest(`已切换到 ${providerDefaults[$("configProvider").value].label}，请先测试连接，成功后再保存。`);
+  });
+  $("configBaseUrl").addEventListener("input", () => invalidateModelConfigTest());
+  $("configModel").addEventListener("change", () => invalidateModelConfigTest());
+  $("configApiKey").addEventListener("input", () => invalidateModelConfigTest());
+  $("messages").addEventListener("scroll", syncOverviewPosition);
+  $("chatForm").addEventListener("dragover", (event) => {
+    event.preventDefault();
+    $("chatForm").classList.add("dragging");
+  });
+  $("chatForm").addEventListener("dragleave", () => {
+    $("chatForm").classList.remove("dragging");
+  });
+  $("chatForm").addEventListener("drop", async (event) => {
+    event.preventDefault();
+    $("chatForm").classList.remove("dragging");
+    await addPendingFiles(event.dataTransfer.files);
+  });
+  initOverviewDragEvents();
+  document.querySelectorAll("[data-theme-choice]").forEach((button) => {
+    button.addEventListener("click", () => applyTheme(button.dataset.themeChoice));
+  });
+  $("renameFromMenu").addEventListener("click", () => {
+    if (state.contextItem) {
+      const { item, row } = state.contextItem;
+      closeContextMenu();
+      startRenameConversation(item, row);
+    }
+  });
+  $("hideFromMenu").addEventListener("click", async () => {
+    if (state.contextItem) {
+      await hideConversationFromList(state.contextItem.item);
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (!$("contextMenu").contains(event.target)) closeContextMenu();
+    if (!$("canvasActionMenu").contains(event.target) && !(event.target.closest && event.target.closest(".canvas-node-plus"))) closeCanvasActionMenu();
+    if (!$("canvasContextMenu").contains(event.target)) closeCanvasContextMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeContextMenu();
+      closeCanvasMenus();
+      closeTrash();
+      closeWorkbench();
+      closeConversationSearch();
+      closeNewConversationModal();
+      closeCanvasDeleteConfirm(false);
+    }
+  });
+  window.addEventListener("resize", syncOverviewPosition);
+  window.addEventListener("resize", () => {
+    applySidebarWidth(state.sidebarWidth, true);
+    autoGrowTextarea();
+    updateCanvasViewportTools();
+  });
+  $("chatInput").addEventListener("input", () => {
+    autoGrowTextarea();
+    updateSendState();
+  });
+  $("chatInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      $("chatForm").requestSubmit();
+    }
+  });
+}
+
+async function init() {
+  loadTheme();
+  loadCollapsedProjectIds();
+  loadSidebarWidth();
+  loadSidebarCollapsed();
+  bindEvents();
+  setAppMode(state.appMode);
+  setComposeMode("");
+  setScriptGrade("B");
+  autoGrowTextarea();
+  updateSendState();
+  initSidebarCat();
+  await loadConfig();
+  await loadConversations();
+}
+
+init().catch((error) => {
+  console.error(error);
+  appendMessage("assistant", error.message, false);
+});

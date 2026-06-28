@@ -1,0 +1,52 @@
+# Local secrets and environment
+.env
+.env.*
+!.env.example
+app/config/*.local.json
+
+# Runtime state
+app/data/
+app/runtime/
+runs/
+*.log
+app-server*.log
+
+# Generated packages
+dist/
+
+# Dependencies and caches
+node_modules/
+.cache/
+.tmp/
+tmp/
+
+# Customer/source materials and extracted private samples
+samples/*
+!samples/README.md
+!samples/待补样例清单.md
+!samples/_inbox/
+!samples/_inbox/README.md
+!samples/_reports/
+samples/_reports/*
+!samples/_reports/README.md
+!samples/_reports/templates/
+!samples/_reports/templates/**
+
+# Local conversation-derived preferences; keep curated accepted rules separately.
+learning/accepted-rules/*
+!learning/accepted-rules/README.md
+learning/candidate-rules/*
+!learning/candidate-rules/README.md
+learning/conversation-records/*
+!learning/conversation-records/README.md
+learning/evals/*
+!learning/evals/README.md
+!learning/evals/templates/
+!learning/evals/templates/**
+learning/evals/tasks/*
+learning/regression-reports/*
+!learning/regression-reports/README.md
+learning/skill-evolution-reports/*
+!learning/skill-evolution-reports/README.md
+learning/snapshots/*
+!learning/snapshots/README.md

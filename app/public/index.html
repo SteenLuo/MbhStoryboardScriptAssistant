@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>猫主子漫剧剧本分镜小助手</title>
+    <link rel="stylesheet" href="/styles.css?v=20260627-canvas-delete-confirm-v1" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sessions">
+        <div class="sessions-head">
+          <div class="sidebar-mode-row">
+            <div class="brand-mark cat-face" aria-label="猫主子">
+              <img class="cat-image" src="/assets/cat-light-calico-cutout.png" alt="" />
+            </div>
+            <button id="appModeSwitch" class="mode-switch" type="button" role="switch" aria-checked="false" aria-label="工作模式：对话" title="切换到画布">
+              <span class="mode-switch-option mode-switch-chat">对话</span>
+              <span class="mode-switch-option mode-switch-canvas">画布</span>
+              <span class="mode-switch-thumb" aria-hidden="true"></span>
+            </button>
+            <button id="newChat" class="sidebar-icon-btn" type="button" aria-label="新建对话" title="新建对话">
+              <svg class="sidebar-symbol-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 5v14"></path>
+                <path d="M5 12h14"></path>
+              </svg>
+            </button>
+            <button id="openConversationSearch" class="sidebar-icon-btn" type="button" aria-label="搜索全部对话" title="搜索全部对话">
+              <svg class="sidebar-search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="10.5" cy="10.5" r="5.5"></circle>
+                <path d="M15 15l5 5"></path>
+              </svg>
+            </button>
+            <button id="toggleSidebar" class="sidebar-icon-btn" type="button" aria-label="收起侧边栏" title="收起侧边栏">
+              <svg class="sidebar-symbol-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path class="sidebar-collapse-path" d="M14 6 8 12l6 6"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div id="sessionList" class="session-list"></div>
+        <div id="canvasList" class="session-list canvas-list" hidden></div>
+        <div class="sidebar-footer">
+          <div class="theme-switcher" aria-label="皮肤风格">
+            <div class="theme-label">皮肤</div>
+            <div class="theme-options">
+              <button class="theme-option" type="button" data-theme-choice="light" aria-pressed="true">浅色</button>
+              <button class="theme-option" type="button" data-theme-choice="dark" aria-pressed="false">深色</button>
+              <button class="theme-option" type="button" data-theme-choice="eye" aria-pressed="false">护眼</button>
+            </div>
+          </div>
+          <div id="sidebarCat" class="sidebar-cat" aria-live="polite">
+            <div class="mini-cat-face">
+              <img class="cat-image" src="/assets/cat-light-calico-cutout.png" alt="" />
+            </div>
+            <div class="cat-note">喵，随时待命</div>
+            <div id="catReminder" class="cat-reminder" role="status" aria-live="polite"></div>
+          </div>
+          <div class="sidebar-actions">
+            <button id="openTrash" class="settings-entry">回收站</button>
+            <button id="openSettings" class="settings-entry">设置</button>
+          </div>
+        </div>
+        <div id="sidebarResizeHandle" class="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="拖拽调整侧边栏宽度" title="拖拽调整侧边栏宽度"></div>
+      </aside>
+
+      <main id="chatShell" class="chat-shell">
+        <header class="chat-top">
+          <div class="brand-line">
+            <div>
+              <h1 id="chatTitle">猫主子漫剧剧本分镜小助手</h1>
+              <p>小说、剧本、分镜、评审和样例学习都从这里对话进入</p>
+            </div>
+            <button id="openWorkbench" class="workbench-entry" type="button">流程图</button>
+          </div>
+        </header>
+
+        <div class="message-paw-layer" aria-hidden="true"></div>
+        <section id="messages" class="messages"></section>
+
+        <form id="chatForm" class="composer">
+          <input id="fileInput" type="file" multiple hidden />
+          <div class="composer-box">
+            <div id="attachmentList" class="attachment-list" aria-live="polite"></div>
+            <textarea id="chatInput" placeholder="输入你的小说、剧本、分镜要求或反馈。Shift+Enter 换行，Enter 发送。"></textarea>
+            <div class="composer-toolbar">
+              <div class="composer-tools">
+                <button id="attachBtn" class="attach-btn" type="button" title="上传文件或图片" aria-label="上传文件或图片">+</button>
+                <button class="mode-btn" type="button" data-compose-mode="script" aria-pressed="false">生成剧本</button>
+                <button class="mode-btn" type="button" data-compose-mode="storyboard" aria-pressed="false">生成分镜</button>
+                <div class="grade-toggle" role="group" aria-label="剧本等级">
+                  <button class="grade-btn active" type="button" data-script-grade="B" aria-pressed="true">B级本</button>
+                  <button class="grade-btn" type="button" data-script-grade="A" aria-pressed="false">A级本</button>
+                </div>
+              </div>
+              <button id="sendBtn" class="send-btn" type="submit" aria-label="发送">↑</button>
+            </div>
+          </div>
+        </form>
+      </main>
+      <main id="canvasShell" class="canvas-shell" hidden>
+        <header class="canvas-top">
+          <div>
+            <h1 id="canvasTitle">自由画布</h1>
+            <p>小说 / 剧本 / 分镜脚本 / 标识节点，可手动连线，也可从节点触发生成。</p>
+          </div>
+          <div class="canvas-toolbar" role="toolbar" aria-label="画布工具">
+            <button type="button" data-add-node="novel">小说</button>
+            <button type="button" data-add-node="script">剧本</button>
+            <button type="button" data-add-node="storyboard">分镜</button>
+            <button type="button" data-add-node="label">标识</button>
+          </div>
+        </header>
+        <section id="canvasStage" class="canvas-stage" aria-label="自由画布">
+          <svg id="canvasEdges" class="canvas-edges" aria-hidden="true"></svg>
+          <div id="canvasNodes" class="canvas-nodes"></div>
+        </section>
+        <div id="canvasMiniMap" class="canvas-minimap" aria-label="画布缩略图" hidden>
+          <svg id="canvasMiniMapSvg" viewBox="0 0 180 116" aria-hidden="true"></svg>
+        </div>
+        <div class="canvas-view-tools" aria-label="画布视图工具">
+          <button id="toggleCanvasMiniMap" type="button" aria-label="显示缩略图" title="显示缩略图">▣</button>
+          <button id="fitCanvasView" type="button" aria-label="适配全部元素" title="适配全部元素">⛶</button>
+          <button id="centerSelectedCanvasNode" type="button" aria-label="定位选中节点" title="定位选中节点">◎</button>
+          <div class="canvas-zoom-control" aria-label="缩放">
+            <button id="canvasZoomOut" type="button" aria-label="缩小" title="缩小">−</button>
+            <span id="canvasZoomLabel">100%</span>
+            <button id="canvasZoomIn" type="button" aria-label="放大" title="放大">＋</button>
+          </div>
+        </div>
+        <div id="canvasStatus" class="canvas-status">未读取画布</div>
+      </main>
+      <aside id="conversationOverview" class="conversation-overview" aria-label="当前对话概览"></aside>
+    </div>
+
+    <aside id="settings" class="settings" aria-hidden="true">
+      <div class="settings-panel">
+        <div class="settings-head">
+          <h2>设置</h2>
+          <button id="closeSettings" class="ghost">关闭</button>
+        </div>
+
+        <div class="settings-tabs" role="tablist" aria-label="设置分类">
+          <button id="settingsTabDeepseek" class="settings-tab active" type="button" role="tab" aria-selected="true" aria-controls="settingsPanelDeepseek" data-settings-tab="deepseek">模型</button>
+          <button id="settingsTabLearning" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settingsPanelLearning" data-settings-tab="learning">学习状态</button>
+        </div>
+
+        <section id="settingsPanelDeepseek" class="settings-tab-panel active" role="tabpanel" aria-labelledby="settingsTabDeepseek" data-settings-panel="deepseek">
+          <label>软件名称</label>
+          <input id="configAppName" placeholder="猫主子漫剧剧本分镜小助手" />
+
+          <label>模型供应商</label>
+          <select id="configProvider">
+            <option value="deepseek">DeepSeek</option>
+            <option value="openai">OpenAI（GPT 5.5）</option>
+            <option value="apimart">APIMart（GPT 5.5）</option>
+          </select>
+
+          <label>Base URL</label>
+          <input id="configBaseUrl" placeholder="https://api.deepseek.com" />
+
+          <label>模型</label>
+          <select id="configModel">
+            <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+            <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+            <option value="deepseek-chat">deepseek-chat</option>
+            <option value="gpt-5.5">gpt-5.5</option>
+            <option value="gpt-5">gpt-5</option>
+            <option value="gpt-5.1">gpt-5.1</option>
+            <option value="gpt-5-chat-latest">gpt-5-chat-latest</option>
+            <option value="gpt-5-mini">gpt-5-mini</option>
+          </select>
+
+          <label>API Key</label>
+          <div id="apiKeySavedBadge" class="saved-badge">未保存 API Key</div>
+          <input id="configApiKey" type="password" autocomplete="off" placeholder="已保存时可留空；输入新 Key 会覆盖" />
+
+          <div class="settings-actions">
+            <button id="testApi">测试连接</button>
+            <button id="saveConfig">保存配置</button>
+          </div>
+
+          <p id="configState">未读取配置</p>
+        </section>
+
+        <section id="settingsPanelLearning" class="settings-tab-panel" role="tabpanel" aria-labelledby="settingsTabLearning" data-settings-panel="learning" hidden>
+        <div class="learning-panel">
+          <div class="learning-head">
+            <h3>M0-M6 完整性</h3>
+            <button id="refreshLearning" class="ghost" type="button">刷新学习闭环</button>
+          </div>
+          <div id="learningStatus" class="learning-status">未读取</div>
+          <div id="completenessList" class="completeness-list"></div>
+        </div>
+        </section>
+
+      </div>
+    </aside>
+
+    <aside id="trash" class="trash-modal" aria-hidden="true">
+      <div class="trash-panel" role="dialog" aria-modal="true" aria-labelledby="trashTitle">
+        <div class="trash-head">
+          <h2 id="trashTitle">回收站</h2>
+          <button id="closeTrash" class="ghost" type="button">关闭</button>
+        </div>
+        <div id="trashList" class="trash-list" aria-live="polite"></div>
+      </div>
+    </aside>
+
+    <aside id="conversationSearchModal" class="conversation-search-modal" aria-hidden="true">
+      <div class="conversation-search-panel" role="dialog" aria-modal="true" aria-labelledby="conversationSearchTitle">
+        <div class="conversation-search-head">
+          <h2 id="conversationSearchTitle">搜索对话</h2>
+          <button id="closeConversationSearch" class="ghost" type="button">关闭</button>
+        </div>
+        <input id="conversationSearch" type="search" autocomplete="off" placeholder="输入关键词，搜索全部对话内容" aria-label="搜索全部对话内容" />
+        <div id="conversationSearchResults" class="conversation-search-results" aria-live="polite"></div>
+      </div>
+    </aside>
+
+    <aside id="newConversationModal" class="new-conversation-modal" aria-hidden="true">
+      <div class="new-conversation-panel" role="dialog" aria-modal="true" aria-labelledby="newConversationTitleText">
+        <div class="new-conversation-head">
+          <h2 id="newConversationTitleText">新建对话</h2>
+          <button id="closeNewConversationModal" class="ghost" type="button">关闭</button>
+        </div>
+        <label for="newConversationTitle">对话标题</label>
+        <input id="newConversationTitle" autocomplete="off" />
+        <label for="newConversationProject">所属项目</label>
+        <select id="newConversationProject"></select>
+        <div id="newConversationProjectNameWrap" hidden>
+          <label for="newConversationProjectName">新项目名称</label>
+          <input id="newConversationProjectName" autocomplete="off" />
+        </div>
+        <div class="new-conversation-actions">
+          <button id="confirmNewConversation" type="button">创建</button>
+          <button id="cancelNewConversation" class="ghost" type="button">取消</button>
+        </div>
+      </div>
+    </aside>
+
+    <aside id="workbench" class="workbench-modal" aria-hidden="true">
+      <div class="workbench-panel" role="dialog" aria-modal="true" aria-labelledby="workbenchTitle">
+        <div class="workbench-head">
+          <div>
+            <h2 id="workbenchTitle">流程思维导图</h2>
+            <p class="workbench-intro">查看一次创作从输入、理解、剧本、检查到分镜的版本脉络。</p>
+            <p id="workbenchRunName">未读取运行目录</p>
+          </div>
+          <button id="closeWorkbench" class="ghost" type="button">关闭</button>
+        </div>
+        <label class="workbench-run-picker">
+          <span>选择一次运行</span>
+          <select id="workbenchRunSelect"></select>
+        </label>
+        <div id="workbenchStatus" class="workbench-status">未读取流程</div>
+        <div id="workbenchStages" class="workbench-stages mind-map"></div>
+        <div id="artifactPreview" class="artifact-preview" hidden>
+          <div class="artifact-preview-head">
+            <h3 id="artifactPreviewTitle">节点内容</h3>
+            <div class="artifact-preview-actions">
+              <button id="addArchiveSelection" class="ghost" type="button">加入归档</button>
+              <button id="closeArtifactPreview" class="ghost" type="button">收起</button>
+            </div>
+          </div>
+          <div id="artifactPreviewBody" class="artifact-preview-body markdown-body"></div>
+        </div>
+        <div class="archive-panel">
+          <div class="archive-panel-head">
+            <h3>采纳清单</h3>
+            <button id="submitArchiveLearning" type="button">手动归档学习</button>
+          </div>
+          <div id="archiveSelectionList" class="archive-selection-list"></div>
+          <p id="archiveState" class="archive-state">从思维导图里点击节点，再加入归档。</p>
+        </div>
+      </div>
+    </aside>
+
+    <aside id="canvasNodeModal" class="canvas-node-modal" aria-hidden="true">
+      <div class="canvas-node-panel" role="dialog" aria-modal="true" aria-labelledby="canvasNodeTitle">
+        <div class="canvas-node-head">
+          <input id="canvasNodeTitle" aria-label="节点标题" />
+          <div class="canvas-node-actions">
+            <button id="generateScriptFromNode" type="button">生成剧本</button>
+            <button id="generateStoryboardsFromNode" type="button">生成分镜</button>
+            <button id="saveCanvasNode" type="button">保存</button>
+            <button id="closeCanvasNode" class="ghost" type="button">关闭</button>
+          </div>
+        </div>
+        <textarea id="canvasNodeContent" class="canvas-node-content" aria-label="节点内容"></textarea>
+      </div>
+    </aside>
+
+    <aside id="episodeConfirmModal" class="canvas-node-modal" aria-hidden="true">
+      <div class="canvas-node-panel episode-panel" role="dialog" aria-modal="true" aria-labelledby="episodeConfirmTitle">
+        <div class="canvas-node-head">
+          <h2 id="episodeConfirmTitle">确认分集分镜</h2>
+          <div class="canvas-node-actions">
+            <button id="confirmEpisodeGenerate" type="button">生成分镜节点</button>
+            <button id="closeEpisodeConfirm" class="ghost" type="button">取消</button>
+          </div>
+        </div>
+        <div id="episodeConfirmList" class="episode-confirm-list"></div>
+      </div>
+    </aside>
+
+    <div id="contextMenu" class="context-menu" aria-hidden="true">
+      <button id="renameFromMenu">重命名</button>
+      <button id="hideFromMenu" class="danger" title="仅从网页列表隐藏，不删除本地文件">删除对话</button>
+    </div>
+    <div id="canvasActionMenu" class="canvas-action-menu" aria-hidden="true"></div>
+    <div id="canvasContextMenu" class="canvas-context-menu" aria-hidden="true"></div>
+    <aside id="canvasDeleteConfirm" class="canvas-delete-confirm-modal" aria-hidden="true">
+      <div class="canvas-delete-confirm-card" role="dialog" aria-modal="true" aria-labelledby="canvasDeleteConfirmTitle" aria-describedby="canvasDeleteConfirmMessage">
+        <div class="canvas-delete-confirm-mark" aria-hidden="true">!</div>
+        <div class="canvas-delete-confirm-copy">
+          <h2 id="canvasDeleteConfirmTitle">确认删除</h2>
+          <p id="canvasDeleteConfirmMessage">删除后无法撤回。</p>
+          <p id="canvasDeleteConfirmDetail" class="canvas-delete-confirm-detail"></p>
+        </div>
+        <div class="canvas-delete-confirm-actions">
+          <button id="cancelCanvasDelete" class="ghost" type="button">取消</button>
+          <button id="confirmCanvasDelete" class="danger" type="button">删除</button>
+        </div>
+      </div>
+    </aside>
+
+    <script src="/usage-format.js?v=20260611-token-usage-v1"></script>
+    <script src="/markdown-format.js?v=20260611-markdown-v1"></script>
+    <script src="/script-grade.js?v=20260611-script-grade-v1"></script>
+    <script src="/compose-validation.js?v=20260611-compose-validation-v1"></script>
+    <script src="/project-tree.js?v=20260627-canvas-icons-paws-v1"></script>
+    <script src="/app.js?v=20260627-canvas-delete-confirm-v1"></script>
+  </body>
+</html>

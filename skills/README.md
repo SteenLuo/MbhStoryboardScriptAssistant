@@ -1,0 +1,34 @@
+# 本地技能目录
+
+本目录存放当前项目专用的 AI 漫剧技能，不是全局 Codex 技能。
+
+技能按职责分层，不平铺：
+
+```text
+skills/
+├── 00-orchestrator/     总控入口和技能路由
+├── 01-input-analysis/   输入整理和类型判断
+├── 02-script/           剧本生成、评审、改写和定稿
+├── 03-storyboard/       分镜生成和分镜评审
+├── 04-learning/         既有样例入库和规则提炼
+└── 05-evolution/        技能改进、评测和版本演进
+```
+
+当前第一批技能：
+
+- `00-orchestrator/mbh-workflow`：AI 漫剧剧本分镜总控入口。
+- `01-input-analysis/novel-intake`：小说或 AI 漫剧剧本输入整理。
+- `02-script/script-generate`：根据小说生成 AI 漫剧剧本。
+- `02-script/script-review-rewrite`：AI 漫剧剧本评审和改写。
+- `03-storyboard/storyboard-generate`：根据剧本生成 AI 漫剧分镜。
+- `04-learning/sample-ingest`：学习已有 AI 漫剧剧本和分镜样例。
+- `05-evolution/skill-evolution`：根据反馈和评测改进技能。
+
+## 使用原则
+
+- 技能说明以中文为主。
+- 英文目录名仅用于工具兼容。
+- 每个技能只做一类事。
+- 正式规则和候选规则分开。
+- 样例学习不能直接污染正式技能。
+- 总控技能只负责路由，不替代专业技能。
