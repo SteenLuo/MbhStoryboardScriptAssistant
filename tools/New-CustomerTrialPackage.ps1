@@ -234,6 +234,7 @@ function New-CustomerPackage {
     "app/config/deepseek.local.json",
     "app/config/app.local.json",
     "app/data",
+    "app/public/prototypes",
     "app/runtime"
   )
   Copy-CleanDirectory -SourceRoot $RootPath -StageRoot $stage -RelativePath "docs"

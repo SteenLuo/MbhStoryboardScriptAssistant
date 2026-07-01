@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>猫主子漫剧剧本分镜小助手</title>
-    <link rel="stylesheet" href="/styles.css?v=20260627-canvas-delete-confirm-v1" />
+    <link rel="stylesheet" href="/styles.css?v=20260701-canvas-merge-rail-v1" />
   </head>
   <body>
     <div class="app-shell">
@@ -114,7 +114,17 @@
         <section id="canvasStage" class="canvas-stage" aria-label="自由画布">
           <svg id="canvasEdges" class="canvas-edges" aria-hidden="true"></svg>
           <div id="canvasNodes" class="canvas-nodes"></div>
+          <div id="canvasSelectionBox" class="canvas-selection-box" hidden></div>
         </section>
+        <div id="canvasGroupBar" class="canvas-group-bar" hidden>
+          <span id="canvasGroupCount">已选 0 个</span>
+          <label>
+            唯一版本
+            <select id="canvasGroupPrimarySelect"></select>
+          </label>
+          <button id="mergeSelectedCanvasNodes" type="button">合并</button>
+          <button id="cancelCanvasGroup" class="ghost" type="button">取消</button>
+        </div>
         <div id="canvasMiniMap" class="canvas-minimap" aria-label="画布缩略图" hidden>
           <svg id="canvasMiniMapSvg" viewBox="0 0 180 116" aria-hidden="true"></svg>
         </div>
@@ -291,6 +301,19 @@
       </div>
     </aside>
 
+    <aside id="canvasMergeHistoryModal" class="canvas-merge-history-modal" aria-hidden="true">
+      <div class="canvas-merge-history-panel" role="dialog" aria-modal="true" aria-labelledby="canvasMergeHistoryTitle">
+        <div class="canvas-merge-history-head">
+          <div>
+            <h2 id="canvasMergeHistoryTitle">历史版本</h2>
+            <p id="canvasMergeHistoryIntro">查看来源、修改要求和返回内容，并指定当前唯一版本。</p>
+          </div>
+          <button id="closeCanvasMergeHistory" class="ghost" type="button">关闭</button>
+        </div>
+        <div id="canvasMergeHistoryList" class="canvas-merge-history-list"></div>
+      </div>
+    </aside>
+
     <aside id="episodeConfirmModal" class="canvas-node-modal" aria-hidden="true">
       <div class="canvas-node-panel episode-panel" role="dialog" aria-modal="true" aria-labelledby="episodeConfirmTitle">
         <div class="canvas-node-head">
@@ -330,6 +353,6 @@
     <script src="/script-grade.js?v=20260611-script-grade-v1"></script>
     <script src="/compose-validation.js?v=20260611-compose-validation-v1"></script>
     <script src="/project-tree.js?v=20260627-canvas-icons-paws-v1"></script>
-    <script src="/app.js?v=20260627-canvas-delete-confirm-v1"></script>
+    <script src="/app.js?v=20260701-canvas-merge-rail-v1"></script>
   </body>
 </html>

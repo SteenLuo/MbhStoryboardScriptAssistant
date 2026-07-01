@@ -33,16 +33,21 @@ const state = {
   currentCanvas: null,
   activeCanvasNodeId: "",
   selectedCanvasNodeId: "",
+  selectedCanvasNodeIds: new Set(),
   selectedCanvasEdgeId: "",
+  canvasGroupPrimaryNodeId: "",
   canvasZoom: 1,
   canvasViewportAnimation: null,
   canvasMiniMapDrag: null,
   editingCanvasNodeId: "",
   canvasDrag: null,
   suppressCanvasPlusClick: false,
+  suppressCanvasStageClick: false,
   suppressCanvasTitleClick: false,
   pendingEpisodes: null,
+  canvasBusy: null,
   canvasDeleteConfirm: null,
+  canvasMergeHistoryNodeId: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -68,12 +73,17 @@ const canvasZoomMin = 0.35;
 const canvasZoomMax = 1.8;
 const canvasZoomStep = 0.1;
 const canvasFitAnimationMs = 280;
+const canvasFocusReadableZoom = 1;
+const canvasFocusMinReadableZoom = 0.72;
+const canvasFocusPadding = 96;
 const canvasTypeLabels = {
   novel: "小说",
   script: "剧本",
   storyboard: "分镜脚本",
   label: "标识",
 };
+const canvasRevisionNodeTypes = new Set(["novel", "script", "storyboard"]);
+const canvasMergeNodeTypes = new Set(["novel", "script", "storyboard"]);
 const canvasTypeIconPaths = {
   novel: '<path d="M6 5.5c1.7-.9 3.6-.9 5.5 0v12c-1.9-.9-3.8-.9-5.5 0z"/><path d="M18 5.5c-1.7-.9-3.6-.9-5.5 0v12c1.9-.9 3.8-.9 5.5 0z"/><path d="M12 5.5v12"/>',
   script: '<path d="M7 4h9l3 3v13H7z"/><path d="M16 4v4h4"/><path d="M10 11h6"/><path d="M10 14h6"/><path d="M10 17h4"/>',
@@ -1941,9 +1951,19 @@ function startRenameCanvas(item, row) {
   input.addEventListener("blur", () => finish(true));
 }
 
+function nextCanvasTitle(baseTitle = "新画布") {
+  const names = new Set(state.canvases.map((canvas) => String(canvas.title || "").trim()).filter(Boolean));
+  if (!names.has(baseTitle)) return baseTitle;
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${baseTitle} ${index}`;
+    if (!names.has(candidate)) return candidate;
+  }
+  return `${baseTitle} ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`;
+}
+
 async function newCanvas(defaultTitle = "") {
-  const title = defaultTitle || window.prompt("新画布名称", "新画布");
-  if (!title || !title.trim()) return;
+  const title = (defaultTitle || nextCanvasTitle()).trim();
+  if (!title) return;
   const canvas = await api("/api/canvases", {
     method: "POST",
     body: JSON.stringify({ title }),
@@ -1959,6 +1979,11 @@ async function loadCanvas(id) {
   state.currentCanvasId = canvas.id;
   state.currentCanvas = canvas;
   state.activeCanvasNodeId = "";
+  state.selectedCanvasNodeId = "";
+  state.selectedCanvasNodeIds = new Set();
+  state.selectedCanvasEdgeId = "";
+  state.canvasGroupPrimaryNodeId = "";
+  state.canvasMergeHistoryNodeId = "";
   $("canvasTitle").textContent = canvas.title || "自由画布";
   renderCanvasList();
   renderCanvas();
@@ -1980,6 +2005,129 @@ function currentCanvasNode(nodeId) {
 
 function currentCanvasEdge(edgeId) {
   return state.currentCanvas?.edges?.find((edge) => edge.id === edgeId) || null;
+}
+
+function isCanvasRevisionNode(node) {
+  return node?.meta?.variantKind === "revision";
+}
+
+function isCanvasMergedNode(node) {
+  return node?.meta?.variantKind === "merged";
+}
+
+function canvasMergedVersionRailSegments(node) {
+  const versions = Array.isArray(node?.meta?.versions) ? node.meta.versions : [];
+  const railCount = Math.min(Math.max(versions.length || 1, 2), 5);
+  const primaryId = String(node?.meta?.primaryVersionId || "");
+  let primaryIndex = versions.findIndex((version) => String(version.id || "") === primaryId);
+  if (primaryIndex < 0) primaryIndex = versions.findIndex((version) => Boolean(version.isPrimary));
+  if (primaryIndex < 0) primaryIndex = Math.max(0, railCount - 1);
+  const activeIndex = versions.length > railCount
+    ? Math.round((primaryIndex / Math.max(versions.length - 1, 1)) * (railCount - 1))
+    : Math.min(primaryIndex, railCount - 1);
+  return Array.from({ length: railCount }, (_, index) => ({ active: index === activeIndex }));
+}
+
+function canvasNodeTitleValue(title) {
+  return String(title || "").trim();
+}
+
+function hasCanvasNodeTitleConflict(title, excludeNodeId = "") {
+  const cleanTitle = canvasNodeTitleValue(title);
+  if (!cleanTitle || !state.currentCanvas) return false;
+  return (state.currentCanvas.nodes || []).some((node) =>
+    node.id !== excludeNodeId &&
+    canvasNodeTitleValue(node.title) === cleanTitle
+  );
+}
+
+function uniqueCanvasNodeTitle(baseTitle, excludeNodeId = "") {
+  const cleanBase = canvasNodeTitleValue(baseTitle) || "未命名节点";
+  if (!hasCanvasNodeTitleConflict(cleanBase, excludeNodeId)) return cleanBase;
+  let index = 2;
+  while (hasCanvasNodeTitleConflict(`${cleanBase} ${index}`, excludeNodeId)) index += 1;
+  return `${cleanBase} ${index}`;
+}
+
+function uniqueCanvasNodeTitleOutside(baseTitle, ignoredNodeIds = new Set()) {
+  const cleanBase = canvasNodeTitleValue(baseTitle) || "未命名节点";
+  const ignored = ignoredNodeIds instanceof Set ? ignoredNodeIds : new Set(ignoredNodeIds);
+  const names = new Set((state.currentCanvas?.nodes || [])
+    .filter((node) => !ignored.has(node.id))
+    .map((node) => canvasNodeTitleValue(node.title))
+    .filter(Boolean));
+  if (!names.has(cleanBase)) return cleanBase;
+  let index = 2;
+  while (names.has(`${cleanBase} ${index}`)) index += 1;
+  return `${cleanBase} ${index}`;
+}
+
+function selectedCanvasNodes() {
+  if (!state.currentCanvas) return [];
+  const selected = state.selectedCanvasNodeIds || new Set();
+  return (state.currentCanvas.nodes || []).filter((node) => selected.has(node.id));
+}
+
+function selectedCanvasNodeCount() {
+  return state.selectedCanvasNodeIds?.size || 0;
+}
+
+function isCanvasNodeSelected(nodeId) {
+  return state.selectedCanvasNodeId === nodeId || Boolean(state.selectedCanvasNodeIds?.has(nodeId));
+}
+
+function canGroupCanvasNodes(nodes = []) {
+  if (nodes.length < 2) return { ok: false, reason: "至少框选两个节点才能打组" };
+  if (nodes.some((node) => !canvasMergeNodeTypes.has(node.type))) {
+    return { ok: false, reason: "仅小说、剧本、分镜脚本可以打组" };
+  }
+  if (nodes.some((node) => isCanvasMergedNode(node))) {
+    return { ok: false, reason: "合并节点请通过历史版本继续指定唯一版本" };
+  }
+  const types = new Set(nodes.map((node) => node.type));
+  if (types.size > 1) return { ok: false, reason: "只能打组同一类型的节点" };
+  return { ok: true };
+}
+
+function canvasNodeIncomingParent(node, selectedIds = new Set()) {
+  if (!node || !state.currentCanvas) return null;
+  const parentId = node.meta?.parentNodeId || (state.currentCanvas.edges || []).find((edge) =>
+    edge.to === node.id && !selectedIds.has(edge.from)
+  )?.from;
+  return parentId ? currentCanvasNode(parentId) : null;
+}
+
+function canvasVersionFromNode(node, index, selectedIds = new Set(), primaryNodeId = "") {
+  const parent = canvasNodeIncomingParent(node, selectedIds);
+  const content = String(node.content || node.meta?.chatResponse || "");
+  return {
+    id: `version-${node.id || index + 1}`,
+    nodeId: node.id,
+    type: node.type,
+    title: node.title || `${canvasTypeLabels[node.type] || "节点"} ${index + 1}`,
+    parentNodeId: node.meta?.parentNodeId || parent?.id || "",
+    parentTitleSnapshot: node.meta?.parentTitleSnapshot || parent?.title || "",
+    chatPrompt: node.meta?.chatPrompt || "",
+    chatResponse: node.meta?.chatResponse || content,
+    content,
+    createdAt: node.meta?.revisedAt || node.meta?.generatedAt || node.meta?.createdAt || "",
+    sourceKind: node.meta?.variantKind || "original",
+    isPrimary: node.id === primaryNodeId,
+  };
+}
+
+function canvasPrimaryVersionContent(version) {
+  return String(version?.content || version?.chatResponse || "");
+}
+
+function canConnectCanvasNodes(fromNodeId, toNodeId) {
+  if (!state.currentCanvas || !fromNodeId || !toNodeId || fromNodeId === toNodeId) return false;
+  const targetNode = currentCanvasNode(toNodeId);
+  if (!targetNode) return false;
+  if (!isCanvasRevisionNode(targetNode)) return true;
+  const parentNodeId = String(targetNode.meta?.parentNodeId || "");
+  if (parentNodeId && fromNodeId !== parentNodeId) return false;
+  return !(state.currentCanvas.edges || []).some((edge) => edge.to === toNodeId);
 }
 
 function canvasStatus(text) {
@@ -2147,17 +2295,32 @@ function canvasCenteredScrollForBounds(bounds, zoom = canvasZoom()) {
   };
 }
 
+function canvasReadableZoomForBounds(bounds) {
+  const stage = $("canvasStage");
+  if (!stage || !bounds) return canvasFocusReadableZoom;
+  const availableWidth = Math.max(240, stage.clientWidth - canvasFocusPadding * 2);
+  const availableHeight = Math.max(180, stage.clientHeight - canvasFocusPadding * 2);
+  const fitZoom = Math.min(availableWidth / Math.max(1, bounds.width), availableHeight / Math.max(1, bounds.height));
+  const targetZoom = Math.min(canvasFocusReadableZoom, fitZoom);
+  if (targetZoom < canvasFocusMinReadableZoom) {
+    return clamp(targetZoom, canvasZoomMin, canvasZoomMax);
+  }
+  return clamp(targetZoom, canvasFocusMinReadableZoom, canvasZoomMax);
+}
+
 function centerCanvasOnNode(nodeId = state.selectedCanvasNodeId) {
   const node = currentCanvasNode(nodeId);
   const stage = $("canvasStage");
   if (!node || !stage) return;
   const bounds = canvasNodeBounds(node);
-  const zoom = canvasZoom();
-  stage.scrollTo({
-    left: (canvasOriginX + bounds.x + bounds.width / 2) * zoom - stage.clientWidth / 2,
-    top: (canvasOriginY + bounds.y + bounds.height / 2) * zoom - stage.clientHeight / 2,
-    behavior: "smooth",
+  const zoom = canvasReadableZoomForBounds(bounds);
+  const targetScroll = canvasCenteredScrollForBounds(bounds, zoom);
+  animateCanvasViewportTo({
+    zoom,
+    left: targetScroll.left,
+    top: targetScroll.top,
   });
+  canvasStatus(`已定位到「${node.title || "选中节点"}」，缩放至 ${Math.round(zoom * 100)}%`);
 }
 
 function fitCanvasToContent() {
@@ -2289,7 +2452,7 @@ async function addNodeToCanvas(type, position = null) {
   if (!state.currentCanvas) await newCanvas("新画布");
   const cleanType = canvasTypeLabels[type] ? type : "label";
   const nodes = state.currentCanvas.nodes || [];
-  if (cleanType === "novel" && nodes.some((node) => node.type === "novel")) {
+  if (cleanType === "novel" && nodes.some((node) => node.type === "novel" && !isCanvasRevisionNode(node))) {
     canvasStatus("一个画布只能有一个小说节点");
     return;
   }
@@ -2301,7 +2464,7 @@ async function addNodeToCanvas(type, position = null) {
   const node = {
     id: `node-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
     type: cleanType,
-    title: canvasTypeLabels[cleanType] || "标识",
+    title: uniqueCanvasNodeTitle(canvasTypeLabels[cleanType] || "标识"),
     content: "",
     x: Number(point.x || 0),
     y: Number(point.y || 0),
@@ -2330,6 +2493,7 @@ function renderCanvas() {
     layer.appendChild(renderCanvasNode(node));
   }
   renderCanvasEdges();
+  renderCanvasGroupBar();
   updateCanvasViewportTools();
   canvasStatus(`节点 ${canvas.nodes.length} 个｜连线 ${(canvas.edges || []).length} 条${state.canvasDrag?.type === "connect" ? "｜拖到目标节点松开" : ""}`);
 }
@@ -2373,7 +2537,7 @@ function ensureCanvasViewportOrigin(canvas) {
 
 function renderCanvasNode(node) {
   const item = document.createElement("article");
-  item.className = `canvas-node ${node.type || "label"}${state.selectedCanvasNodeId === node.id ? " selected" : ""}`;
+  item.className = `canvas-node ${node.type || "label"}${isCanvasRevisionNode(node) ? " revision" : ""}${isCanvasMergedNode(node) ? " merged" : ""}${isCanvasNodeSelected(node.id) ? " selected" : ""}`;
   item.dataset.nodeId = node.id;
   item.tabIndex = 0;
   item.style.left = `${canvasScreenX(node.x)}px`;
@@ -2433,6 +2597,18 @@ function renderCanvasNode(node) {
     event.preventDefault();
     event.stopPropagation();
   });
+  if (isCanvasMergedNode(node)) {
+    const rail = document.createElement("div");
+    rail.className = "canvas-node-version-rail";
+    rail.setAttribute("aria-hidden", "true");
+    rail.dataset.versionCount = String(node.meta?.versions?.length || 0);
+    canvasMergedVersionRailSegments(node).forEach((segment) => {
+      const span = document.createElement("span");
+      if (segment.active) span.className = "active";
+      rail.appendChild(span);
+    });
+    item.appendChild(rail);
+  }
   item.appendChild(head);
   if (state.editingCanvasNodeId === node.id) {
     head.innerHTML = `<span class="canvas-node-type-icon ${escapeHtml(node.type || "label")}" title="${escapeHtml(canvasTypeLabels[node.type] || "标识")}" aria-hidden="true">${canvasTypeIcon(node.type)}</span>`;
@@ -2467,6 +2643,7 @@ function renderCanvasNode(node) {
   body.dataset.savedContent = node.content || "";
   body.placeholder = "点击编辑节点内容。";
   body.setAttribute("aria-label", `${node.title || "节点"}内容`);
+  body.readOnly = isCanvasMergedNode(node);
   body.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
     selectCanvasNode(node.id);
@@ -2476,6 +2653,9 @@ function renderCanvasNode(node) {
     event.stopPropagation();
     selectCanvasNode(node.id);
   });
+  body.addEventListener("wheel", (event) => {
+    if (body.scrollHeight > body.clientHeight) event.stopPropagation();
+  }, { passive: true });
   body.addEventListener("input", () => updateCanvasNodeDraft(node.id, body.value));
   body.addEventListener("blur", async () => {
     if (body.dataset.savedContent === body.value) return;
@@ -2483,6 +2663,29 @@ function renderCanvasNode(node) {
     body.dataset.savedContent = body.value;
   });
   item.appendChild(body);
+  if (isCanvasMergedNode(node)) {
+    const badge = document.createElement("button");
+    badge.type = "button";
+    badge.className = "canvas-node-merge-badge";
+    badge.textContent = "合";
+    badge.title = "查看历史版本";
+    badge.addEventListener("pointerdown", (event) => event.stopPropagation());
+    badge.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openCanvasMergeHistory(node.id);
+    });
+    item.appendChild(badge);
+  }
+  if (isCanvasRevisionNode(node)) {
+    const badge = document.createElement("div");
+    badge.className = "canvas-node-revision-badge";
+    badge.textContent = "修";
+    badge.title = "修改节点";
+    item.appendChild(badge);
+    item.appendChild(renderCanvasRevisionChat(node));
+  }
+  applyCanvasNodeBusy(item, node.id);
 
   const plusSides = node.type === "novel" ? ["right"] : ["left", "right"];
   for (const side of plusSides) {
@@ -2495,6 +2698,150 @@ function renderCanvasNode(node) {
   resize.addEventListener("pointerdown", (event) => startCanvasNodeResize(event, node.id));
   item.appendChild(resize);
   return item;
+}
+
+function openCanvasMergeHistory(nodeId) {
+  const node = currentCanvasNode(nodeId);
+  if (!node || !isCanvasMergedNode(node)) return;
+  state.canvasMergeHistoryNodeId = nodeId;
+  renderCanvasMergedHistoryModal();
+  $("canvasMergeHistoryModal").setAttribute("aria-hidden", "false");
+}
+
+function closeCanvasMergeHistory() {
+  state.canvasMergeHistoryNodeId = "";
+  $("canvasMergeHistoryModal").setAttribute("aria-hidden", "true");
+  const list = $("canvasMergeHistoryList");
+  if (list) list.innerHTML = "";
+}
+
+function mergedVersionSourceText(version) {
+  const type = version.sourceKind === "revision" ? "修改版本" : "原始版本";
+  const parent = version.parentTitleSnapshot ? `｜来源：${version.parentTitleSnapshot}` : "";
+  return `${type}${parent}`;
+}
+
+function renderCanvasMergedHistoryModal() {
+  const node = currentCanvasNode(state.canvasMergeHistoryNodeId);
+  const list = $("canvasMergeHistoryList");
+  if (!node || !isCanvasMergedNode(node) || !list) return;
+  $("canvasMergeHistoryTitle").textContent = `${node.title || "合并节点"} · 历史版本`;
+  list.innerHTML = "";
+  const versions = node.meta?.versions || [];
+  if (!versions.length) {
+    list.innerHTML = `<div class="canvas-merge-empty">暂无历史版本。</div>`;
+    return;
+  }
+  for (const version of versions) {
+    const item = document.createElement("article");
+    item.className = `canvas-merge-version${version.id === node.meta?.primaryVersionId ? " primary" : ""}`;
+    item.innerHTML = `
+      <div class="canvas-merge-version-head">
+        <div>
+          <h3>${escapeHtml(version.title || "未命名版本")}</h3>
+          <p>${escapeHtml(mergedVersionSourceText(version))}</p>
+        </div>
+        <button type="button" data-merge-version-id="${escapeHtml(version.id)}"${version.id === node.meta?.primaryVersionId ? " disabled" : ""}>${version.id === node.meta?.primaryVersionId ? "当前唯一" : "设为唯一"}</button>
+      </div>
+      <div class="canvas-merge-version-grid">
+        <section>
+          <h4>对话内容</h4>
+          <p>${escapeHtml(version.chatPrompt || "无对话内容")}</p>
+        </section>
+        <section>
+          <h4>返回信息</h4>
+          <p>${escapeHtml(version.chatResponse || version.content || "无返回信息")}</p>
+        </section>
+      </div>
+    `;
+    list.appendChild(item);
+  }
+}
+
+async function setMergedPrimaryVersion(nodeId, versionId) {
+  if (!state.currentCanvas) return;
+  const node = currentCanvasNode(nodeId);
+  if (!node || !isCanvasMergedNode(node)) return;
+  const versions = node.meta?.versions || [];
+  const primary = versions.find((version) => version.id === versionId);
+  if (!primary) {
+    canvasStatus("找不到该历史版本");
+    return;
+  }
+  state.currentCanvas.nodes = (state.currentCanvas.nodes || []).map((item) => {
+    if (item.id !== nodeId) return item;
+    return {
+      ...item,
+      title: uniqueCanvasNodeTitle(primary.title || item.title, item.id),
+      content: canvasPrimaryVersionContent(primary),
+      meta: {
+        ...item.meta,
+        primaryVersionId: primary.id,
+        versions: versions.map((version) => ({
+          ...version,
+          isPrimary: version.id === primary.id,
+        })),
+      },
+    };
+  });
+  await saveCurrentCanvas();
+  state.selectedCanvasNodeId = nodeId;
+  renderCanvas();
+  renderCanvasMergedHistoryModal();
+  canvasStatus("已更新唯一版本；已生成的下游内容不会自动调整");
+}
+
+function renderCanvasRevisionChat(node) {
+  const panel = document.createElement("div");
+  panel.className = `canvas-node-revision-chat${node.meta?.chatLocked ? " locked" : ""}`;
+  panel.addEventListener("pointerdown", (event) => event.stopPropagation());
+  panel.addEventListener("pointerup", (event) => event.stopPropagation());
+  panel.addEventListener("click", (event) => event.stopPropagation());
+  panel.addEventListener("dblclick", (event) => event.stopPropagation());
+  panel.addEventListener("contextmenu", (event) => event.stopPropagation());
+
+  const parent = currentCanvasNode(node.meta?.parentNodeId);
+  const sourceTitle = parent?.title || node.meta?.parentTitleSnapshot || "父级节点";
+  const locked = Boolean(node.meta?.chatLocked);
+
+  const header = document.createElement("div");
+  header.className = "canvas-node-revision-chat-head";
+
+  const icon = document.createElement("span");
+  icon.className = "canvas-node-revision-source-icon";
+  icon.textContent = "≡";
+  icon.setAttribute("aria-hidden", "true");
+  header.appendChild(icon);
+
+  const source = document.createElement("div");
+  source.className = "canvas-node-revision-source";
+  source.innerHTML = `<strong>来源：${escapeHtml(sourceTitle)}</strong><small>${locked ? "修改已生效，只读" : "输入针对父级内容的调整要求"}</small>`;
+  header.appendChild(source);
+  panel.appendChild(header);
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "canvas-node-revision-input";
+  textarea.value = node.meta?.chatPrompt || "";
+  textarea.readOnly = locked;
+  textarea.placeholder = "写下你想调整的故事、场景或角色设定。";
+  textarea.setAttribute("aria-label", "修改要求");
+  panel.appendChild(textarea);
+
+  const footer = document.createElement("div");
+  footer.className = "canvas-node-revision-actions";
+  const send = document.createElement("button");
+  send.type = "button";
+  send.className = "canvas-node-revision-send";
+  send.textContent = locked ? "已生效" : "发送";
+  send.disabled = locked;
+  send.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    await submitCanvasRevisionChat(node.id, textarea.value);
+  });
+  footer.appendChild(send);
+  panel.appendChild(footer);
+  return panel;
 }
 
 function canvasTypeIcon(type = "label") {
@@ -2514,6 +2861,8 @@ function renderCanvasToolbarIcons() {
 
 function selectCanvasNode(nodeId) {
   state.selectedCanvasNodeId = nodeId;
+  state.selectedCanvasNodeIds = new Set();
+  state.canvasGroupPrimaryNodeId = "";
   state.selectedCanvasEdgeId = "";
   document.querySelectorAll(".canvas-node").forEach((node) => {
     node.classList.toggle("selected", node.dataset.nodeId === nodeId);
@@ -2521,19 +2870,51 @@ function selectCanvasNode(nodeId) {
   document.querySelectorAll(".canvas-edge").forEach((edge) => {
     edge.classList.remove("selected");
   });
+  renderCanvasGroupBar();
   updateCanvasViewportTools();
 }
 
 function selectCanvasEdge(edgeId) {
   state.selectedCanvasEdgeId = edgeId;
   state.selectedCanvasNodeId = "";
+  state.selectedCanvasNodeIds = new Set();
+  state.canvasGroupPrimaryNodeId = "";
   document.querySelectorAll(".canvas-node").forEach((node) => {
     node.classList.remove("selected");
   });
   document.querySelectorAll(".canvas-edge").forEach((edge) => {
     edge.classList.toggle("selected", edge.dataset.edgeId === edgeId);
   });
+  renderCanvasGroupBar();
   updateCanvasViewportTools();
+}
+
+function setCanvasBusy(nodeId, label = "生成中") {
+  state.canvasBusy = nodeId ? { nodeId, label } : null;
+  renderCanvasBusyIndicators();
+}
+
+function renderCanvasBusyIndicators() {
+  document.querySelectorAll(".canvas-node").forEach((item) => {
+    applyCanvasNodeBusy(item, item.dataset.nodeId);
+  });
+}
+
+function applyCanvasNodeBusy(item, nodeId) {
+  const isBusy = Boolean(state.canvasBusy?.nodeId && state.canvasBusy.nodeId === nodeId);
+  const existing = Array.from(item.children).find((child) => child.classList?.contains("canvas-node-busy"));
+  item.classList.toggle("is-generating", isBusy);
+  if (!isBusy) {
+    existing?.remove();
+    return;
+  }
+  const label = state.canvasBusy?.label || "生成中";
+  const busy = existing || document.createElement("div");
+  busy.className = "canvas-node-busy";
+  busy.setAttribute("role", "status");
+  busy.setAttribute("aria-live", "polite");
+  busy.innerHTML = `<span class="canvas-node-busy-spinner" aria-hidden="true"></span><span class="canvas-node-busy-text">${escapeHtml(label)}</span>`;
+  if (!existing) item.appendChild(busy);
 }
 
 function updateCanvasNodeDraft(nodeId, content) {
@@ -2552,6 +2933,8 @@ async function saveCanvasNodeDraft(nodeId, content) {
 
 function clearCanvasSelection() {
   state.selectedCanvasNodeId = "";
+  state.selectedCanvasNodeIds = new Set();
+  state.canvasGroupPrimaryNodeId = "";
   state.selectedCanvasEdgeId = "";
   document.querySelectorAll(".canvas-node.selected, .canvas-node.hovering").forEach((node) => {
     node.classList.remove("selected");
@@ -2560,10 +2943,57 @@ function clearCanvasSelection() {
   document.querySelectorAll(".canvas-edge.selected").forEach((edge) => {
     edge.classList.remove("selected");
   });
+  hideCanvasSelectionBox();
+  renderCanvasGroupBar();
+  updateCanvasViewportTools();
+}
+
+function renderCanvasGroupBar() {
+  const bar = $("canvasGroupBar");
+  const count = $("canvasGroupCount");
+  const select = $("canvasGroupPrimarySelect");
+  if (!bar || !count || !select) return;
+  const nodes = selectedCanvasNodes();
+  const canGroup = canGroupCanvasNodes(nodes);
+  bar.hidden = nodes.length < 2;
+  if (bar.hidden) return;
+  count.textContent = canGroup.ok ? `已选 ${nodes.length} 个` : canGroup.reason;
+  select.innerHTML = "";
+  for (const node of nodes) {
+    const option = document.createElement("option");
+    option.value = node.id;
+    option.textContent = node.title || canvasTypeLabels[node.type] || "节点";
+    select.appendChild(option);
+  }
+  if (!state.canvasGroupPrimaryNodeId || !nodes.some((node) => node.id === state.canvasGroupPrimaryNodeId)) {
+    state.canvasGroupPrimaryNodeId = state.selectedCanvasNodeId && nodes.some((node) => node.id === state.selectedCanvasNodeId)
+      ? state.selectedCanvasNodeId
+      : nodes[0]?.id || "";
+  }
+  select.value = state.canvasGroupPrimaryNodeId;
+  $("mergeSelectedCanvasNodes").disabled = !canGroup.ok;
+}
+
+function setCanvasMultiSelection(nodeIds = [], primaryNodeId = "") {
+  const ids = new Set(nodeIds.filter(Boolean));
+  state.selectedCanvasNodeIds = ids;
+  state.selectedCanvasNodeId = primaryNodeId && ids.has(primaryNodeId) ? primaryNodeId : (ids.values().next().value || "");
+  state.canvasGroupPrimaryNodeId = state.selectedCanvasNodeId;
+  state.selectedCanvasEdgeId = "";
+  document.querySelectorAll(".canvas-node").forEach((node) => {
+    node.classList.toggle("selected", ids.has(node.dataset.nodeId));
+    node.classList.remove("hovering");
+  });
+  document.querySelectorAll(".canvas-edge.selected").forEach((edge) => edge.classList.remove("selected"));
+  renderCanvasGroupBar();
   updateCanvasViewportTools();
 }
 
 function handleCanvasStageClick(event) {
+  if (state.suppressCanvasStageClick) {
+    state.suppressCanvasStageClick = false;
+    return;
+  }
   if (
     event.target.closest?.(".canvas-node, .canvas-edge, .canvas-node-plus, .canvas-action-menu, .canvas-context-menu")
   ) {
@@ -2604,11 +3034,18 @@ async function commitCanvasNodeTitleEdit(nodeId, title) {
   const node = currentCanvasNode(nodeId);
   if (!node || !state.currentCanvas || state.editingCanvasNodeId !== nodeId) return;
   const cleanTitle = String(title || "").trim();
-  state.editingCanvasNodeId = "";
   if (!cleanTitle || cleanTitle === node.title) {
+    state.editingCanvasNodeId = "";
     renderCanvas();
     return;
   }
+  if (hasCanvasNodeTitleConflict(cleanTitle, nodeId)) {
+    state.editingCanvasNodeId = nodeId;
+    canvasStatus("节点名称已存在，请换一个名称");
+    renderCanvas();
+    return;
+  }
+  state.editingCanvasNodeId = "";
   state.currentCanvas.nodes = (state.currentCanvas.nodes || []).map((item) => item.id === nodeId
     ? { ...item, title: cleanTitle }
     : item);
@@ -2660,16 +3097,27 @@ function canvasMenuButton(label, action, meta = "") {
 }
 
 function canvasNodeCreateOptions(node) {
+  const revisionOption = canvasRevisionNodeTypes.has(node.type)
+    ? [{ label: "修改", action: "create-revision", meta: "对该节点改一版" }]
+    : [];
   if (node.type === "novel") {
     return [
       { label: "剧本", action: "generate-script", meta: "按小说生成" },
       { label: "标识", action: "add-label", meta: "补充说明" },
+      ...revisionOption,
     ];
   }
   if (node.type === "script") {
     return [
       { label: "分镜脚本", action: "generate-storyboard-all", meta: "一键生成所有集数分镜" },
       { label: "标识", action: "add-label", meta: "补充说明" },
+      ...revisionOption,
+    ];
+  }
+  if (node.type === "storyboard") {
+    return [
+      { label: "标识", action: "add-label", meta: "补充说明" },
+      ...revisionOption,
     ];
   }
   return [
@@ -2738,7 +3186,7 @@ function openCanvasBoardContextMenu(event) {
   title.textContent = "新增节点";
   menu.appendChild(title);
 
-  const hasNovel = (state.currentCanvas.nodes || []).some((node) => node.type === "novel");
+  const hasNovel = (state.currentCanvas.nodes || []).some((node) => node.type === "novel" && !isCanvasRevisionNode(node));
   const options = [
     { label: hasNovel ? "小说（已存在）" : "小说", action: "canvas-add-novel", disabled: hasNovel, meta: hasNovel ? "每个画布仅允许一个" : "原始材料" },
     { label: "剧本", action: "canvas-add-script" },
@@ -2844,6 +3292,7 @@ async function runCanvasNodeAction(nodeId, action) {
   if (action === "generate-script") return generateScriptFromNode(nodeId);
   if (action === "generate-storyboard") return planStoryboardsFromNode(nodeId);
   if (action === "generate-storyboard-all") return generateAllStoryboardsFromNode(nodeId);
+  if (action === "create-revision") return createRevisionCanvasNode(nodeId);
   if (action === "edit") {
     openCanvasNodeModal(nodeId);
     return;
@@ -2956,7 +3405,7 @@ async function addDerivedCanvasNode(sourceNodeId, kind) {
   const node = {
     id: `node-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
     type: typeByKind[kind] || "label",
-    title: titleByKind[kind] || "文本",
+    title: uniqueCanvasNodeTitle(titleByKind[kind] || "文本"),
     content: "",
     x: Number(source.x || 0) + Number(source.width || 320) + 120,
     y: Number(source.y || 0) + offset,
@@ -2973,6 +3422,171 @@ async function addDerivedCanvasNode(sourceNodeId, kind) {
   renderCanvas();
 }
 
+async function groupSelectedCanvasNodes() {
+  if (!state.currentCanvas) return;
+  const nodes = selectedCanvasNodes();
+  const check = canGroupCanvasNodes(nodes);
+  if (!check.ok) {
+    canvasStatus(check.reason);
+    return;
+  }
+  const primaryId = $("canvasGroupPrimarySelect")?.value || state.canvasGroupPrimaryNodeId || nodes[0].id;
+  await createMergedCanvasNode(nodes.map((node) => node.id), primaryId);
+}
+
+async function createMergedCanvasNode(nodeIds = [], primaryNodeId = "") {
+  if (!state.currentCanvas) return;
+  const selectedIds = new Set(nodeIds.filter(Boolean));
+  const nodes = (state.currentCanvas.nodes || []).filter((node) => selectedIds.has(node.id));
+  const check = canGroupCanvasNodes(nodes);
+  if (!check.ok) {
+    canvasStatus(check.reason);
+    return;
+  }
+  const primary = nodes.find((node) => node.id === primaryNodeId) || nodes[0];
+  const versions = nodes.map((node, index) => canvasVersionFromNode(node, index, selectedIds, primary.id));
+  const primaryVersion = versions.find((version) => version.nodeId === primary.id) || versions[0];
+  const minX = Math.min(...nodes.map((node) => Number(node.x || 0)));
+  const minY = Math.min(...nodes.map((node) => Number(node.y || 0)));
+  const maxX = Math.max(...nodes.map((node) => Number(node.x || 0) + Number(node.width || 320)));
+  const maxY = Math.max(...nodes.map((node) => Number(node.y || 0) + Number(node.height || 220)));
+  const mergedId = `merged-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
+  const mergedNode = {
+    id: mergedId,
+    type: primary.type,
+    title: uniqueCanvasNodeTitleOutside(primaryVersion.title || primary.title || canvasTypeLabels[primary.type] || "节点", selectedIds),
+    content: canvasPrimaryVersionContent(primaryVersion),
+    x: minX,
+    y: minY,
+    width: Math.min(900, Math.max(Number(primary.width || 360), Math.min(maxX - minX, 720))),
+    height: Math.min(900, Math.max(Number(primary.height || 240), Math.min(maxY - minY, 420))),
+    meta: {
+      variantKind: "merged",
+      primaryVersionId: primaryVersion.id,
+      versionIds: versions.map((version) => version.id),
+      mergedNodeIds: nodes.map((node) => node.id),
+      mergedAt: new Date().toISOString(),
+      versions,
+    },
+  };
+  const edgeKeys = new Set();
+  const rewiredEdges = [];
+  for (const edge of state.currentCanvas.edges || []) {
+    const fromSelected = selectedIds.has(edge.from);
+    const toSelected = selectedIds.has(edge.to);
+    if (fromSelected && toSelected) continue;
+    const next = {
+      ...edge,
+      id: `edge-${edge.id || Date.now()}-${mergedId}`,
+      from: fromSelected ? mergedId : edge.from,
+      to: toSelected ? mergedId : edge.to,
+      fromSide: fromSelected ? "right" : edge.fromSide,
+      toSide: toSelected ? "left" : edge.toSide,
+    };
+    if (next.from === next.to) continue;
+    const key = `${next.from}->${next.to}:${next.label || ""}`;
+    if (edgeKeys.has(key)) continue;
+    edgeKeys.add(key);
+    rewiredEdges.push(next);
+  }
+  state.currentCanvas.nodes = [
+    ...(state.currentCanvas.nodes || []).filter((node) => !selectedIds.has(node.id)),
+    mergedNode,
+  ];
+  state.currentCanvas.edges = rewiredEdges;
+  state.selectedCanvasNodeIds = new Set();
+  state.selectedCanvasNodeId = mergedId;
+  state.canvasGroupPrimaryNodeId = "";
+  state.selectedCanvasEdgeId = "";
+  await saveCurrentCanvas();
+  renderCanvas();
+  canvasStatus("已合并为唯一版本节点");
+}
+
+async function createRevisionCanvasNode(sourceNodeId) {
+  if (!state.currentCanvas) return;
+  const source = currentCanvasNode(sourceNodeId);
+  if (!source || !canvasRevisionNodeTypes.has(source.type)) {
+    canvasStatus("该节点类型暂不支持修改");
+    return;
+  }
+  const siblings = (state.currentCanvas.nodes || []).filter((node) =>
+    isCanvasRevisionNode(node) &&
+    node.meta?.parentNodeId === sourceNodeId
+  );
+  const node = {
+    id: `revision-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    type: source.type,
+    title: uniqueCanvasNodeTitle(`${source.title || canvasTypeLabels[source.type] || "节点"} 修改`),
+    content: "",
+    x: Number(source.x || 0) + Number(source.width || 320) + 160,
+    y: Number(source.y || 0) + siblings.length * 56,
+    width: Number(source.width || 360),
+    height: Number(source.height || 240),
+    meta: {
+      variantKind: "revision",
+      parentNodeId: source.id,
+      parentTitleSnapshot: source.title || "",
+      chatLocked: false,
+      createdAt: new Date().toISOString(),
+    },
+  };
+  state.currentCanvas.nodes = [...(state.currentCanvas.nodes || []), node];
+  state.currentCanvas.edges = [
+    ...(state.currentCanvas.edges || []),
+    {
+      id: `edge-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+      from: source.id,
+      to: node.id,
+      label: "修改",
+      fromSide: "right",
+      toSide: "left",
+    },
+  ];
+  await saveCurrentCanvas();
+  state.selectedCanvasNodeId = node.id;
+  state.selectedCanvasEdgeId = "";
+  renderCanvas();
+  canvasStatus("已创建修改节点，请在下方输入修改要求");
+}
+
+async function submitCanvasRevisionChat(nodeId, prompt) {
+  if (!state.currentCanvas) return;
+  const node = currentCanvasNode(nodeId);
+  if (!node || !isCanvasRevisionNode(node)) return;
+  if (node.meta?.chatLocked) {
+    canvasStatus("该修改节点已经生效，不能再次对话");
+    return;
+  }
+  const cleanPrompt = String(prompt || "").trim();
+  if (!cleanPrompt) {
+    canvasStatus("请输入修改要求");
+    return;
+  }
+  canvasStatus("正在根据修改要求生成新版本...");
+  setCanvasBusy(nodeId, "修改生成中");
+  try {
+    const data = await api("/api/canvas/revise-node", {
+      method: "POST",
+      body: JSON.stringify({
+        canvasId: state.currentCanvasId,
+        nodeId,
+        prompt: cleanPrompt,
+        scriptGrade: state.scriptGrade,
+      }),
+    });
+    state.currentCanvas = data.canvas;
+    state.selectedCanvasNodeId = nodeId;
+    state.selectedCanvasEdgeId = "";
+    renderCanvas();
+    canvasStatus("修改节点已生成并锁定");
+  } catch (error) {
+    canvasStatus(error.message);
+  } finally {
+    setCanvasBusy(null);
+  }
+}
+
 async function copyCanvasNode(nodeId) {
   if (!state.currentCanvas) return;
   const source = currentCanvasNode(nodeId);
@@ -2980,7 +3594,7 @@ async function copyCanvasNode(nodeId) {
   const node = {
     ...source,
     id: `node-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
-    title: `${source.title || "节点"} 副本`,
+    title: uniqueCanvasNodeTitle(`${source.title || "节点"} 副本`),
     x: Number(source.x || 0) + 36,
     y: Number(source.y || 0) + 36,
     meta: { ...(source.meta || {}), copiedFrom: source.id },
@@ -3006,6 +3620,46 @@ function canvasStagePoint(clientX, clientY) {
     x: (clientX - rect.left + stage.scrollLeft) / zoom - canvasOriginX,
     y: (clientY - rect.top + stage.scrollTop) / zoom - canvasOriginY,
   };
+}
+
+function canvasSelectionRect(drag) {
+  const start = drag?.startPoint || { x: 0, y: 0 };
+  const current = drag?.currentPoint || start;
+  return {
+    x: Math.min(start.x, current.x),
+    y: Math.min(start.y, current.y),
+    width: Math.abs(current.x - start.x),
+    height: Math.abs(current.y - start.y),
+  };
+}
+
+function updateCanvasSelectionBox(drag) {
+  const box = $("canvasSelectionBox");
+  if (!box || !drag) return;
+  const rect = canvasSelectionRect(drag);
+  box.hidden = false;
+  box.style.left = `${canvasScreenX(rect.x)}px`;
+  box.style.top = `${canvasScreenY(rect.y)}px`;
+  box.style.width = `${Math.max(1, rect.width * canvasZoom())}px`;
+  box.style.height = `${Math.max(1, rect.height * canvasZoom())}px`;
+}
+
+function hideCanvasSelectionBox() {
+  const box = $("canvasSelectionBox");
+  if (!box) return;
+  box.hidden = true;
+  box.style.width = "0px";
+  box.style.height = "0px";
+}
+
+function rectIntersectsCanvasNode(rect, node) {
+  const bounds = canvasNodeBounds(node);
+  return !(
+    bounds.x + bounds.width < rect.x ||
+    bounds.x > rect.x + rect.width ||
+    bounds.y + bounds.height < rect.y ||
+    bounds.y > rect.y + rect.height
+  );
 }
 
 function canvasNodeEndpoint(node, side = "right") {
@@ -3155,6 +3809,27 @@ function activateCanvasPan(drag) {
   document.body.classList.add("canvas-panning");
 }
 
+function startCanvasSelection(event) {
+  if (!state.currentCanvas || event.button !== 0) return;
+  if (event.target?.closest?.(".canvas-node, .canvas-edge, .canvas-context-menu, .canvas-action-menu, .canvas-view-tools, .canvas-group-bar, button, input, textarea, select")) return;
+  event.preventDefault();
+  closeCanvasMenus();
+  const point = canvasStagePoint(event.clientX, event.clientY);
+  const drag = {
+    type: "select",
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    startPoint: point,
+    currentPoint: point,
+    active: true,
+    trigger: $("canvasStage"),
+  };
+  state.canvasDrag = drag;
+  captureCanvasPointer(drag.trigger, drag.pointerId);
+  updateCanvasSelectionBox(drag);
+}
+
 function beginCanvasEdgeDraft(event, nodeId, side) {
   if (!state.currentCanvas || event.button !== 0) return;
   event.stopPropagation();
@@ -3191,6 +3866,10 @@ async function finishCanvasEdgeDraft(event, draft) {
   const target = findCanvasNodeAtPoint(event.clientX, event.clientY, draft.nodeId);
   if (!target) {
     canvasStatus("未连接：请拖到目标节点后松开");
+    return;
+  }
+  if (!canConnectCanvasNodes(draft.nodeId, target.id)) {
+    canvasStatus("修改节点只能保留一个父级来源");
     return;
   }
   const duplicate = (state.currentCanvas.edges || []).some((edge) =>
@@ -3351,6 +4030,11 @@ function updateCanvasPointer(event) {
   const dy = event.clientY - drag.startY;
   const canvasDx = dx / canvasZoom();
   const canvasDy = dy / canvasZoom();
+  if (drag.type === "select") {
+    drag.currentPoint = canvasStagePoint(event.clientX, event.clientY);
+    updateCanvasSelectionBox(drag);
+    return;
+  }
   if (drag.type === "connect") {
     drag.current = canvasStagePoint(event.clientX, event.clientY);
     if (Math.hypot(dx, dy) > canvasConnectMovePx) {
@@ -3405,6 +4089,27 @@ async function endCanvasPointer(event) {
     document.body.classList.remove("canvas-panning");
     return;
   }
+  if (drag.type === "select") {
+    releaseCanvasPointer(drag.trigger, drag.pointerId);
+    const rect = canvasSelectionRect(drag);
+    hideCanvasSelectionBox();
+    if (rect.width < 6 && rect.height < 6) {
+      clearCanvasSelection();
+      return;
+    }
+    state.suppressCanvasStageClick = true;
+    const ids = (state.currentCanvas.nodes || [])
+      .filter((node) => rectIntersectsCanvasNode(rect, node))
+      .map((node) => node.id);
+    if (ids.length) {
+      setCanvasMultiSelection(ids, ids[0]);
+      const canGroup = canGroupCanvasNodes(selectedCanvasNodes());
+      canvasStatus(canGroup.ok ? `已框选 ${ids.length} 个节点，可指定唯一版本后合并` : canGroup.reason);
+    } else {
+      clearCanvasSelection();
+    }
+    return;
+  }
   if (drag.type === "move") {
     releaseCanvasPointer(drag.trigger, drag.pointerId);
     document.body.classList.remove("canvas-node-dragging");
@@ -3441,8 +4146,13 @@ function closeCanvasNodeModal() {
 async function saveActiveCanvasNode() {
   const nodeId = state.activeCanvasNodeId;
   if (!nodeId || !state.currentCanvas) return;
+  const nextTitle = $("canvasNodeTitle").value.trim();
+  if (nextTitle && hasCanvasNodeTitleConflict(nextTitle, nodeId)) {
+    canvasStatus("节点名称已存在，请换一个名称");
+    return;
+  }
   state.currentCanvas.nodes = state.currentCanvas.nodes.map((node) => node.id === nodeId
-    ? { ...node, title: $("canvasNodeTitle").value.trim() || node.title, content: $("canvasNodeContent").value }
+    ? { ...node, title: nextTitle || node.title, content: $("canvasNodeContent").value }
     : node);
   await saveCurrentCanvas();
   renderCanvas();
@@ -3503,6 +4213,7 @@ async function planStoryboardsFromNode(nodeId = state.activeCanvasNodeId) {
 async function generateAllStoryboardsFromNode(nodeId) {
   if (!nodeId) return;
   canvasStatus("正在识别分集并生成全部分镜...");
+  setCanvasBusy(nodeId, "分镜生成中");
   try {
     const plan = await api("/api/canvas/plan-storyboards", {
       method: "POST",
@@ -3529,6 +4240,8 @@ async function generateAllStoryboardsFromNode(nodeId) {
     canvasStatus(`已生成 ${data.nodes?.length || episodes.length} 个分镜脚本节点`);
   } catch (error) {
     canvasStatus(error.message);
+  } finally {
+    setCanvasBusy(null);
   }
 }
 
@@ -3569,13 +4282,15 @@ async function generateConfirmedStoryboards() {
   }
   closeEpisodeConfirm();
   closeCanvasNodeModal();
+  const sourceNodeId = state.pendingEpisodes.scriptNodeId;
   canvasStatus(`正在生成 ${selected.length} 个分镜节点...`);
+  setCanvasBusy(sourceNodeId, "分镜生成中");
   try {
     const data = await api("/api/canvas/generate-storyboards", {
       method: "POST",
       body: JSON.stringify({
         canvasId: state.currentCanvasId,
-        nodeId: state.pendingEpisodes.scriptNodeId,
+        nodeId: sourceNodeId,
         episodes: selected,
         scriptGrade: state.scriptGrade,
       }),
@@ -3586,6 +4301,8 @@ async function generateConfirmedStoryboards() {
     canvasStatus(`已生成 ${data.nodes?.length || selected.length} 个分镜节点`);
   } catch (error) {
     canvasStatus(error.message);
+  } finally {
+    setCanvasBusy(null);
   }
 }
 
@@ -4196,6 +4913,21 @@ function bindEvents() {
   $("canvasDeleteConfirm").addEventListener("click", (event) => {
     if (event.target === $("canvasDeleteConfirm")) closeCanvasDeleteConfirm(false);
   });
+  $("canvasGroupPrimarySelect").addEventListener("change", (event) => {
+    state.canvasGroupPrimaryNodeId = event.target.value;
+  });
+  $("mergeSelectedCanvasNodes").addEventListener("click", groupSelectedCanvasNodes);
+  $("cancelCanvasGroup").addEventListener("click", clearCanvasSelection);
+  $("closeCanvasMergeHistory").addEventListener("click", closeCanvasMergeHistory);
+  $("canvasMergeHistoryModal").addEventListener("click", (event) => {
+    if (event.target === $("canvasMergeHistoryModal")) closeCanvasMergeHistory();
+  });
+  $("canvasMergeHistoryList").addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-merge-version-id]");
+    if (!button) return;
+    await setMergedPrimaryVersion(state.canvasMergeHistoryNodeId, button.dataset.mergeVersionId);
+  });
+  $("canvasStage").addEventListener("pointerdown", startCanvasSelection);
   $("canvasStage").addEventListener("pointerdown", beginCanvasPan);
   $("canvasStage").addEventListener("click", handleCanvasStageClick);
   $("canvasStage").addEventListener("contextmenu", openCanvasBoardContextMenu);

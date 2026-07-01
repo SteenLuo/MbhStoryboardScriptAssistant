@@ -28,10 +28,65 @@ function cleanEdgeSide(side, fallback) {
   return side === "left" || side === "right" ? side : fallback;
 }
 
+function isRevisionCanvasNode(node) {
+  return node?.meta?.variantKind === "revision";
+}
+
+function isMergedCanvasNode(node) {
+  return node?.meta?.variantKind === "merged";
+}
+
+function revisionParentId(node) {
+  return String(node?.meta?.parentNodeId || "");
+}
+
+function normalizeMergedVersion(version = {}, index = 0) {
+  const id = String(version.id || version.versionId || `version-${index + 1}`);
+  const content = String(version.content || version.chatResponse || "");
+  return {
+    id,
+    nodeId: String(version.nodeId || ""),
+    type: cleanType(version.type),
+    title: String(version.title || `版本 ${index + 1}`),
+    parentNodeId: String(version.parentNodeId || ""),
+    parentTitleSnapshot: String(version.parentTitleSnapshot || ""),
+    chatPrompt: String(version.chatPrompt || ""),
+    chatResponse: String(version.chatResponse || content),
+    content,
+    createdAt: String(version.createdAt || ""),
+    sourceKind: String(version.sourceKind || ""),
+    isPrimary: Boolean(version.isPrimary),
+  };
+}
+
+function normalizeNodeMeta(meta = {}) {
+  if (!meta || typeof meta !== "object") return {};
+  if (meta.variantKind !== "merged") return meta;
+
+  const versions = (Array.isArray(meta.versions) ? meta.versions : [])
+    .map(normalizeMergedVersion);
+  const requestedPrimaryId = String(meta.primaryVersionId || "");
+  const fallbackPrimaryId = versions.find((version) => version.isPrimary)?.id || versions[0]?.id || "";
+  const primaryVersionId = versions.some((version) => version.id === requestedPrimaryId)
+    ? requestedPrimaryId
+    : fallbackPrimaryId;
+
+  return {
+    ...meta,
+    variantKind: "merged",
+    primaryVersionId,
+    versionIds: versions.map((version) => version.id),
+    versions: versions.map((version) => ({
+      ...version,
+      isPrimary: version.id === primaryVersionId,
+    })),
+  };
+}
+
 function normalizeNode(node = {}, index = 0) {
   const type = cleanType(node.type);
   const defaults = NODE_DEFAULTS[type];
-  return {
+  const normalized = {
     id: String(node.id || randomId("node")),
     type,
     title: String(node.title || defaults.title),
@@ -40,8 +95,13 @@ function normalizeNode(node = {}, index = 0) {
     y: clampNumber(node.y, 120 + index * 40, -20000, 20000),
     width: clampNumber(node.width, defaults.width, 220, 900),
     height: clampNumber(node.height, defaults.height, 120, 900),
-    meta: node.meta && typeof node.meta === "object" ? node.meta : {},
+    meta: normalizeNodeMeta(node.meta),
   };
+  if (isMergedCanvasNode(normalized) && !normalized.content) {
+    const primary = normalized.meta.versions.find((version) => version.id === normalized.meta.primaryVersionId);
+    normalized.content = primary?.content || primary?.chatResponse || "";
+  }
+  return normalized;
 }
 
 function normalizeCanvas(canvas = {}, now = nowIso) {
@@ -50,13 +110,25 @@ function normalizeCanvas(canvas = {}, now = nowIso) {
     .map(normalizeNode)
     .filter((node) => {
       if (node.type !== "novel") return true;
+      if (isRevisionCanvasNode(node)) return true;
       if (hasNovel) return false;
       hasNovel = true;
       return true;
     });
   const nodeIds = new Set(nodes.map((node) => node.id));
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const revisionIncoming = new Set();
   const edges = (Array.isArray(canvas.edges) ? canvas.edges : [])
-    .filter((edge) => nodeIds.has(edge?.from) && nodeIds.has(edge?.to) && edge.from !== edge.to)
+    .filter((edge) => {
+      if (!nodeIds.has(edge?.from) || !nodeIds.has(edge?.to) || edge.from === edge.to) return false;
+      const targetNode = nodeMap.get(edge.to);
+      if (!isRevisionCanvasNode(targetNode)) return true;
+      const parentId = revisionParentId(targetNode);
+      if (parentId && edge.from !== parentId) return false;
+      if (revisionIncoming.has(edge.to)) return false;
+      revisionIncoming.add(edge.to);
+      return true;
+    })
     .map((edge, index) => ({
       id: String(edge.id || `edge-${edge.from}-${edge.to}-${index}`),
       from: edge.from,
@@ -107,7 +179,11 @@ function touch(canvas) {
 function addCanvasNode(canvas, node) {
   const normalized = normalizeCanvas(canvas);
   const nextNode = normalizeNode(node, normalized.nodes.length);
-  if (nextNode.type === "novel" && normalized.nodes.some((item) => item.type === "novel")) {
+  if (
+    nextNode.type === "novel" &&
+    !isRevisionCanvasNode(nextNode) &&
+    normalized.nodes.some((item) => item.type === "novel" && !isRevisionCanvasNode(item))
+  ) {
     return normalized;
   }
   return touch({
@@ -155,11 +231,44 @@ function deleteCanvasNode(canvas, nodeId) {
   });
 }
 
+function setCanvasMergedPrimaryVersion(canvas, nodeId, versionId) {
+  const normalized = normalizeCanvas(canvas);
+  return touch({
+    ...normalized,
+    nodes: normalized.nodes.map((node) => {
+      if (node.id !== nodeId || !isMergedCanvasNode(node)) return node;
+      const requestedVersionId = String(versionId || "");
+      const versions = node.meta.versions || [];
+      const primary = versions.find((version) => version.id === requestedVersionId);
+      if (!primary) return node;
+      return normalizeNode({
+        ...node,
+        title: primary.title || node.title,
+        content: primary.content || primary.chatResponse || "",
+        meta: {
+          ...node.meta,
+          primaryVersionId: primary.id,
+          versions: versions.map((version) => ({
+            ...version,
+            isPrimary: version.id === primary.id,
+          })),
+        },
+      }, 0);
+    }),
+  });
+}
+
 function connectCanvasNodes(canvas, from, to, label = "", options = {}) {
   const normalized = normalizeCanvas(canvas);
-  const ids = new Set(normalized.nodes.map((node) => node.id));
-  if (!ids.has(from) || !ids.has(to) || from === to) return normalized;
+  const nodes = new Map(normalized.nodes.map((node) => [node.id, node]));
+  if (!nodes.has(from) || !nodes.has(to) || from === to) return normalized;
   if (normalized.edges.some((edge) => edge.from === from && edge.to === to)) return normalized;
+  const targetNode = nodes.get(to);
+  if (isRevisionCanvasNode(targetNode)) {
+    const parentId = revisionParentId(targetNode);
+    if (parentId && from !== parentId) return normalized;
+    if (normalized.edges.some((edge) => edge.to === to)) return normalized;
+  }
   return touch({
     ...normalized,
     edges: [...normalized.edges, {
@@ -180,9 +289,12 @@ module.exports = {
   connectCanvasNodes,
   createCanvas,
   deleteCanvasNode,
+  isMergedCanvasNode,
+  isRevisionCanvasNode,
   moveCanvasNode,
   normalizeCanvas,
   normalizeNode,
   resizeCanvasNode,
+  setCanvasMergedPrimaryVersion,
   updateCanvasNodeContent,
 };

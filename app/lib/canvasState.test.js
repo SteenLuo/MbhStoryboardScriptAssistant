@@ -7,8 +7,10 @@ const {
   connectCanvasNodes,
   createCanvas,
   deleteCanvasNode,
+  isMergedCanvasNode,
   normalizeCanvas,
   resizeCanvasNode,
+  setCanvasMergedPrimaryVersion,
   updateCanvasNodeContent,
 } = require("./canvasState");
 
@@ -87,4 +89,96 @@ test("addCanvasNode rejects a second novel node", () => {
 
   assert.strictEqual(next.nodes.filter((node) => node.type === "novel").length, 1);
   assert.strictEqual(next.nodes.some((node) => node.id === "novel-2"), false);
+});
+
+test("revision novel nodes do not count as the single original novel node", () => {
+  const canvas = createCanvas("Revision canvas", () => "2026-06-27T00:00:00.000Z", () => "root01");
+  const next = addCanvasNode(canvas, {
+    id: "novel-revision-1",
+    type: "novel",
+    title: "Novel revision",
+    meta: {
+      variantKind: "revision",
+      parentNodeId: canvas.nodes[0].id,
+    },
+  });
+
+  assert.strictEqual(next.nodes.filter((node) => node.type === "novel").length, 2);
+  assert.strictEqual(next.nodes.some((node) => node.id === "novel-revision-1"), true);
+});
+
+test("revision nodes accept only one parent edge", () => {
+  let canvas = createCanvas("Revision parent canvas", () => "2026-06-27T00:00:00.000Z", () => "root01");
+  canvas = addCanvasNode(canvas, { id: "script-1", type: "script", title: "Script" });
+  canvas = addCanvasNode(canvas, { id: "label-1", type: "label", title: "Label" });
+  canvas = addCanvasNode(canvas, {
+    id: "script-revision-1",
+    type: "script",
+    title: "Script revision",
+    meta: {
+      variantKind: "revision",
+      parentNodeId: "script-1",
+    },
+  });
+
+  canvas = connectCanvasNodes(canvas, "script-1", "script-revision-1", "revise");
+  canvas = connectCanvasNodes(canvas, "label-1", "script-revision-1", "extra parent");
+
+  assert.strictEqual(canvas.edges.filter((edge) => edge.to === "script-revision-1").length, 1);
+  assert.strictEqual(canvas.edges.find((edge) => edge.to === "script-revision-1").from, "script-1");
+});
+
+test("merged nodes preserve grouped version history and a unique primary version", () => {
+  const canvas = normalizeCanvas({
+    id: "canvas-merge",
+    title: "Merge canvas",
+    nodes: [
+      {
+        id: "merged-1",
+        type: "script",
+        title: "剧本合并",
+        content: "当前唯一版本",
+        meta: {
+          variantKind: "merged",
+          primaryVersionId: "version-2",
+          versionIds: ["version-1", "version-2"],
+          versions: [
+            {
+              id: "version-1",
+              nodeId: "script-1",
+              title: "剧本",
+              parentNodeId: "novel-1",
+              parentTitleSnapshot: "小说",
+              chatPrompt: "",
+              chatResponse: "旧版",
+              content: "旧版",
+            },
+            {
+              id: "version-2",
+              nodeId: "script-revision-1",
+              title: "剧本 修改",
+              parentNodeId: "script-1",
+              parentTitleSnapshot: "剧本",
+              chatPrompt: "加强冲突",
+              chatResponse: "当前唯一版本",
+              content: "当前唯一版本",
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  const merged = canvas.nodes[0];
+  assert.strictEqual(isMergedCanvasNode(merged), true);
+  assert.strictEqual(merged.meta.primaryVersionId, "version-2");
+  assert.strictEqual(merged.meta.versions.length, 2);
+
+  const next = setCanvasMergedPrimaryVersion(canvas, "merged-1", "version-1");
+  const nextNode = next.nodes[0];
+  assert.strictEqual(nextNode.meta.primaryVersionId, "version-1");
+  assert.strictEqual(nextNode.title, "剧本");
+  assert.strictEqual(nextNode.content, "旧版");
+  assert.strictEqual(nextNode.meta.versions.filter((item) => item.isPrimary).length, 1);
+  assert.strictEqual(nextNode.meta.versions.find((item) => item.id === "version-1").isPrimary, true);
 });

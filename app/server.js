@@ -1011,6 +1011,7 @@ async function runWorkflowTask({ runDir, task, model, apiKey, scriptGrade = "B",
     return { ...config, content: existing, usage: null, model: "", reused: true };
   }
   const artifacts = await collectRunContext(runDir);
+  const skillPrompt = await taskSkillPrompt(task);
   const userContent = [
     `任务：${config.title}`,
     "",
@@ -1028,6 +1029,7 @@ async function runWorkflowTask({ runDir, task, model, apiKey, scriptGrade = "B",
     temperature: 0.7,
     messages: [
       { role: "system", content: config.system },
+      ...(skillPrompt ? [{ role: "system", content: skillPrompt }] : []),
       { role: "user", content: userContent },
     ],
   });
@@ -1037,15 +1039,20 @@ async function runWorkflowTask({ runDir, task, model, apiKey, scriptGrade = "B",
   return { ...config, content: result.content, usage: result.usage, model: result.model, reused: false };
 }
 
-async function runCanvasTask({ task, input, model, apiKey, scriptGrade = "B" }) {
+async function runCanvasTask({ task, input, model, apiKey, scriptGrade = "B", skillPrompt = "" }) {
   const config = taskConfig(task);
+  const resolvedSkillPrompt = skillPrompt || await taskSkillPrompt(task);
+  const systemMessages = [{ role: "system", content: config.system }];
+  if (resolvedSkillPrompt) {
+    systemMessages.push({ role: "system", content: resolvedSkillPrompt });
+  }
   const result = await deepseekChat({
     apiKey,
     provider: null,
     model,
     temperature: 0.7,
     messages: [
-      { role: "system", content: config.system },
+      ...systemMessages,
       {
         role: "user",
         content: [
@@ -1069,10 +1076,61 @@ async function runCanvasTask({ task, input, model, apiKey, scriptGrade = "B" }) 
   };
 }
 
+async function taskSkillPrompt(task) {
+  if (task === "storyboard-generate") {
+    return canvasStoryboardSkillPrompt();
+  }
+  return "";
+}
+
+async function canvasStoryboardSkillPrompt() {
+  const files = [
+    "skills/03-storyboard/storyboard-generate/SKILL.md",
+    "skills/03-storyboard/storyboard-generate/references/分镜生成规则.md",
+    "docs/分镜标准格式.md",
+  ];
+  const optionalFiles = [
+    "learning/accepted-rules/web-confirmed-preferences.md",
+  ];
+  const sections = [];
+  for (const relativePath of files) {
+    const text = await fsp.readFile(path.join(ROOT, relativePath), "utf8");
+    sections.push(`## ${relativePath}\n\n${text}`);
+  }
+  for (const relativePath of optionalFiles) {
+    const filePath = path.join(ROOT, relativePath);
+    if (!fs.existsSync(filePath)) continue;
+    const text = await fsp.readFile(filePath, "utf8");
+    sections.push(`## ${relativePath}\n\n${text}`);
+  }
+  return [
+    "【本轮本地技能】分镜生成（storyboard-generate）",
+    "以下内容来自本项目本地 skills 和分镜标准文档。画布一键生成分镜时必须优先遵守这些规则；如果与普通任务说明冲突，以本地分镜规则为准。",
+    "每次调用只生成当前分集的分镜脚本，不要合并其他集数，不要输出表格。",
+    sections.join("\n\n"),
+  ].join("\n\n");
+}
+
 function findCanvasNode(canvas, nodeId) {
   const node = canvas.nodes.find((item) => item.id === nodeId);
   if (!node) throw new Error("找不到画布节点");
   return node;
+}
+
+function isRevisionCanvasNode(node) {
+  return node?.meta?.variantKind === "revision";
+}
+
+function uniqueCanvasNodeTitle(canvas, baseTitle, excludeNodeId = "") {
+  const cleanBase = String(baseTitle || "").trim() || "未命名节点";
+  const used = new Set((canvas.nodes || [])
+    .filter((node) => node.id !== excludeNodeId)
+    .map((node) => String(node.title || "").trim())
+    .filter(Boolean));
+  if (!used.has(cleanBase)) return cleanBase;
+  let index = 2;
+  while (used.has(`${cleanBase} ${index}`)) index += 1;
+  return `${cleanBase} ${index}`;
 }
 
 async function generateCanvasScript(body) {
@@ -1089,7 +1147,7 @@ async function generateCanvasScript(body) {
   const scriptNode = {
     id: `script-${conversationId()}`,
     type: "script",
-    title: `${sourceNode.title || "小说"} 生成剧本`,
+    title: uniqueCanvasNodeTitle(canvas, `${sourceNode.title || "小说"} 生成剧本`),
     content: result.content,
     x: Number(sourceNode.x || 120) + 460,
     y: Number(sourceNode.y || 120),
@@ -1134,9 +1192,11 @@ async function generateCanvasStoryboards(body) {
   const generatedNodes = [];
   const usages = [];
   let lastModel = "";
+  const storyboardSkillPrompt = await canvasStoryboardSkillPrompt();
 
   for (let index = 0; index < selectedEpisodes.length; index += 1) {
     const episode = selectedEpisodes[index];
+    const plannedNode = plan.nodes[index];
     const result = await runCanvasTask({
       task: "storyboard-generate",
       input: [
@@ -1147,14 +1207,17 @@ async function generateCanvasStoryboards(body) {
       model: body.model,
       apiKey: body.apiKey,
       scriptGrade: normalizeScriptGrade(body.scriptGrade),
+      skillPrompt: storyboardSkillPrompt,
     });
     usages.push(result.usage);
     lastModel = result.model || lastModel;
+    const titleScope = { nodes: [...(canvas.nodes || []), ...generatedNodes] };
     generatedNodes.push({
-      ...plan.nodes[index],
+      ...plannedNode,
+      title: uniqueCanvasNodeTitle(titleScope, plannedNode.title),
       content: result.content,
       meta: {
-        ...plan.nodes[index].meta,
+        ...plannedNode.meta,
         model: result.model,
         usage: result.usage,
         generatedAt: new Date().toISOString(),
@@ -1170,6 +1233,97 @@ async function generateCanvasStoryboards(body) {
   }
   canvas = await saveCanvas(canvas);
   return { canvas, nodes: generatedNodes, model: lastModel, usage: aggregateUsage(usages) };
+}
+
+async function reviseCanvasNode(body) {
+  let canvas = await getCanvas(body.canvasId);
+  const node = findCanvasNode(canvas, body.nodeId);
+  if (!isRevisionCanvasNode(node) || node.meta?.variantKind !== "revision") {
+    throw new Error("只有通过修改功能创建的节点可以对话修改");
+  }
+  const parentNodeId = String(node.meta?.parentNodeId || "");
+  if (!parentNodeId) throw new Error("修改节点缺少父级来源");
+  const parentNode = findCanvasNode(canvas, parentNodeId);
+  if (node.meta?.chatLocked) throw new Error("该修改节点已经完成一次对话，不能再次修改");
+  const prompt = String(body.prompt || "").trim();
+  if (!prompt) throw new Error("请输入修改要求");
+  if (!["novel", "script", "storyboard"].includes(node.type)) {
+    throw new Error("该节点类型暂不支持修改对话");
+  }
+
+  const skillPrompt = node.type === "storyboard" ? await canvasStoryboardSkillPrompt() : "";
+  const messages = [
+    {
+      role: "system",
+      content: [
+        "你是 AI 漫剧画布的节点修改助手。",
+        "你只能根据父级节点内容和用户的修改要求，输出修改后的完整节点内容。",
+        "不要输出解释、寒暄、总结或 Markdown 标题；不要只输出差异说明。",
+      ].join("\n"),
+    },
+  ];
+  if (skillPrompt) messages.push({ role: "system", content: skillPrompt });
+  messages.push({
+    role: "user",
+    content: [
+      `修改节点类型：${canvasTypeText(node.type)}`,
+      `修改节点标题：${node.title || ""}`,
+      `父级节点ID：${parentNodeId}`,
+      `父级节点标题：${parentNode.title || node.meta?.parentTitleSnapshot || ""}`,
+      "",
+      "父级节点内容：",
+      parentNode.content || "",
+      "",
+      "用户修改要求：",
+      prompt,
+    ].join("\n"),
+  });
+
+  const result = await deepseekChat({
+    apiKey: body.apiKey,
+    provider: null,
+    model: body.model,
+    temperature: 0.55,
+    messages,
+  });
+  const revisedAt = new Date().toISOString();
+  canvas = {
+    ...canvas,
+    nodes: (canvas.nodes || []).map((item) => item.id === node.id
+      ? {
+          ...item,
+          content: result.content,
+          meta: {
+            ...(item.meta || {}),
+            variantKind: "revision",
+            parentNodeId,
+            parentTitleSnapshot: parentNode.title || item.meta?.parentTitleSnapshot || "",
+            chatPrompt: prompt,
+            chatResponse: result.content,
+            chatLocked: true,
+            revisedAt,
+            model: result.model,
+            usage: result.usage,
+          },
+        }
+      : item),
+  };
+  canvas = await saveCanvas(canvas);
+  return {
+    canvas,
+    node: findCanvasNode(canvas, node.id),
+    model: result.model,
+    usage: result.usage,
+  };
+}
+
+function canvasTypeText(type) {
+  return {
+    novel: "小说",
+    script: "剧本",
+    storyboard: "分镜脚本",
+    label: "标识",
+  }[type] || "节点";
 }
 
 function workflowSkillRoute(workflowIntent) {
@@ -1366,6 +1520,7 @@ async function generateWithDeepSeek(body) {
   const artifacts = await collectRunContext(runDir);
   const input = String(body.input || "").trim();
   const scriptGrade = normalizeScriptGrade(body.scriptGrade);
+  const skillPrompt = await taskSkillPrompt(body.task);
   const userContent = [
     `任务：${config.title}`,
     "",
@@ -1385,6 +1540,7 @@ async function generateWithDeepSeek(body) {
     temperature: Number(body.temperature || 0.7),
     messages: [
       { role: "system", content: config.system },
+      ...(skillPrompt ? [{ role: "system", content: skillPrompt }] : []),
       { role: "user", content: userContent },
     ],
   });
@@ -1651,6 +1807,9 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/canvas/generate-storyboards") {
     return sendJson(res, 200, await generateCanvasStoryboards(body));
+  }
+  if (req.method === "POST" && url.pathname === "/api/canvas/revise-node") {
+    return sendJson(res, 200, await reviseCanvasNode(body));
   }
   if (req.method === "POST" && url.pathname === "/api/chat") {
     return sendJson(res, 200, await chatWithAssistant(body));

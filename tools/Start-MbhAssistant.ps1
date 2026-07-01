@@ -1,5 +1,6 @@
 param(
-  [int]$Port = 17877
+  [int]$Port = 17877,
+  [switch]$NoOpenBrowser
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,6 +8,15 @@ $ErrorActionPreference = "Stop"
 function Write-Step {
   param([string]$Message)
   Write-Host "[Mbh Assistant] $Message"
+}
+
+function Open-AssistantPage {
+  param([string]$TargetUrl)
+  if ($NoOpenBrowser) {
+    Write-Step "Browser launch skipped."
+    return
+  }
+  Start-Process $TargetUrl
 }
 
 function Test-AssistantHttp {
@@ -80,8 +90,8 @@ if (!$node) {
 Write-Step "Node.js is ready: $node"
 
 if (Test-AssistantHttp -TargetPort $Port) {
-  Write-Step "Service is already running. Opening the page."
-  Start-Process $url
+  Write-Step "Service is already running."
+  Open-AssistantPage -TargetUrl $url
   exit 0
 }
 
@@ -128,5 +138,5 @@ if (!$ready) {
   exit 1
 }
 
-Write-Step "Service is ready. Opening the page."
-Start-Process $url
+Write-Step "Service is ready."
+Open-AssistantPage -TargetUrl $url
