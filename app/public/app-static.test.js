@@ -309,6 +309,7 @@ test("learning record renderer keeps novice fields in the default card", () => {
   const failureSource = extractFunction("renderLearningFailureSummary");
   const failureStageSource = extractFunction("readableLearningFailureStage");
   const failureValueSource = extractFunction("readableLearningFailureValue");
+  const shortEnglishFailureSource = extractFunction("isShortEnglishLearningFailureValue");
   const keySource = extractFunction("learningRecordKey");
   const failedSource = extractFunction("isFailedLearningRecord");
 
@@ -355,7 +356,12 @@ test("learning record renderer keeps novice fields in the default card", () => {
   assert.match(failureValueSource, /isTechnicalLearningFailureValue/);
   assert.match(failureValueSource, /Bearer/);
   assert.match(failureValueSource, /api\[_-\]\?key\|token\|secret/);
+  assert.match(failureValueSource, /hasChineseText/);
+  assert.match(failureValueSource, /isShortEnglishLearningFailureValue/);
+  assert.match(shortEnglishFailureSource, /disk full/);
   assert.match(keySource, /record\?\.recordId/);
+  assert.match(keySource, /learning-record-/);
+  assert.match(keySource, /learningRecordKeyHash/);
   assert.match(failedSource, /record\?\.displayStatus\s*\|\|\s*record\?\.status/);
   assert.doesNotMatch(renderRecordSource, /record\.displayStatus\s*\|\|\s*record\.status/);
   assert.doesNotMatch(renderRecordSource, /record\.summary \|\| record\.rawTrigger \|\| record\.topicKey/);
@@ -363,6 +369,12 @@ test("learning record renderer keeps novice fields in the default card", () => {
   assert.doesNotMatch(renderRecordSource, /record\.tokenUsage/);
   assert.doesNotMatch(renderRecordSource, /stack/);
   assert.doesNotMatch(failureSource, /const stage = readableLearningFailureValue/);
+  assert.doesNotMatch(failureSource, /record\.affectsGeneration/);
+  assert.doesNotMatch(failureStageSource, /:\s*text/);
+  assert.doesNotMatch(failureValueSource, /return sanitized \|\| fallback/);
+  assert.doesNotMatch(keySource, /record\?\.summary/);
+  assert.doesNotMatch(keySource, /record\?\.rawTrigger/);
+  assert.doesNotMatch(keySource, /record\?\.advanced\?\.topicKey/);
   assert.doesNotMatch(failureSource, /record\.advanced\?\.error\?\.message,[\s\S]*未返回明确原因/);
   assert.doesNotMatch(failureSource, /learningRecordLine\("失败阶段",\s*record\.advanced\?\.error\?\.stage\)/);
   assert.doesNotMatch(renderRecordSource, /formatLearningSource\(record\.sourceType\)/);

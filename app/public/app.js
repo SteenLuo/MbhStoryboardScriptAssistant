@@ -6271,7 +6271,7 @@ function renderLearningFailureSummary(record) {
     <div class="learning-record-failure" role="note" aria-label="失败状态">
       ${learningRecordLine("失败阶段", stage)}
       ${learningRecordLine("原因", reason)}
-      ${learningRecordLine("是否影响生成", record.generationImpactText || (record.affectsGeneration ? "可能影响生成" : "未影响生成"))}
+      ${learningRecordLine("是否影响生成", record.generationImpactText || "未返回影响生成说明")}
       ${learningRecordLine("下一步", record.nextStepText || "可以点“带引用去纠正”，回到对话里补充说明。")}
     </div>
   `;
@@ -6293,19 +6293,23 @@ function readableLearningFailureStage(value, fallback) {
     "regression-evaluation": "评测学习样例",
     eval: "评测学习样例",
   };
-  const text = readableLearningFailureValue(value, "");
+  const text = String(value || "").trim();
   if (!text) return fallback;
-  if (hasChineseText(text)) return text;
+  if (hasChineseText(text)) return text.split(/\r?\n/).find((line) => line.trim()) || fallback;
   const normalized = text.toLowerCase().replace(/_/g, "-").replace(/\s+/g, "-");
   if (learningFailureStageLabels[normalized]) return learningFailureStageLabels[normalized];
-  return isInternalLearningCode(text) ? "学习流程处理" : text;
+  return "学习流程处理";
 }
 
 function readableLearningFailureValue(value, fallback, options = {}) {
   const text = String(value || "").trim();
   if (!text) return fallback;
   const firstLine = text.split(/\r?\n/).find((line) => line.trim()) || "";
-  if (options.hideTechnical && isTechnicalLearningFailureValue(firstLine)) {
+  if (options.hideTechnical && (
+    !hasChineseText(firstLine)
+    || isShortEnglishLearningFailureValue(firstLine)
+    || isTechnicalLearningFailureValue(firstLine)
+  )) {
     return "学习流程处理失败，详情可在高级详情中查看。";
   }
   const sanitized = firstLine
@@ -6314,7 +6318,10 @@ function readableLearningFailureValue(value, fallback, options = {}) {
     .replace(/\b(api[_-]?key|token|secret)\b\s*[:=]\s*\S+/gi, "$1 已隐藏")
     .replace(/\b[A-Za-z]:\\[^\s"'<>]+/g, "已隐藏路径")
     .replace(/\/(?:Users|home|var|tmp|app|src|mnt)\/[^\s"'<>]+/g, "已隐藏路径");
-  return sanitized || fallback;
+  if (options.hideTechnical && !hasChineseText(sanitized)) {
+    return "学习流程处理失败，详情可在高级详情中查看。";
+  }
+  return sanitized ? sanitized : fallback;
 }
 
 function hasChineseText(value) {
@@ -6324,6 +6331,14 @@ function hasChineseText(value) {
 function isInternalLearningCode(value) {
   const text = String(value || "").trim();
   return !hasChineseText(text) && text.length <= 80 && /^[a-z0-9]+(?:[-_][a-z0-9]+){1,6}$/i.test(text);
+}
+
+function isShortEnglishLearningFailureValue(value) {
+  const text = String(value || "").trim();
+  if (!text || hasChineseText(text)) return false;
+  const commonShortEnglishFailures = /^(?:disk full|permission denied|timeout|network error|request failed)$/i;
+  return commonShortEnglishFailures.test(text)
+    || (text.length <= 80 && /^[a-z0-9][a-z0-9\s._:/\\-]*$/i.test(text));
 }
 
 function isTechnicalLearningFailureValue(value) {
@@ -6408,13 +6423,36 @@ function buildLearningCorrectionReference(record, payload = {}) {
   return [title, ...ids].filter(Boolean).join("；");
 }
 
+const learningRecordKeyFallbacks = new WeakMap();
+let learningRecordKeyFallbackCounter = 0;
+
 function learningRecordKey(record) {
-  return String(record?.recordId || record?.eventId || record?.advanced?.eventId || record?.advanced?.ruleId || [
-    record?.summary,
-    record?.rawTrigger,
-    record?.advanced?.topicKey,
+  const keyParts = [
+    record?.recordId,
+    record?.eventId,
+    record?.advanced?.eventId,
+    record?.advanced?.ruleId,
     record?.createdAt,
-  ].filter(Boolean).join("|") || "learning-record");
+  ].filter(Boolean);
+  let keyInput = keyParts.length ? keyParts.join("|") : "";
+  if (!keyInput && record && typeof record === "object") {
+    if (!learningRecordKeyFallbacks.has(record)) {
+      learningRecordKeyFallbackCounter += 1;
+      learningRecordKeyFallbacks.set(record, `fallback-${learningRecordKeyFallbackCounter}`);
+    }
+    keyInput = learningRecordKeyFallbacks.get(record);
+  }
+  return `learning-record-${learningRecordKeyHash(keyInput || "missing")}`;
+}
+
+function learningRecordKeyHash(value) {
+  const text = String(value || "");
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36).slice(0, 10);
 }
 
 function isFailedLearningRecord(record) {
