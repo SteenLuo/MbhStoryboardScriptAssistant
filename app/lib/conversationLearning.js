@@ -306,7 +306,13 @@ function extractExplicitRuleLearningInput({ conversation, userMessage, assistant
     summary: summarizeExplicitRule(ruleText),
     capability: inferCapabilityForExplicitRule(`${ruleText}\n${text}`, assistantMessage?.skillRoute),
     sourceType: "conversation",
+    sourceEventIds: [],
+    landingIds: [],
+    outputId: String(assistantMessage?.outputId || assistantMessage?.id || ""),
+    projectId: String(conversation?.projectId || ""),
+    canvasId: String(conversation?.canvasId || userMessage?.canvasId || ""),
     conversationId: String(conversation?.id || ""),
+    learningMode: "overall",
     tokenUsage: assistantMessage?.usage || null,
   };
 }

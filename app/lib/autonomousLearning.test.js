@@ -33,11 +33,22 @@ test("learnExplicitRule publishes a valid rule into the current ruleset", async 
   const ruleset = await readCurrentRuleset(root);
   const events = await listLearningEvents(root);
 
-  assert.strictEqual(result.event.status, "已生效");
+  assert.equal(result.event.learningMode, "overall");
+  assert.equal(result.event.internalStatus, "landed");
+  assert.equal(result.event.jobStatus, "completed");
+  assert.equal(result.event.landingType, "current-rule");
   assert.strictEqual(ruleset.rules.length, 1);
   assert.strictEqual(ruleset.rules[0].topicKey, "storyboard.dialogue.length");
   assert.match(ruleset.rules[0].content, /20 字以内/);
-  assert.strictEqual(events[0].status, "已生效");
+  assert.strictEqual(events[0].internalStatus, "landed");
+  assert.strictEqual(events[0].jobStatus, "completed");
+  assert.strictEqual(events[0].landingType, "current-rule");
+
+  const rawRecords = (await fsp.readFile(path.join(root, "learning/events.jsonl"), "utf8"))
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => JSON.parse(line));
+  assert.ok(rawRecords.every((record) => !Object.hasOwn(record, "status")));
 });
 
 test("learnExplicitRule covers older same-topic events and keeps only the latest active rule", async () => {
@@ -69,7 +80,7 @@ test("learnExplicitRule covers older same-topic events and keeps only the latest
 
   assert.strictEqual(activeRules.length, 1);
   assert.match(activeRules[0].content, /15 字以内/);
-  assert.strictEqual(events.find((event) => event.eventId === "event-old").status, "已被覆盖");
+  assert.strictEqual(events.find((event) => event.eventId === "event-old").internalStatus, "covered");
   assert.strictEqual(events.find((event) => event.eventId === "event-old").coveredByEventId, "event-new");
 });
 
@@ -99,11 +110,12 @@ test("learnExplicitRule records failure without replacing last-good ruleset", as
   const ruleset = await readCurrentRuleset(root);
   const events = await listLearningEvents(root, { includeCovered: true });
 
-  assert.strictEqual(failed.event.status, "失败");
+  assert.strictEqual(failed.event.internalStatus, "failed");
+  assert.strictEqual(failed.event.jobStatus, "failed");
   assert.match(failed.event.error.message, /规则内容为空/);
   assert.strictEqual(ruleset.rules.filter((rule) => rule.status === "active").length, 1);
   assert.match(ruleset.rules[0].content, /20 字以内/);
-  assert.strictEqual(events.find((event) => event.eventId === "event-bad").status, "失败");
+  assert.strictEqual(events.find((event) => event.eventId === "event-bad").internalStatus, "failed");
 });
 
 test("learnExplicitRule notifies failure and withdraws stale failure when a newer same-topic rule succeeds", async () => {
@@ -138,7 +150,7 @@ test("learnExplicitRule notifies failure and withdraws stale failure when a newe
   const events = await listLearningEvents(root, { includeCovered: true });
   notifications = await listNotifications(root, { includeHandled: true });
 
-  assert.strictEqual(events.find((event) => event.eventId === "event-failed").status, "已被覆盖");
+  assert.strictEqual(events.find((event) => event.eventId === "event-failed").internalStatus, "covered");
   assert.strictEqual(events.find((event) => event.eventId === "event-failed").coveredByEventId, "event-success");
   assert.strictEqual(notifications.find((item) => item.sourceId === "event-failed").status, "withdrawn");
 });

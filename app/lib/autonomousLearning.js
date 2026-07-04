@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
+const { normalizeLearningEvent } = require("./learningContracts");
 const { addNotification, withdrawNotificationsForSource } = require("./notifications");
 
 const ACTIVE_STATUS = "active";
@@ -26,21 +27,28 @@ async function learnExplicitRule(root, input = {}, options = {}) {
   const createdAt = now();
   const eventId = input.eventId || idSource();
   const topicKey = inferTopicKey(input);
-  const baseEvent = {
+  const baseEvent = normalizeEvent({
     eventId,
     topicKey,
+    conflictKey: topicKey,
     sourceType: input.sourceType || "conversation",
+    sourceEventIds: input.sourceEventIds,
+    landingIds: input.landingIds,
+    outputId: input.outputId || "",
     projectId: input.projectId || "",
     canvasId: input.canvasId || "",
     conversationId: input.conversationId || "",
-    status: "处理中",
+    learningMode: typeof input.learningMode === "string" ? input.learningMode : "overall",
+    internalStatus: "received",
+    jobStatus: "queued",
+    landingType: input.landingType || "",
     summary: String(input.summary || "").trim(),
     rawTrigger: String(input.rawTrigger || "").trim(),
     capability: String(input.capability || "").trim() || capabilityFromTopic(topicKey),
     tokenUsage: normalizeUsage(input.tokenUsage),
     createdAt,
     updatedAt: createdAt,
-  };
+  });
   await appendLearningEvent(root, baseEvent);
 
   try {
@@ -59,7 +67,8 @@ async function learnExplicitRule(root, input = {}, options = {}) {
     const coveredEvents = existingEvents.filter((event) =>
       event.eventId !== eventId &&
       event.topicKey === topicKey &&
-      !["已被覆盖", "失败"].includes(event.status)
+      event.internalStatus !== "covered" &&
+      event.internalStatus !== "failed"
     );
 
     for (const event of [
@@ -67,13 +76,14 @@ async function learnExplicitRule(root, input = {}, options = {}) {
       ...existingEvents.filter((item) =>
         item.eventId !== eventId &&
         item.topicKey === topicKey &&
-        item.status === "失败" &&
+        item.internalStatus === "failed" &&
         !coveredEvents.some((covered) => covered.eventId === item.eventId)
       ),
     ]) {
       await appendLearningEvent(root, {
         ...event,
-        status: "已被覆盖",
+        internalStatus: "covered",
+        jobStatus: "completed",
         coveredByEventId: eventId,
         updatedAt: publishTime,
       });
@@ -104,26 +114,30 @@ async function learnExplicitRule(root, input = {}, options = {}) {
     validateRuleset(nextRuleset);
     await writeCurrentRuleset(root, nextRuleset);
 
-    const event = {
+    const event = normalizeEvent({
       ...baseEvent,
-      status: "已生效",
+      internalStatus: "landed",
+      jobStatus: "completed",
+      landingType: "current-rule",
+      landingIds: [newRuleId],
       ruleId: newRuleId,
       updatedAt: publishTime,
-    };
+    });
     await appendLearningEvent(root, event);
     return { event, ruleset: nextRuleset };
   } catch (error) {
     const failedAt = now();
-    const event = {
+    const event = normalizeEvent({
       ...baseEvent,
-      status: "失败",
+      internalStatus: "failed",
+      jobStatus: "failed",
       error: {
         stage: "publish-current-ruleset",
         code: "RULESET_PUBLISH_FAILED",
         message: error.message || String(error),
       },
       updatedAt: failedAt,
-    };
+    });
     await appendLearningEvent(root, event);
     if (options.notifyOnFailure) {
       await addNotification(root, {
@@ -225,7 +239,7 @@ async function listLearningEvents(root, options = {}) {
     latest.set(record.eventId, { ...previous, ...record });
   }
   return Array.from(latest.values())
-    .filter((event) => options.includeCovered || event.status !== "已被覆盖")
+    .filter((event) => options.includeCovered || event.internalStatus !== "covered")
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
 }
 
@@ -249,8 +263,10 @@ async function readLearningEventRecords(root) {
 
 async function appendLearningEvent(root, event) {
   const file = eventsFile(root);
+  const normalized = normalizeEvent(event);
+  if (!normalized) throw new Error("learning event requires eventId");
   await fsp.mkdir(path.dirname(file), { recursive: true });
-  await fsp.appendFile(file, `${JSON.stringify(normalizeEvent(event))}\n`, "utf8");
+  await fsp.appendFile(file, `${JSON.stringify(normalized)}\n`, "utf8");
 }
 
 function validateRuleset(ruleset) {
@@ -273,26 +289,14 @@ function validateRuleset(ruleset) {
 
 function normalizeEvent(event) {
   if (!event || typeof event !== "object") return null;
-  const eventId = String(event.eventId || "").trim();
-  if (!eventId) return null;
-  return {
-    eventId,
-    topicKey: String(event.topicKey || "general").trim(),
-    sourceType: String(event.sourceType || "").trim(),
-    projectId: String(event.projectId || "").trim(),
-    canvasId: String(event.canvasId || "").trim(),
-    conversationId: String(event.conversationId || "").trim(),
-    status: String(event.status || "处理中").trim(),
-    summary: String(event.summary || "").trim(),
-    rawTrigger: String(event.rawTrigger || "").trim(),
-    capability: String(event.capability || "").trim(),
-    tokenUsage: normalizeUsage(event.tokenUsage),
-    ruleId: String(event.ruleId || "").trim(),
-    coveredByEventId: String(event.coveredByEventId || "").trim(),
-    error: event.error && typeof event.error === "object" ? event.error : null,
-    createdAt: String(event.createdAt || event.updatedAt || new Date().toISOString()),
-    updatedAt: String(event.updatedAt || event.createdAt || new Date().toISOString()),
-  };
+  try {
+    return {
+      ...normalizeLearningEvent(event),
+      tokenUsage: normalizeUsage(event.tokenUsage),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function normalizeRule(rule) {
