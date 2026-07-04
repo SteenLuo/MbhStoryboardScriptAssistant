@@ -6176,7 +6176,7 @@ function renderLearningTabCounts(data) {
   const status = $("learningStatus");
   if (!status) return;
   if (!records.length && !rules.length) {
-    status.textContent = "还没有沉淀学习记录。后续在对话、样例学习或画布归档中产生的结果会出现在这里。";
+    status.textContent = "还没有学习记录；当你说以后都这样、投喂样例或归档画布后，会出现在这里";
     status.hidden = false;
     return;
   }
@@ -6262,11 +6262,10 @@ function renderLearningFailureSummary(record) {
     "未返回明确阶段",
   );
   const userFacingReason = record.failureReason || record.reason || record.error?.userMessage || record.advanced?.error?.userMessage;
-  const internalReason = record.error?.message || record.advanced?.error?.message;
   const reason = readableLearningFailureValue(
-    userFacingReason || internalReason,
-    "未返回明确原因",
-    { hideTechnical: !userFacingReason },
+    userFacingReason,
+    "学习流程处理失败，详情可在高级详情中查看。",
+    { hideTechnical: true },
   );
   return `
     <div class="learning-record-failure" role="note" aria-label="失败状态">

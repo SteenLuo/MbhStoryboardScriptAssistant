@@ -343,6 +343,8 @@ test("learning record renderer keeps novice fields in the default card", () => {
   assert.match(failureSource, /下一步/);
   assert.match(failureSource, /readableLearningFailureStage/);
   assert.match(failureSource, /record\.failureReason\s*\|\|\s*record\.reason\s*\|\|\s*record\.error\?\.userMessage\s*\|\|\s*record\.advanced\?\.error\?\.userMessage/);
+  assert.doesNotMatch(failureSource, /internalReason/);
+  assert.doesNotMatch(failureSource, /readableLearningFailureValue\([\s\S]*internalReason/);
   assert.match(failureStageSource, /write-learning-evidence/);
   assert.match(failureStageSource, /publish-current-ruleset/);
   assert.match(failureStageSource, /hard-rule-validation/);
@@ -365,6 +367,7 @@ test("learning record renderer keeps novice fields in the default card", () => {
   assert.doesNotMatch(failureSource, /learningRecordLine\("失败阶段",\s*record\.advanced\?\.error\?\.stage\)/);
   assert.doesNotMatch(renderRecordSource, /formatLearningSource\(record\.sourceType\)/);
   assert.doesNotMatch(renderRecordSource, /formatLearningTokenUsage\(record\.tokenUsage\)/);
+  assert.doesNotMatch(appSource, /还没有沉淀学习记录。后续在对话、样例学习或画布归档中产生的结果会出现在这里。/);
   assert.match(appSource, /还没有学习记录；当你说以后都这样、投喂样例或归档画布后，会出现在这里/);
 });
 
