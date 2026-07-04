@@ -24,7 +24,7 @@ test("canvas storyboard generation loads the local storyboard skill context", ()
   const promptSource = extractFunction("canvasStoryboardSkillPrompt");
   const generateSource = extractFunction("generateCanvasStoryboards");
 
-  assert.match(contextSource, /loadLocalSkillContext\(ROOT,\s*findLocalSkillRoute\("storyboard-generate"\)/);
+  assert.match(contextSource, /loadLocalSkillContext\(BUSINESS_ROOT,\s*findLocalSkillRoute\("storyboard-generate"\)/);
   assert.match(contextSource, /skillContext\.prompt/);
   assert.match(contextSource, /findLocalSkillRoute\("storyboard-generate"\)/);
   assert.match(contextSource, /routeLocalSkill\("分镜"\)/);
@@ -168,9 +168,30 @@ test("notification API exposes unread queue and handling endpoint", () => {
 
   assert.match(serverSource, /require\("\.\/lib\/notifications"\)/);
   assert.match(apiSource, /\/api\/notifications/);
-  assert.match(apiSource, /listNotifications\(ROOT\)/);
+  assert.match(apiSource, /listNotifications\(BUSINESS_ROOT\)/);
   assert.match(apiSource, /\/api\/notifications\/handle/);
-  assert.match(apiSource, /handleNotification\(ROOT/);
+  assert.match(apiSource, /handleNotification\(BUSINESS_ROOT/);
+});
+
+test("acceptance fixture mode separates code root from mutable business data root", () => {
+  const apiSource = extractFunction("handleApi");
+  const correctionSource = extractFunction("handleLearningCorrection");
+  const archiveSource = extractFunction("archiveCanvasRecord");
+  const learningCycleSource = extractFunction("runLearningCycle");
+
+  assert.match(serverSource, /const ACCEPTANCE_ROOT = process\.env\.MBH_ACCEPTANCE_ROOT/);
+  assert.match(serverSource, /const BUSINESS_ROOT = ACCEPTANCE_ROOT \|\| ROOT/);
+  assert.match(serverSource, /const RUNS_DIR = path\.join\(BUSINESS_ROOT,\s*"runs"\)/);
+  assert.match(serverSource, /const DATA_DIR = path\.join\(BUSINESS_ROOT,\s*"app",\s*"data"\)/);
+  assert.match(apiSource, /acceptanceMode:\s*ACCEPTANCE_MODE/);
+  assert.match(apiSource, /acceptanceRoot:\s*ACCEPTANCE_ROOT/);
+  assert.match(apiSource, /buildLearningLibrary\(BUSINESS_ROOT\)/);
+  assert.match(apiSource, /listNotifications\(BUSINESS_ROOT\)/);
+  assert.match(apiSource, /updateCurrentRuleStatus\(BUSINESS_ROOT/);
+  assert.match(apiSource, /handleNotification\(BUSINESS_ROOT/);
+  assert.match(correctionSource, /applyLearningCorrectionRequest\(BUSINESS_ROOT,\s*body/);
+  assert.match(archiveSource, /recordArchiveLearningEvidence\(BUSINESS_ROOT/);
+  assert.match(learningCycleSource, /"-Root",\s*BUSINESS_ROOT/);
 });
 
 test("learning library API exposes fixed D7 contract fields", () => {
@@ -180,12 +201,12 @@ test("learning library API exposes fixed D7 contract fields", () => {
   assert.match(serverSource, /require\("\.\/lib\/learningCorrection"\)/);
   assert.match(serverSource, /updateCurrentRuleStatus/);
   assert.match(apiSource, /\/api\/learning-library/);
-  assert.match(apiSource, /buildLearningLibrary\(ROOT\)/);
+  assert.match(apiSource, /buildLearningLibrary\(BUSINESS_ROOT\)/);
   for (const field of ["records", "impactItems", "sampleItems", "evalItems", "skillItems", "accessIssues"]) {
     assert.match(learningLibrarySource, new RegExp(`${field}:`));
   }
   assert.match(apiSource, /\/api\/learning-rules\/status/);
-  assert.match(apiSource, /updateCurrentRuleStatus\(ROOT/);
+  assert.match(apiSource, /updateCurrentRuleStatus\(BUSINESS_ROOT/);
 });
 
 test("learning correction API writes referenced correction events without blind rule edits", () => {
@@ -195,7 +216,7 @@ test("learning correction API writes referenced correction events without blind 
   assert.match(apiSource, /\/api\/learning-corrections/);
   assert.match(apiSource, /handleLearningCorrection\(body\)/);
   assert.match(serverSource, /applyLearningCorrectionRequest/);
-  assert.match(correctionSource, /applyLearningCorrectionRequest\(ROOT,\s*body/);
+  assert.match(correctionSource, /applyLearningCorrectionRequest\(BUSINESS_ROOT,\s*body/);
   assert.match(correctionSource, /appendLearningEvent/);
   assert.match(correctionSource, /updateCurrentRuleStatus/);
   assert.match(correctionSource, /buildLearningLibrary/);
@@ -245,7 +266,7 @@ test("canvas archive writes learning evidence after save and records evidence fa
 
   assert.match(serverSource, /require\("\.\/lib\/learningEvidence"\)/);
   assert.match(archiveSource, /const archived = await saveCanvas/);
-  assert.match(archiveSource, /recordArchiveLearningEvidence\(ROOT/);
+  assert.match(archiveSource, /recordArchiveLearningEvidence\(BUSINESS_ROOT/);
   assert.match(archiveSource, /learningEvidence/);
   assert.match(archiveSource, /ok:\s*true/);
 });

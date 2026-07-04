@@ -25,10 +25,13 @@ const { analyzeCanvasArchiveReadiness } = require("./lib/canvasArchive");
 const { applyStoryboardHardRuleValidation, isStoryboardValidationResolved, validateStoryboardContent } = require("./lib/storyboardValidation");
 
 const ROOT = path.resolve(__dirname, "..");
+const ACCEPTANCE_ROOT = process.env.MBH_ACCEPTANCE_ROOT ? path.resolve(process.env.MBH_ACCEPTANCE_ROOT) : "";
+const ACCEPTANCE_MODE = Boolean(ACCEPTANCE_ROOT);
+const BUSINESS_ROOT = ACCEPTANCE_ROOT || ROOT;
 const PUBLIC_DIR = path.join(__dirname, "public");
-const RUNS_DIR = path.join(ROOT, "runs");
+const RUNS_DIR = path.join(BUSINESS_ROOT, "runs");
 const CONFIG_DIR = path.join(__dirname, "config");
-const DATA_DIR = path.join(__dirname, "data");
+const DATA_DIR = path.join(BUSINESS_ROOT, "app", "data");
 const CONVERSATIONS_DIR = path.join(DATA_DIR, "conversations");
 const CANVASES_DIR = path.join(DATA_DIR, "canvases");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -455,7 +458,7 @@ async function archiveCanvasRecord(body) {
     archivedAt,
     archiveReadiness: archiveCheck,
   }, { allowArchived: true });
-  const learningEvidence = await recordArchiveLearningEvidence(ROOT, {
+  const learningEvidence = await recordArchiveLearningEvidence(BUSINESS_ROOT, {
     canvas: archived,
     archiveCheck,
     outputId: body.outputId || "",
@@ -593,7 +596,7 @@ async function saveMessageAttachments(conversation, attachments = []) {
       const targetName = `${timestamp()}-${index + 1}-${fileName}`;
       const targetPath = path.join(uploadDir, targetName);
       await fsp.writeFile(targetPath, buffer);
-      item.path = path.relative(ROOT, targetPath).replace(/\\/g, "/");
+      item.path = path.relative(BUSINESS_ROOT, targetPath).replace(/\\/g, "/");
       item.size = buffer.length;
     }
 
@@ -927,7 +930,7 @@ async function chatWithAssistant(body) {
     };
   }
 
-  const skillContext = skillRoute ? await loadLocalSkillContext(ROOT, skillRoute) : null;
+  const skillContext = skillRoute ? await loadLocalSkillContext(BUSINESS_ROOT, skillRoute) : null;
   const appSettings = await readAppSettings();
   const historyMessages = selectHistoryForIntent(
     conversation.messages.filter((item) => item.role === "user" || item.role === "assistant"),
@@ -993,7 +996,7 @@ async function handleLearningCompose({ conversation, userMessage, chatIntent, sk
     skillRoute,
   });
   try {
-    const learningRecord = await writeConversationLearningRecord(ROOT, {
+    const learningRecord = await writeConversationLearningRecord(BUSINESS_ROOT, {
       conversation,
       userMessage,
       assistantMessage,
@@ -1037,7 +1040,7 @@ async function applyAutonomousConversationLearning({ conversation, userMessage, 
     assistantMessage,
   });
   if (!learningInput) return null;
-  const result = await learnExplicitRule(ROOT, learningInput, {
+  const result = await learnExplicitRule(BUSINESS_ROOT, learningInput, {
     notifyOnFailure: true,
   });
   assistantMessage.learningEvent = result.event?.eventId || "";
@@ -1298,7 +1301,7 @@ async function canvasStoryboardSkillPrompt() {
 }
 
 async function canvasStoryboardSkillContext() {
-  const skillContext = await loadLocalSkillContext(ROOT, findLocalSkillRoute("storyboard-generate") || routeLocalSkill("分镜"));
+  const skillContext = await loadLocalSkillContext(BUSINESS_ROOT, findLocalSkillRoute("storyboard-generate") || routeLocalSkill("分镜"));
   const standardPath = "docs/分镜标准格式.md";
   const standardText = await fsp.readFile(path.join(ROOT, standardPath), "utf8");
   const prompt = [
@@ -1462,7 +1465,7 @@ async function recordStoryboardHardRuleFailure(input = {}) {
   const firstRule = appliedRules[0] || currentRulesUsed[0] || {};
   const failedAt = new Date().toISOString();
   const eventId = `hard-rule-validation-failed-${safeEventSegment(input.canvasId)}-${safeEventSegment(input.outputId)}-${Date.now()}`;
-  await appendLearningEvent(ROOT, {
+  await appendLearningEvent(BUSINESS_ROOT, {
     eventId,
     internalStatus: "failed",
     jobStatus: "failed",
@@ -1949,7 +1952,7 @@ async function archiveLearningManually(body) {
   const date = timestamp().slice(0, 8).replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3");
   const suffix = Math.random().toString(16).slice(2, 8);
   const archiveFile = `manual-learning-archive-${date}-${suffix}.md`;
-  const learningDir = path.join(ROOT, "learning", "conversation-records");
+  const learningDir = path.join(BUSINESS_ROOT, "learning", "conversation-records");
   await fsp.mkdir(learningDir, { recursive: true });
   await fsp.writeFile(path.join(learningDir, archiveFile), markdown, "utf8");
   await fsp.writeFile(path.join(runDir, archiveFile), markdown, "utf8");
@@ -1963,7 +1966,7 @@ async function archiveLearningManually(body) {
 
 async function learningStatus() {
   const countFiles = async (dir) => {
-    const full = path.join(ROOT, dir);
+    const full = path.join(BUSINESS_ROOT, dir);
     if (!fs.existsSync(full)) return 0;
     const entries = await fsp.readdir(full, { withFileTypes: true });
     return entries.filter((entry) => entry.isFile() && entry.name !== "README.md").length;
@@ -1978,7 +1981,7 @@ async function learningStatus() {
 }
 
 async function handleLearningCorrection(body = {}) {
-  return applyLearningCorrectionRequest(ROOT, body, {
+  return applyLearningCorrectionRequest(BUSINESS_ROOT, body, {
     appendLearningEvent,
     updateCurrentRuleStatus,
     buildLearningLibrary,
@@ -1997,7 +2000,7 @@ async function runLearningCycle() {
     "-File",
     script,
     "-Root",
-    ROOT,
+    BUSINESS_ROOT,
     "-Date",
     new Date().toISOString().slice(0, 10),
     "-Force",
@@ -2012,6 +2015,8 @@ async function handleApi(req, res, url) {
     const appSettings = await readAppSettings();
     return sendJson(res, 200, {
       ok: true,
+      acceptanceMode: ACCEPTANCE_MODE,
+      acceptanceRoot: ACCEPTANCE_ROOT,
       appName: appSettings.appName,
       provider: modelSettings.provider,
       providerLabel: modelSettings.providerLabel,
@@ -2070,10 +2075,10 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, await learningStatus());
   }
   if (req.method === "GET" && url.pathname === "/api/learning-library") {
-    return sendJson(res, 200, await buildLearningLibrary(ROOT));
+    return sendJson(res, 200, await buildLearningLibrary(BUSINESS_ROOT));
   }
   if (req.method === "GET" && url.pathname === "/api/notifications") {
-    return sendJson(res, 200, { notifications: await listNotifications(ROOT) });
+    return sendJson(res, 200, { notifications: await listNotifications(BUSINESS_ROOT) });
   }
   if (req.method === "GET" && url.pathname === "/api/product-completeness") {
     return sendJson(res, 200, { milestones: buildCompletenessMatrix() });
@@ -2095,8 +2100,8 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, await createRun(body));
   }
   if (req.method === "POST" && url.pathname === "/api/learning-rules/status") {
-    const result = await updateCurrentRuleStatus(ROOT, body);
-    return sendJson(res, 200, { ...result, library: await buildLearningLibrary(ROOT) });
+    const result = await updateCurrentRuleStatus(BUSINESS_ROOT, body);
+    return sendJson(res, 200, { ...result, library: await buildLearningLibrary(BUSINESS_ROOT) });
   }
   if (req.method === "POST" && url.pathname === "/api/learning-corrections") {
     return sendJson(res, 200, await handleLearningCorrection(body));
@@ -2185,8 +2190,8 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, await runLearningCycle());
   }
   if (req.method === "POST" && url.pathname === "/api/notifications/handle") {
-    const notification = await handleNotification(ROOT, body.id);
-    return sendJson(res, 200, { notification, notifications: await listNotifications(ROOT) });
+    const notification = await handleNotification(BUSINESS_ROOT, body.id);
+    return sendJson(res, 200, { notification, notifications: await listNotifications(BUSINESS_ROOT) });
   }
   sendJson(res, 404, { error: "接口不存在" });
 }
