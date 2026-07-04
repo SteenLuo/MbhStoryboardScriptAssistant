@@ -1,0 +1,41 @@
+{
+  "version": 12,
+  "lastGoodVersion": 12,
+  "createdAt": "2026-07-04T13:47:05.335Z",
+  "sourceEventIds": [
+    "learn-20260704-dialogue-length-20-shot-split",
+    "learn-1783172825332-a437b9"
+  ],
+  "rules": [
+    {
+      "ruleId": "rule-learn-20260704-dialogue-length-20-shot-split",
+      "topicKey": "storyboard.dialogue.length",
+      "conflictKey": "storyboard.dialogue.length",
+      "capability": "storyboard",
+      "content": "同一个镜号里边的台词不能超过20个字，超过要拆分镜头",
+      "priority": 50,
+      "sourceEventIds": [
+        "learn-20260704-dialogue-length-20-shot-split"
+      ],
+      "status": "covered",
+      "coveredByRuleId": "rule-learn-1783172825332-a437b9",
+      "createdAt": "2026-07-03T22:05:19.214Z",
+      "updatedAt": "2026-07-04T13:47:05.335Z"
+    },
+    {
+      "ruleId": "rule-learn-1783172825332-a437b9",
+      "topicKey": "storyboard.dialogue.length",
+      "conflictKey": "storyboard.dialogue.length",
+      "capability": "storyboard",
+      "content": "一个镜号中只允许存在一个人物的台词，不允许多人台词的情况",
+      "priority": 50,
+      "sourceEventIds": [
+        "learn-1783172825332-a437b9"
+      ],
+      "status": "active",
+      "coveredByRuleId": "",
+      "createdAt": "2026-07-04T13:47:05.335Z",
+      "updatedAt": "2026-07-04T13:47:05.335Z"
+    }
+  ]
+}

@@ -29,6 +29,10 @@ test("canvas storyboard generation loads the local storyboard skill context", ()
   assert.match(contextSource, /findLocalSkillRoute\("storyboard-generate"\)/);
   assert.match(contextSource, /routeLocalSkill\("分镜"\)/);
   assert.match(contextSource, /分镜标准格式\.md/);
+  assert.match(contextSource, /同一个镜号只能有一个说话人/);
+  assert.match(contextSource, /单条台词不得超过 20 个字/);
+  assert.match(contextSource, /字段标签使用纯文本/);
+  assert.match(contextSource, /只输出分镜正文/);
   assert.match(promptSource, /canvasStoryboardSkillContext\(\)/);
   assert.match(generateSource, /canvasStoryboardSkillContext\(\)/);
   assert.match(generateSource, /storyboardSkillContext/);
@@ -86,8 +90,20 @@ test("first-pass storyboard generation paths load the local storyboard skill", (
   assert.match(taskPromptSource, /canvasStoryboardSkillPrompt\(\)/);
   assert.match(workflowSource, /taskSkillContext\(task\)/);
   assert.match(workflowSource, /skillPrompt/);
-  assert.match(workbenchSource, /taskSkillPrompt\(body\.task\)/);
+  assert.match(workbenchSource, /taskSkillContext\(body\.task\)/);
   assert.match(workbenchSource, /skillPrompt/);
+});
+
+test("generic storyboard generation and canvas save apply storyboard validation", () => {
+  const workbenchSource = extractFunction("generateWithDeepSeek");
+  const saveSource = extractFunction("saveCanvas");
+
+  assert.match(workbenchSource, /body\.task === "storyboard-generate"/);
+  assert.match(workbenchSource, /applyStoryboardHardRuleValidation\(result\.content/);
+  assert.match(workbenchSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
+  assert.match(workbenchSource, /recordStoryboardHardRuleFailure/);
+  assert.match(saveSource, /applyCanvasStoryboardValidation/);
+  assert.match(saveSource, /currentStoryboardRulesUsed\(\)/);
 });
 
 test("server prompts no longer apply script level rules", () => {

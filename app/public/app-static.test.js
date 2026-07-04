@@ -301,9 +301,10 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(indexSource, /learningSkillsTabCount/);
   assert.match(indexSource, /learningRecordHelp/);
   assert.match(indexSource, /学习记录说明/);
-  assert.match(learningPageSource, /系统会把长期规则、满意样例、纠错和归档证据记到这里。每条记录都会说明是否影响生成。学错了可以点“带引用去纠正”回到对话处理。/);
+  assert.match(learningPageSource, /系统会把长期规则、满意样例、纠错和归档证据记到这里。每条记录都会说明是否会被后续生成读取；硬规则最终是否执行成功，要看输出后校验。学错了可以点“带引用去纠正”回到对话处理。/);
   assert.match(learningPageSource, /已保存/);
   assert.match(learningPageSource, /已影响生成/);
+  assert.match(learningPageSource, /输出后校验/);
   assert.match(learningPageSource, /待确认/);
   assert.match(learningPageSource, /学错了怎么改/);
   assert.doesNotMatch(learningPageSource, /已生效/);

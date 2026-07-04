@@ -7,6 +7,7 @@ param(
   [switch]$All,
   [switch]$ServiceMode,
   [int]$Port = 17878,
+  [switch]$KeepAlive,
   [switch]$WriteReport
 )
 
@@ -720,7 +721,8 @@ function Assert-ServiceLearningLibrary {
 function Invoke-ServiceMode {
   param(
     [Parameter(Mandatory=$true)][string]$Root,
-    [Parameter(Mandatory=$true)][int]$Port
+    [Parameter(Mandatory=$true)][int]$Port,
+    [Parameter(Mandatory=$true)][switch]$KeepAlive
   )
   $workspace = Get-WorkspaceRoot $Root
   $logDir = Join-Path $Root 'service'
@@ -730,10 +732,22 @@ function Invoke-ServiceMode {
   $oldAcceptanceRoot = $env:MBH_ACCEPTANCE_ROOT
   $oldPort = $env:MBH_WEB_PORT
   $process = $null
+  $shouldKeepAlive = $false
   try {
     $env:MBH_ACCEPTANCE_ROOT = $workspace
     $env:MBH_WEB_PORT = [string]$Port
-    $process = Start-Process -FilePath 'node' -ArgumentList @('app/server.js') -WorkingDirectory $RepoRoot -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    $startArgs = @{
+      FilePath = 'node'
+      ArgumentList = @('app/server.js')
+      WorkingDirectory = $RepoRoot
+      PassThru = $true
+      WindowStyle = 'Hidden'
+    }
+    if (!$KeepAlive) {
+      $startArgs.RedirectStandardOutput = $stdout
+      $startArgs.RedirectStandardError = $stderr
+    }
+    $process = Start-Process @startArgs
     $status = $null
     for ($i = 0; $i -lt 40; $i += 1) {
       Start-Sleep -Milliseconds 250
@@ -764,14 +778,18 @@ function Invoke-ServiceMode {
     $manifest = Read-JsonFile -Path $manifestPath -Default ([pscustomobject]@{})
     $manifest | Add-Member -NotePropertyName serviceMode -NotePropertyValue ([ordered]@{
       port = $Port
+      pid = $process.Id
+      keepAlive = $KeepAlive.IsPresent
       statusPath = 'service/status.json'
       libraryPath = 'service/learning-library.json'
       checkedAt = Get-IsoNow
     }) -Force
     Write-JsonFile -Path $manifestPath -Value $manifest
-    "SERVICE PASS http://127.0.0.1:$Port service/status.json; service/learning-library.json"
+    $shouldKeepAlive = $KeepAlive.IsPresent
+    $suffix = if ($shouldKeepAlive) { "; keepAlive pid=$($process.Id)" } else { '' }
+    "SERVICE PASS http://127.0.0.1:$Port service/status.json; service/learning-library.json$suffix"
   } finally {
-    if ($process -and !$process.HasExited) {
+    if ($process -and !$process.HasExited -and !$shouldKeepAlive) {
       Stop-Process -Id $process.Id -Force
       $process.WaitForExit()
     }
@@ -865,7 +883,7 @@ if ($Scenario) {
 }
 
 if ($ServiceMode) {
-  Invoke-ServiceMode -Root $resolvedRoot -Port $Port
+  Invoke-ServiceMode -Root $resolvedRoot -Port $Port -KeepAlive:$KeepAlive
 }
 
 if ($WriteReport) {

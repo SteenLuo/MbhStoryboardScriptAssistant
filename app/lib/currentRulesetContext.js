@@ -4,30 +4,15 @@ const path = require("node:path");
 const { normalizeRuleset, validateRuleset } = require("./autonomousLearning");
 
 async function buildCurrentRulesetContext(root, input = {}) {
-  const currentFile = path.join(root, "learning", "current-ruleset.json");
   const capability = capabilityForInput(input);
 
-  if (!fs.existsSync(currentFile)) {
-    return emptyResult();
+  const rulesetLoad = await loadCurrentRulesetForPrompt(root);
+  if (!rulesetLoad.ok) {
+    return emptyResult({ ok: false, loadError: rulesetLoad.loadError });
   }
 
-  let ruleset;
-  let sourceFile = currentFile;
-  let loadError = null;
-
-  try {
-    ruleset = await readRulesetFileStrict(currentFile);
-  } catch (error) {
-    loadError = error.message || String(error);
-    const fallback = await loadLastGoodRuleset(root, error.lastGoodVersion);
-    if (!fallback) {
-      return emptyResult({ ok: false, loadError });
-    }
-    ruleset = fallback.ruleset;
-    sourceFile = fallback.file;
-    loadError = `${loadError}；已改用 last-good 快照 ${relativePath(root, sourceFile)}`;
-  }
-
+  const ruleset = rulesetLoad.ruleset;
+  const sourceFile = rulesetLoad.sourceFile;
   const rules = selectActiveRules(ruleset, capability);
   const sourceFileRef = rules.length ? relativePath(root, sourceFile) : "";
   const currentRulesUsed = rules.map((rule) => traceRule(rule, {
@@ -39,9 +24,47 @@ async function buildCurrentRulesetContext(root, input = {}) {
     rules,
     promptText: buildPromptText(root, sourceFile, rules),
     currentRulesUsed,
-    loadError,
+    loadError: rulesetLoad.loadError,
     sourceFile: sourceFileRef,
   };
+}
+
+async function loadCurrentRulesetForPrompt(root) {
+  const currentFile = path.join(root, "learning", "current-ruleset.json");
+  if (!fs.existsSync(currentFile)) {
+    return {
+      ok: true,
+      ruleset: emptyRuleset(),
+      sourceFile: "",
+      loadError: null,
+    };
+  }
+
+  try {
+    return {
+      ok: true,
+      ruleset: await readRulesetFileStrict(currentFile),
+      sourceFile: currentFile,
+      loadError: null,
+    };
+  } catch (error) {
+    const loadError = error.message || String(error);
+    const fallback = await loadLastGoodRuleset(root, error.lastGoodVersion);
+    if (!fallback) {
+      return {
+        ok: false,
+        ruleset: emptyRuleset(),
+        sourceFile: "",
+        loadError,
+      };
+    }
+    return {
+      ok: true,
+      ruleset: fallback.ruleset,
+      sourceFile: fallback.file,
+      loadError: `${loadError}；已改用 last-good 快照 ${relativePath(root, fallback.file)}`,
+    };
+  }
 }
 
 async function readRulesetFileStrict(file) {
@@ -169,10 +192,20 @@ function emptyResult(overrides = {}) {
   };
 }
 
+function emptyRuleset() {
+  return {
+    version: 0,
+    lastGoodVersion: 0,
+    updatedAt: "",
+    rules: [],
+  };
+}
+
 function relativePath(root, file) {
   return path.relative(root, file).replace(/\\/g, "/");
 }
 
 module.exports = {
   buildCurrentRulesetContext,
+  loadCurrentRulesetForPrompt,
 };

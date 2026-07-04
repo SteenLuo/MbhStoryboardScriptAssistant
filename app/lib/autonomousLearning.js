@@ -58,7 +58,7 @@ async function learnExplicitRule(root, input = {}, options = {}) {
   const topicKey = inferTopicKey(input);
   const conflictKey = Object.hasOwn(input, "conflictKey")
     ? String(input.conflictKey || "").trim()
-    : topicKey;
+    : inferConflictKey(input, topicKey);
   if (shouldWaitForEvaluationSamples(input)) {
     const event = await appendSampleInsufficientLearningEvent(root, {
       ...input,
@@ -441,7 +441,7 @@ async function updateCurrentRuleStatus(root, input = {}, options = {}) {
         isSameTopicOrConflict(item, rule.topicKey, rule.conflictKey)
       );
       if (activeSameRule) {
-        throw new Error(`同一主题已存在启用规则或同一冲突键已存在启用规则：${rule.topicKey} / ${rule.conflictKey}`);
+        throw new Error(`同一冲突键已存在启用规则：${rule.conflictKey}`);
       }
     }
 
@@ -533,7 +533,6 @@ async function appendSampleInsufficientLearningEvent(root, input = {}, options =
 function validateRuleset(ruleset) {
   if (!ruleset || typeof ruleset !== "object") throw new Error("当前规则层结构不合法");
   if (!Array.isArray(ruleset.rules)) throw new Error("当前规则层缺少 rules 数组");
-  const activeTopics = new Set();
   const activeConflicts = new Set();
   for (const rule of ruleset.rules) {
     const normalizedRule = normalizeRule(rule);
@@ -545,9 +544,7 @@ function validateRuleset(ruleset) {
       throw new Error(`当前规则状态不合法：${normalizedRule.status}`);
     }
     if (normalizedRule.status === ACTIVE_STATUS) {
-      if (activeTopics.has(normalizedRule.topicKey)) throw new Error(`同一主题存在多个生效规则：${normalizedRule.topicKey}`);
       if (activeConflicts.has(normalizedRule.conflictKey)) throw new Error(`同一冲突键存在多个生效规则：${normalizedRule.conflictKey}`);
-      activeTopics.add(normalizedRule.topicKey);
       activeConflicts.add(normalizedRule.conflictKey);
     }
   }
@@ -615,7 +612,14 @@ function normalizeRule(rule) {
 
 function isSameTopicOrConflict(item, topicKey, conflictKey) {
   if (!item || typeof item !== "object") return false;
-  return String(item.topicKey || "") === topicKey || String(item.conflictKey || "") === conflictKey;
+  const itemConflictKey = String(item.conflictKey || "").trim();
+  const targetConflictKey = String(conflictKey || "").trim();
+  if (itemConflictKey && targetConflictKey) {
+    return itemConflictKey === targetConflictKey;
+  }
+  const itemTopicKey = String(item.topicKey || "").trim();
+  const targetTopicKey = String(topicKey || "").trim();
+  return Boolean(itemTopicKey && targetTopicKey && itemTopicKey === targetTopicKey);
 }
 
 function normalizeOptionalVersion(value) {
@@ -628,15 +632,35 @@ function normalizeOptionalVersion(value) {
 }
 
 function inferTopicKey(input = {}) {
-  const text = `${input.summary || ""}\n${input.rawTrigger || ""}`.toLowerCase();
+  const explicitTopicKey = String(input.topicKey || "").trim();
+  if (explicitTopicKey) return explicitTopicKey;
+  const text = `${input.content || ""}\n${input.summary || ""}\n${input.rawTrigger || ""}`.toLowerCase();
   const capability = String(input.capability || "").toLowerCase();
   if (/分镜|storyboard/.test(text) || capability === "storyboard") {
+    if (/单人台词|一个人物|一个角色|一名人物|一名角色|不允许多人|多人台词|多个人物|多个角色|speaker/.test(text)) return "storyboard.dialogue.speaker-count";
     if (/台词|对白|dialogue|字|长度|以内/.test(text)) return "storyboard.dialogue.length";
     if (/镜号/.test(text)) return "storyboard.shot.numbering";
     return "storyboard.general";
   }
   if (/剧本|script/.test(text) || capability === "script") return "script.general";
   return "general";
+}
+
+function inferConflictKey(input = {}, topicKey = "general") {
+  const text = `${input.content || ""}\n${input.summary || ""}\n${input.rawTrigger || ""}`.toLowerCase();
+  if (
+    topicKey === "storyboard.dialogue.speaker-count" ||
+    /单人台词|一个人物|一个角色|一名人物|一名角色|不允许多人|多人台词|多个人物|多个角色|speaker/.test(text)
+  ) {
+    return "storyboard.dialogue.speaker-count.single-speaker";
+  }
+  if (
+    topicKey === "storyboard.dialogue.length" ||
+    /台词|对白|dialogue/.test(text) && /字|长度|以内|超过|拆分/.test(text)
+  ) {
+    return "storyboard.dialogue.length.max-chars";
+  }
+  return String(topicKey || "general").trim() || "general";
 }
 
 function capabilityFromTopic(topicKey) {

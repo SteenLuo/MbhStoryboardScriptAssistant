@@ -6691,6 +6691,7 @@ function formatLearningSource(sourceType) {
 function formatLearningTopic(topicKey) {
   const labels = {
     "storyboard.dialogue.length": "分镜台词长度",
+    "storyboard.dialogue.speaker-count": "分镜台词人数",
     "storyboard.structure": "分镜结构",
     "script.format": "剧本格式",
     "script.style": "剧本写法",

@@ -85,8 +85,10 @@ test("current rule landing affects generation but can be pending first hit", () 
   assert.equal(record.displayStatus, "已影响生成");
   assert.equal(record.actionLabel, "不用管");
   assert.equal(record.affectsGeneration, true);
-  assert.match(record.generationImpactText, /会参与后续生成/);
+  assert.match(record.generationImpactText, /会被后续生成读取/);
+  assert.match(record.generationImpactText, /输出后校验/);
   assert.equal(record.generationProof.proofStatus, "pending_first_hit");
+  assert.match(record.generationProof.claimText, /输出后校验/);
 });
 
 test("unfinished generation landings wait for confirmation before affecting generation", () => {

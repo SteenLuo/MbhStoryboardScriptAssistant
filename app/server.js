@@ -13,6 +13,7 @@ const { buildCompletenessMatrix } = require("./lib/productCompleteness");
 const { classifyChatIntent, selectHistoryForIntent } = require("./lib/chatIntent");
 const { buildArchiveRecordMarkdown, buildWorkbenchState } = require("./lib/workbench");
 const { addCanvasNode, connectCanvasNodes, createCanvas, normalizeCanvas } = require("./lib/canvasState");
+const { applyCanvasStoryboardValidation } = require("./lib/canvasStoryboardValidation");
 const { buildStoryboardNodePlan, splitScriptIntoEpisodes } = require("./lib/episodeSplit");
 const { DEFAULT_PROJECT_ID, createProject, groupConversationsByProject, normalizeProjects, renameProject, resolveProjectId } = require("./lib/projects");
 const { normalizeModelSettings, publicModelSettings, resolveActiveModelSettings, updateModelSettings } = require("./lib/modelSettings");
@@ -22,6 +23,7 @@ const { applyLearningCorrectionRequest } = require("./lib/learningCorrection");
 const { appendLearningEvent, learnExplicitRule, updateCurrentRuleStatus } = require("./lib/autonomousLearning");
 const { recordArchiveLearningEvidence } = require("./lib/learningEvidence");
 const { analyzeCanvasArchiveReadiness } = require("./lib/canvasArchive");
+const { buildCurrentRulesetContext } = require("./lib/currentRulesetContext");
 const { applyStoryboardHardRuleValidation, isStoryboardValidationResolved, validateStoryboardContent } = require("./lib/storyboardValidation");
 
 const ROOT = path.resolve(__dirname, "..");
@@ -375,15 +377,29 @@ async function canvasFile(id) {
 }
 
 async function saveCanvas(canvas, options = {}) {
-  const normalized = normalizeCanvas(canvas);
+  let normalized = normalizeCanvas(canvas);
   const file = await canvasFile(normalized.id);
   if (!options.allowArchived && fs.existsSync(file)) {
     const existing = normalizeCanvas(await readJsonFile(file));
     if (existing.archivedAt) throw new Error("画布已归档，不能继续编辑。");
     if (existing.deletedAt) throw new Error("画布已在回收站，不能继续编辑。");
   }
+  if (!options.skipStoryboardValidation) {
+    normalized = normalizeCanvas(applyCanvasStoryboardValidation(normalized, {
+      currentRulesUsed: await currentStoryboardRulesUsed(),
+    }));
+  }
   await fsp.writeFile(file, JSON.stringify(normalized, null, 2), "utf8");
   return normalized;
+}
+
+async function currentStoryboardRulesUsed() {
+  try {
+    const context = await buildCurrentRulesetContext(BUSINESS_ROOT, { capability: "storyboard" });
+    return Array.isArray(context.currentRulesUsed) ? context.currentRulesUsed : [];
+  } catch {
+    return [];
+  }
 }
 
 async function getCanvas(id) {
@@ -1308,6 +1324,12 @@ async function canvasStoryboardSkillContext() {
     skillContext.prompt,
     "【画布分镜生成补充要求】",
     "每次调用只生成当前分集的分镜脚本，不要合并其他集数，不要输出表格。",
+    "【硬性输出约束】",
+    "1. 同一个镜号只能有一个说话人；如果出现两个人物对话，必须拆成连续镜号，每个镜号只保留一个人物的台词。",
+    "2. 单条台词不得超过 20 个字；超过时必须拆成新的镜号或拆成多条台词，且每条都不超过 20 个字。",
+    "3. 字段标签使用纯文本，不要使用 Markdown 加粗、表格、项目符号或把多个字段挤在同一行。",
+    "4. 每个镜号必须按文本块输出：镜号、景别、运镜、情绪/动作、音效、台词、时长；人物对白只能放在台词字段，不要写进情绪/动作。",
+    "5. 只输出分镜正文，不要寒暄、解释、标题、Markdown 分隔线或“好的，收到任务”等非分镜内容。",
     `## 分镜标准文档：${standardPath}\n\n${standardText}`,
   ].join("\n\n");
   return {
@@ -1841,7 +1863,8 @@ async function generateWithDeepSeek(body) {
   const config = taskConfig(body.task);
   const artifacts = await collectRunContext(runDir);
   const input = String(body.input || "").trim();
-  const skillPrompt = await taskSkillPrompt(body.task);
+  const skillContext = await taskSkillContext(body.task);
+  const skillPrompt = skillContext.prompt;
   const userContent = [
     `任务：${config.title}`,
     "",
@@ -1863,11 +1886,45 @@ async function generateWithDeepSeek(body) {
       { role: "user", content: userContent },
     ],
   });
+  let finalContent = result.content;
+  let hardRuleValidation = null;
+  if (body.task === "storyboard-generate") {
+    const hardRuleResult = applyStoryboardHardRuleValidation(result.content, {
+      currentRulesUsed: skillContext.currentRulesUsed || [],
+    });
+    hardRuleValidation = hardRuleResult.hardRuleValidation;
+    if (hardRuleValidation.checked && !hardRuleValidation.finalOk) {
+      await recordStoryboardHardRuleFailure({
+        canvasId: path.basename(runDir),
+        outputId: config.file,
+        currentRulesUsed: skillContext.currentRulesUsed || [],
+        hardRuleValidation,
+      });
+      throw new Error("分镜产物违反已命中的硬规则，自动拆分修复后仍未通过，已写入学习失败事件。");
+    }
+    finalContent = hardRuleResult.content;
+  }
   const target = path.join(runDir, config.file);
-  const output = `# ${config.title}\n\n生成时间：${new Date().toISOString()}\n\n模型：${result.model}\n\n---\n\n${result.content}\n`;
+  const output = `# ${config.title}\n\n生成时间：${new Date().toISOString()}\n\n模型：${result.model}\n\n---\n\n${finalContent}\n`;
   await fsp.writeFile(target, output, "utf8");
-  await appendManifest(runDir, { lastGenerated: config.file, lastModel: result.model, updatedAt: new Date().toISOString() });
-  return { file: config.file, content: result.content, usage: result.usage };
+  await appendManifest(runDir, {
+    lastGenerated: config.file,
+    lastModel: result.model,
+    updatedAt: new Date().toISOString(),
+    ...(body.task === "storyboard-generate" ? {
+      currentRulesUsed: skillContext.currentRulesUsed || [],
+      hardRuleValidation,
+    } : {}),
+  });
+  return {
+    file: config.file,
+    content: finalContent,
+    usage: result.usage,
+    ...(body.task === "storyboard-generate" ? {
+      currentRulesUsed: skillContext.currentRulesUsed || [],
+      hardRuleValidation,
+    } : {}),
+  };
 }
 
 async function collectRunContext(runDir) {

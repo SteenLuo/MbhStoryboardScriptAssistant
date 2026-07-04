@@ -27,6 +27,56 @@ test("buildLearningLibrary returns the fixed D7 view contract", async () => {
   assert.ok(Array.isArray(library.skills));
 });
 
+test("buildLearningLibrary does not claim current rules affect generation when prompt loading fails", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-bad-ruleset-"));
+  const learningDir = path.join(root, "learning");
+  await fsp.mkdir(learningDir, { recursive: true });
+  await fsp.writeFile(path.join(learningDir, "events.jsonl"), JSON.stringify({
+    eventId: "event-invalid-rule",
+    internalStatus: "landed",
+    jobStatus: "completed",
+    learningMode: "overall",
+    landingType: "current-rule",
+    ruleId: "rule-invalid",
+    landingIds: ["rule-invalid"],
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length",
+    sourceType: "conversation",
+    summary: "分镜台词每句 20 字以内。",
+    createdAt: "2026-07-04T00:00:00.000Z",
+    updatedAt: "2026-07-04T00:00:00.000Z",
+  }) + "\n", "utf8");
+  await fsp.writeFile(path.join(learningDir, "current-ruleset.json"), JSON.stringify({
+    version: 1,
+    lastGoodVersion: 1,
+    updatedAt: "2026-07-04T00:00:00.000Z",
+    rules: [
+      {
+        ruleId: "rule-invalid",
+        topicKey: "storyboard.dialogue.length",
+        capability: "storyboard",
+        content: "分镜台词每句 20 字以内。",
+        priority: 50,
+        sourceEventIds: ["event-invalid-rule"],
+        status: "active",
+        createdAt: "2026-07-04T00:00:00.000Z",
+        updatedAt: "2026-07-04T00:00:00.000Z",
+      },
+    ],
+  }, null, 2), "utf8");
+
+  const library = await buildLearningLibrary(root);
+  const record = library.records.find((item) => item.recordId === "rule:rule-invalid");
+
+  assert.ok(record);
+  assert.strictEqual(record.displayStatus, "失败");
+  assert.strictEqual(record.affectsGeneration, false);
+  assert.match(record.generationImpactText, /加载失败/);
+  assert.strictEqual(record.generationProof.proofStatus, "failed");
+  assert.strictEqual(library.impactItems.some((item) => item.recordId === "rule:rule-invalid"), false);
+  assert.ok(library.accessIssues.some((issue) => issue.area === "rules" && /conflictKey/.test(issue.message)));
+});
+
 test("buildLearningLibrary shows sample-insufficient next steps and trace fields", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-sample-insufficient-"));
   await appendSampleInsufficientLearningEvent(root, {
@@ -271,11 +321,12 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   assert.strictEqual(library.records.length, 1);
   assert.ok(library.records.some((record) => record.recordId === "rule:rule-event-1"));
   const eventRecord = library.records.find((record) => record.recordId === "rule:rule-event-1");
-  assert.strictEqual(eventRecord.displayStatus, "已影响生成");
-  assert.strictEqual(eventRecord.status, "已影响生成");
+  assert.strictEqual(eventRecord.displayStatus, "已保存");
+  assert.strictEqual(eventRecord.status, "已保存");
   assert.strictEqual(eventRecord.actionLabel, "不用管");
-  assert.strictEqual(eventRecord.affectsGeneration, true);
-  assert.strictEqual(eventRecord.generationProof.proofStatus, "pending_first_hit");
+  assert.strictEqual(eventRecord.affectsGeneration, false);
+  assert.match(eventRecord.generationImpactText, /停用/);
+  assert.strictEqual(eventRecord.generationProof.proofStatus, "not_applicable");
   assert.strictEqual(eventRecord.advanced.internalStatus, "landed");
   assert.strictEqual(eventRecord.advanced.jobStatus, "completed");
   assert.strictEqual(eventRecord.advanced.learningMode, "overall");
@@ -295,6 +346,7 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   assert.strictEqual(eventRecord.correctionAction.payload.scope, "overall");
   assert.strictEqual(eventRecord.correctionAction.defaultText, "这条学错了，请按这次说明覆盖。");
   assert.equal(Object.hasOwn(eventRecord.correctionAction.payload, "tokenUsage"), false);
+  assert.strictEqual(library.impactItems.some((record) => record.recordId === "rule:rule-event-1"), false);
   assert.strictEqual(library.currentRules[0].topicKey, "storyboard.dialogue.length");
   assert.strictEqual(library.currentRules[0].status, "disabled");
   const storyboardSkill = library.skills.find((skill) => skill.id === "storyboard-generate");
@@ -459,6 +511,59 @@ test("buildLearningLibrary keeps raw failure and coverage fields in advanced onl
   assert.strictEqual(record.advanced.coveredByEventId, "event-new");
   assert.strictEqual(record.advanced.tokenUsage.total_tokens, 8);
   assert.strictEqual(record.advanced.error.message, "旧失败信息");
+});
+
+test("buildLearningLibrary restores covered current-rule records when the current ruleset is active", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-restored-rule-"));
+  const learningDir = path.join(root, "learning");
+  await fsp.mkdir(learningDir, { recursive: true });
+  await fsp.writeFile(
+    path.join(learningDir, "events.jsonl"),
+    JSON.stringify({
+      eventId: "event-restored",
+      topicKey: "storyboard.dialogue.length",
+      conflictKey: "storyboard.dialogue.length.max-chars",
+      sourceType: "conversation",
+      internalStatus: "covered",
+      jobStatus: "completed",
+      learningMode: "overall",
+      landingType: "current-rule",
+      summary: "同一个镜号里边的台词不能超过20个字，超过要拆分镜头",
+      ruleId: "rule-event-restored",
+      coveredByEventId: "event-new",
+      createdAt: "2026-07-04T00:00:00.000Z",
+      updatedAt: "2026-07-04T00:01:00.000Z",
+    }) + "\n",
+    "utf8",
+  );
+  await fsp.writeFile(path.join(learningDir, "current-ruleset.json"), JSON.stringify({
+    version: 1,
+    lastGoodVersion: 1,
+    updatedAt: "2026-07-04T00:02:00.000Z",
+    rules: [{
+      ruleId: "rule-event-restored",
+      topicKey: "storyboard.dialogue.length",
+      conflictKey: "storyboard.dialogue.length.max-chars",
+      capability: "storyboard",
+      content: "同一个镜号里边的台词不能超过20个字，超过要拆分镜头",
+      priority: 50,
+      sourceEventIds: ["event-restored"],
+      status: "active",
+      coveredByRuleId: "",
+      createdAt: "2026-07-04T00:00:00.000Z",
+      updatedAt: "2026-07-04T00:02:00.000Z",
+    }],
+  }), "utf8");
+
+  const library = await buildLearningLibrary(root);
+  const record = library.records.find((item) => item.recordId === "rule:rule-event-restored");
+
+  assert.strictEqual(record.displayStatus, "已影响生成");
+  assert.strictEqual(record.status, "active");
+  assert.strictEqual(record.affectsGeneration, true);
+  assert.match(record.generationImpactText, /输出后校验/);
+  assert.match(record.generationProof.claimText, /输出后校验/);
+  assert.strictEqual(record.advanced.currentRuleStatus, "active");
 });
 
 test("buildLearningLibrary maps persisted generation proof from normalized JSONL events", async () => {

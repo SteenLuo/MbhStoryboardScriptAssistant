@@ -1,7 +1,13 @@
 {
   "version": 15,
   "lastGoodVersion": 15,
-  "updatedAt": "2026-07-04T15:12:16.163Z",
+  "createdAt": "2026-07-04T15:12:16.163Z",
+  "sourceEventIds": [
+    "learn-20260704-dialogue-length-20-shot-split",
+    "learn-1783172825332-a437b9",
+    "learn-1783174427883-cf245f",
+    "learn-1783177936160-ae3068"
+  ],
   "rules": [
     {
       "ruleId": "rule-learn-20260704-dialogue-length-20-shot-split",

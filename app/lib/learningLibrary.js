@@ -2,14 +2,15 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 
-const { listLearningEvents, readCurrentRuleset } = require("./autonomousLearning");
+const { listLearningEvents } = require("./autonomousLearning");
+const { loadCurrentRulesetForPrompt } = require("./currentRulesetContext");
 const { buildCorrectionAction } = require("./learningCorrection");
 const { mapLearningDisplayRecord } = require("./learningStatusMapper");
 const { FALLBACK_ROUTE, SKILL_ROUTES } = require("./localSkills");
 
 async function buildLearningLibrary(root) {
   const accessIssues = [];
-  const [events, ruleset, evidenceResult, sampleResult, evalResult, skillDraftResult] = await Promise.all([
+  const [events, rulesetResult, evidenceResult, sampleResult, evalResult, skillDraftResult] = await Promise.all([
     safeReadEvents(root, accessIssues),
     safeReadRuleset(root, accessIssues),
     readMaterialRecords(path.join(root, "learning", "evidence"), "evidenceId", "evidence", accessIssues),
@@ -18,15 +19,20 @@ async function buildLearningLibrary(root) {
     readSkillDraftRecords(path.join(root, "learning", "skill-evolution-reports"), accessIssues),
   ]);
 
-  const eventRecords = buildPublicLearningRecords(events, accessIssues);
+  const ruleset = rulesetResult.ruleset;
+  const promptSafeRuleById = new Map((ruleset.rules || []).map((rule) => [normalizeString(rule.ruleId), rule]));
+  const eventRecords = buildPublicLearningRecords(events, accessIssues)
+    .map((record) => applyCurrentRuleImpactOverlay(record, rulesetResult, promptSafeRuleById));
   const evidenceRecords = evidenceResult.records.map(publicEvidenceRecord).filter(hasUsableRecordId);
   const sampleRecords = sampleResult.records.map(publicSampleRecord).filter(hasUsableRecordId);
   const evalRecords = evalResult.records.map(publicEvalRecord).filter(hasUsableRecordId);
   const materialRecords = [...evidenceRecords, ...sampleRecords];
   const records = sortLearningRecords([...eventRecords, ...materialRecords, ...evalRecords]);
   const impactItems = sortLearningRecords(uniqueRecordsById([
-    ...(ruleset.rules || []).map(publicImpactRule).filter(hasUsableRecordId),
-    ...eventRecords.filter((record) => record.affectsGeneration || record.recordId.startsWith("rule:")),
+    ...(ruleset.rules || [])
+      .map(publicImpactRule)
+      .filter((record) => hasUsableRecordId(record) && record.affectsGeneration),
+    ...eventRecords.filter((record) => record.affectsGeneration),
   ]));
   const sampleItems = sortLearningRecords(uniqueRecordsById([
     ...materialRecords,
@@ -69,12 +75,35 @@ async function safeReadEvents(root, accessIssues) {
 }
 
 async function safeReadRuleset(root, accessIssues) {
+  const currentRulesetFile = path.join(root, "learning", "current-ruleset.json");
+  const fileExists = fs.existsSync(currentRulesetFile);
   try {
-    return await readCurrentRuleset(root);
+    const result = await loadCurrentRulesetForPrompt(root);
+    if (result.loadError) {
+      accessIssues.push(accessIssue("rules", new Error(result.loadError), currentRulesetFile, {
+        sourceFile: result.sourceFile ? path.relative(root, result.sourceFile).replace(/\\/g, "/") : "",
+      }));
+    }
+    return {
+      ok: result.ok,
+      ruleset: result.ruleset || emptyRuleset(),
+      sourceFile: result.sourceFile || "",
+      fileExists,
+      loadError: result.loadError || "",
+    };
   } catch (error) {
-    accessIssues.push(accessIssue("rules", error, path.join(root, "learning", "current-ruleset.json")));
-    return { version: 0, lastGoodVersion: 0, updatedAt: "", rules: [] };
+    accessIssues.push(accessIssue("rules", error, currentRulesetFile));
+    return { ok: false, ruleset: emptyRuleset(), sourceFile: "", fileExists, loadError: error.message || String(error) };
   }
+}
+
+function emptyRuleset() {
+  return {
+    version: 0,
+    lastGoodVersion: 0,
+    updatedAt: "",
+    rules: [],
+  };
 }
 
 function publicLearningRecord(event) {
@@ -231,14 +260,14 @@ function savedMaterialRecord(input) {
 }
 
 function publicImpactRule(rule) {
-  return {
+  const record = {
     recordId: prefixedId("rule", rule.ruleId),
     displayStatus: rule.status === "active" ? "已影响生成" : "已保存",
     status: rule.status,
     actionLabel: "不用管",
     affectsGeneration: rule.status === "active",
     generationImpactText: rule.status === "active"
-      ? "会参与后续生成：已进入当前规则层。"
+      ? "会被后续生成读取；硬规则必须通过输出后校验才算本次执行成功。"
       : "当前规则已保留在规则层，但未处于启用状态。",
     learnedText: rule.content,
     sourceText: "当前规则",
@@ -256,6 +285,10 @@ function publicImpactRule(rule) {
       status: rule.status,
       coveredByRuleId: rule.coveredByRuleId,
     },
+  };
+  return {
+    ...record,
+    correctionAction: buildCorrectionAction(record),
   };
 }
 
@@ -277,6 +310,97 @@ function publicCurrentRule(rule) {
       conflictKey: rule.conflictKey,
       sourceEventIds: normalizeStringArray(rule.sourceEventIds),
     },
+  };
+}
+
+function applyCurrentRuleImpactOverlay(record, rulesetResult, promptSafeRuleById) {
+  if (!record || normalizeString(record.advanced?.landingType) !== "current-rule") return record;
+
+  const ruleId = normalizeString(record.advanced?.ruleId || firstString(record.advanced?.landingIds));
+  const promptSafeRule = ruleId ? promptSafeRuleById.get(ruleId) : null;
+  if (!rulesetResult.fileExists) return record;
+
+  let overlay;
+  if (promptSafeRule?.status === "active") {
+    overlay = {
+      displayStatus: "已影响生成",
+      status: "active",
+      actionLabel: "不用管",
+      generationImpactText: "会被后续生成读取；硬规则必须通过输出后校验才算本次执行成功。",
+      usedWhereText: "当前规则层",
+      nextStepText: "无需处理；如果生成结果违规，系统必须自动修复或记录失败，不能静默交付。",
+      generationProof: {
+        proofStatus: "ready",
+        claimText: "这条规则已通过当前规则层校验，会被生成链路读取；本次是否执行成功以输出后校验为准。",
+      },
+    };
+  } else if (!rulesetResult.ok) {
+    overlay = {
+      displayStatus: "失败",
+      status: "失败",
+      actionLabel: "待纠正",
+      generationImpactText: "当前规则层加载失败，这条规则暂不影响生成。",
+      usedWhereText: "未进入生成链路。",
+      nextStepText: "需要修复规则结构，或带引用去纠正后重新发布。",
+      generationProof: {
+        proofStatus: "failed",
+        claimText: "规则文件未通过生成加载校验，不能作为正常生成证据。",
+      },
+    };
+  } else if (promptSafeRule?.status === "disabled") {
+    overlay = {
+      displayStatus: "已保存",
+      status: "已保存",
+      actionLabel: "不用管",
+      generationImpactText: "当前规则已停用，暂不影响生成。",
+      usedWhereText: "学习资料库。",
+      nextStepText: "无需处理；需要恢复时可重新启用或重新说明。",
+      generationProof: {
+        proofStatus: "not_applicable",
+        claimText: "这条规则当前未启用，不参与生成。",
+      },
+    };
+  } else if (promptSafeRule?.status === "covered") {
+    overlay = {
+      displayStatus: "已被覆盖",
+      status: "已被覆盖",
+      actionLabel: "不用管",
+      generationImpactText: "已被后续学习覆盖，不再影响生成。",
+      usedWhereText: promptSafeRule.coveredByRuleId ? `已被后续规则覆盖：${promptSafeRule.coveredByRuleId}` : "已被后续规则覆盖。",
+      nextStepText: "无需处理，查看覆盖它的新学习即可。",
+      generationProof: {
+        proofStatus: "not_applicable",
+        claimText: "已被后续学习覆盖，不再需要生成命中证据。",
+      },
+    };
+  } else {
+    overlay = {
+      displayStatus: "待确认",
+      status: "待确认 / 待纠正",
+      actionLabel: "待纠正",
+      generationImpactText: "未在当前可加载规则层中找到对应规则，暂不影响生成。",
+      usedWhereText: "尚未进入生成链路。",
+      nextStepText: "请带引用去纠正，或重新说明这条是否要作为长期规则。",
+      generationProof: {
+        proofStatus: "not_applicable",
+        claimText: "当前没有可追溯的生成规则，不需要生成命中证据。",
+      },
+    };
+  }
+
+  const nextRecord = {
+    ...record,
+    ...overlay,
+    affectsGeneration: promptSafeRule?.status === "active",
+    advanced: {
+      ...(record.advanced || {}),
+      rulesetLoadError: rulesetResult.loadError || "",
+      currentRuleStatus: promptSafeRule?.status || "",
+    },
+  };
+  return {
+    ...nextRecord,
+    correctionAction: buildCorrectionAction(nextRecord),
   };
 }
 

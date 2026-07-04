@@ -1,7 +1,12 @@
 {
-  "version": 15,
-  "lastGoodVersion": 15,
-  "updatedAt": "2026-07-04T15:12:16.163Z",
+  "version": 14,
+  "lastGoodVersion": 14,
+  "createdAt": "2026-07-04T14:13:47.885Z",
+  "sourceEventIds": [
+    "learn-20260704-dialogue-length-20-shot-split",
+    "learn-1783172825332-a437b9",
+    "learn-1783174427883-cf245f"
+  ],
   "rules": [
     {
       "ruleId": "rule-learn-20260704-dialogue-length-20-shot-split",
@@ -13,10 +18,10 @@
       "sourceEventIds": [
         "learn-20260704-dialogue-length-20-shot-split"
       ],
-      "status": "covered",
-      "coveredByRuleId": "rule-learn-1783177936160-ae3068",
+      "status": "active",
+      "coveredByRuleId": "",
       "createdAt": "2026-07-03T22:05:19.214Z",
-      "updatedAt": "2026-07-04T15:12:16.163Z"
+      "updatedAt": "2026-07-04T13:54:09.384Z"
     },
     {
       "ruleId": "rule-learn-1783172825332-a437b9",
@@ -47,21 +52,6 @@
       "coveredByRuleId": "",
       "createdAt": "2026-07-04T14:13:47.885Z",
       "updatedAt": "2026-07-04T14:13:47.885Z"
-    },
-    {
-      "ruleId": "rule-learn-1783177936160-ae3068",
-      "topicKey": "storyboard.dialogue.length",
-      "conflictKey": "storyboard.dialogue.length.max-chars",
-      "capability": "storyboard",
-      "content": "拆分台词时要生成新的镜号，不能直接第二行又写台词，这样写没意义",
-      "priority": 50,
-      "sourceEventIds": [
-        "learn-1783177936160-ae3068"
-      ],
-      "status": "active",
-      "coveredByRuleId": "",
-      "createdAt": "2026-07-04T15:12:16.163Z",
-      "updatedAt": "2026-07-04T15:12:16.163Z"
     }
   ]
 }

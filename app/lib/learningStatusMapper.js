@@ -136,10 +136,10 @@ function defaultProofStatus(state) {
 
 function defaultProofClaim(proofStatus, displayStatus, affectsGeneration) {
   if (proofStatus === "pending_first_hit") {
-    return "已进入生成落点，会参与后续生成，等待首次命中证据。";
+    return "已进入生成读取层，会参与后续生成；硬规则是否执行成功要看输出后校验。";
   }
-  if (proofStatus === "participated") return "已参与生成，仍需继续确认生成效果。";
-  if (proofStatus === "validated") return "已在生成中命中并通过验证。";
+  if (proofStatus === "participated") return "已参与生成；硬规则仍需查看输出后校验结果。";
+  if (proofStatus === "validated") return "已在生成中命中，并且输出后校验通过。";
   if (proofStatus === "failed") return "学习落地失败，不能作为正常生成证据。";
   if (proofStatus === "unknown" && affectsGeneration) return "当前仍会影响生成，证据不完整需排查。";
   if (proofStatus === "unknown") return "证据状态未知，但当前不会直接影响生成。";
@@ -153,8 +153,8 @@ function hasUnknownProofWarning(claimText) {
 
 function resolveGenerationImpactText(event, displayStatus, affectsGeneration) {
   if (affectsGeneration) {
-    if (normalizeString(event.landingType) === "current-rule") return "会参与后续生成：已进入当前规则层。";
-    return "会参与后续生成：已进入可被生成流程读取的落点。";
+    if (normalizeString(event.landingType) === "current-rule") return "会被后续生成读取；硬规则以输出后校验通过为准，不能只看规则已启用。";
+    return "会被后续生成读取；是否执行成功要看本次输出校验和命中证据。";
   }
   if (displayStatus === "失败") return "学习未落地，不会影响生成。";
   if (displayStatus === "已被覆盖") return "已被后续学习覆盖，不再影响生成。";
@@ -200,7 +200,7 @@ function resolveUsedWhereText(event, displayStatus) {
 function resolveNextStepText(event, displayStatus, actionLabel) {
   const landingType = normalizeString(event.landingType);
   if (displayStatus === "失败") return "请修正学习内容或落点后重试。";
-  if (displayStatus === "已影响生成") return "等待下一次生成命中后补充验证证据。";
+  if (displayStatus === "已影响生成") return "后续生成会读取；若本次输出违规，必须自动修复或记录失败，不能静默交付。";
   if (displayStatus === "已被覆盖") return "无需处理，查看覆盖它的新学习即可。";
   if (displayStatus === "已保存") return "无需处理，可在需要时作为资料回看。";
   if (landingType === "sample-insufficient") {

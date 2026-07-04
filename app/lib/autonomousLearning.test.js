@@ -42,7 +42,7 @@ test("learnExplicitRule publishes a valid rule into the current ruleset", async 
   assert.equal(result.event.landingType, "current-rule");
   assert.strictEqual(ruleset.rules.length, 1);
   assert.strictEqual(ruleset.rules[0].topicKey, "storyboard.dialogue.length");
-  assert.strictEqual(ruleset.rules[0].conflictKey, "storyboard.dialogue.length");
+  assert.strictEqual(ruleset.rules[0].conflictKey, "storyboard.dialogue.length.max-chars");
   assert.match(ruleset.rules[0].content, /20 字以内/);
   assert.strictEqual(events[0].internalStatus, "landed");
   assert.strictEqual(events[0].jobStatus, "completed");
@@ -54,7 +54,7 @@ test("learnExplicitRule publishes a valid rule into the current ruleset", async 
   assert.strictEqual(snapshot.createdAt, "2026-07-01T10:00:00.000Z");
   assert.deepStrictEqual(snapshot.sourceEventIds, ["event-1"]);
   assert.strictEqual(snapshot.rules[0].ruleId, "rule-event-1");
-  assert.strictEqual(snapshot.rules[0].conflictKey, "storyboard.dialogue.length");
+  assert.strictEqual(snapshot.rules[0].conflictKey, "storyboard.dialogue.length.max-chars");
 
   const rawRecords = (await fsp.readFile(path.join(root, "learning/events.jsonl"), "utf8"))
     .trim()
@@ -63,7 +63,7 @@ test("learnExplicitRule publishes a valid rule into the current ruleset", async 
   assert.ok(rawRecords.every((record) => !Object.hasOwn(record, "status")));
 });
 
-test("learnExplicitRule covers older same-topic events and keeps only the latest active rule", async () => {
+test("learnExplicitRule covers older same-conflict events and keeps only the latest active rule", async () => {
   const root = await tempRoot();
   let index = 0;
   const ids = ["event-old", "event-new"];
@@ -94,6 +94,45 @@ test("learnExplicitRule covers older same-topic events and keeps only the latest
   assert.match(activeRules[0].content, /15 字以内/);
   assert.strictEqual(events.find((event) => event.eventId === "event-old").internalStatus, "covered");
   assert.strictEqual(events.find((event) => event.eventId === "event-old").coveredByEventId, "event-new");
+});
+
+test("learnExplicitRule keeps distinct dialogue constraints active when conflict keys differ", async () => {
+  const root = await tempRoot();
+  let index = 0;
+  const ids = ["event-dialogue-length", "event-dialogue-speaker-count"];
+  const times = ["2026-07-01T10:00:00.000Z", "2026-07-01T10:20:00.000Z"];
+  const options = {
+    now: () => times[index],
+    idSource: () => ids[index++],
+  };
+
+  await learnExplicitRule(root, {
+    rawTrigger: "storyboard dialogue max 20 chars",
+    summary: "storyboard dialogue max 20 chars",
+    capability: "storyboard",
+    sourceType: "conversation",
+  }, options);
+  await learnExplicitRule(root, {
+    rawTrigger: "storyboard one speaker per shot",
+    summary: "storyboard speaker only one character per shot",
+    capability: "storyboard",
+    sourceType: "conversation",
+  }, options);
+
+  const ruleset = await readCurrentRuleset(root);
+  const events = await listLearningEvents(root, { includeCovered: true });
+  const activeRules = ruleset.rules.filter((rule) => rule.status === "active");
+  const activeConflictKeys = activeRules.map((rule) => rule.conflictKey).sort();
+
+  assert.strictEqual(activeRules.length, 2);
+  assert.deepStrictEqual(activeConflictKeys, [
+    "storyboard.dialogue.length.max-chars",
+    "storyboard.dialogue.speaker-count.single-speaker",
+  ]);
+  assert.strictEqual(ruleset.rules.find((rule) => rule.ruleId === "rule-event-dialogue-length").topicKey, "storyboard.dialogue.length");
+  assert.strictEqual(ruleset.rules.find((rule) => rule.ruleId === "rule-event-dialogue-speaker-count").topicKey, "storyboard.dialogue.speaker-count");
+  assert.strictEqual(events.find((event) => event.eventId === "event-dialogue-length").internalStatus, "landed");
+  assert.strictEqual(events.find((event) => event.eventId === "event-dialogue-speaker-count").internalStatus, "landed");
 });
 
 test("learnExplicitRule records failure without replacing last-good ruleset", async () => {
@@ -672,7 +711,7 @@ test("updateCurrentRuleStatus lets users disable and enable an active rule", asy
   assert.strictEqual(ruleset.rules[0].updatedAt, "2026-07-01T10:10:00.000Z");
 });
 
-test("updateCurrentRuleStatus rejects covered rules and duplicate active topics", async () => {
+test("updateCurrentRuleStatus rejects covered rules and duplicate active conflicts", async () => {
   const root = await tempRoot();
   let index = 0;
   const ids = ["event-old", "event-new"];
@@ -738,11 +777,11 @@ test("updateCurrentRuleStatus rejects covered rules and duplicate active topics"
 
   await assert.rejects(
     updateCurrentRuleStatus(root, { ruleId: "rule-disabled", status: "active" }),
-    /同一主题已存在启用规则/,
+    /同一冲突键|conflict/,
   );
 });
 
-test("learnExplicitRule covers disabled same-topic rules when a newer rule succeeds", async () => {
+test("learnExplicitRule covers disabled same-conflict rules when a newer rule succeeds", async () => {
   const root = await tempRoot();
   let index = 0;
   const ids = ["event-disabled", "event-new"];

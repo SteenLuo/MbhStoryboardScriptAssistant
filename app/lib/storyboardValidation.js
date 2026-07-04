@@ -1,9 +1,31 @@
-const DIALOGUE_PREFIX = /^\s*(台词|对白|dialogue)\s*[:：]\s*(.+)$/i;
 const MAX_DIALOGUE_CHARS = 20;
+const DIALOGUE_LINE_PATTERN = /^(\s*(?:[-*+]\s*)?(?:#{1,6}\s*)?(?:(?:\*\*|__)\s*)?(?:台词|对白|dialogue)\s*[:：]\s*(?:(?:\*\*|__)\s*)?)(.+)$/i;
+const SPEAKER_MARKER_PATTERN = /^((?:[（(][^）)]{1,20}[）)]\s*)?(?:(?:[\u4e00-\u9fa5A-Za-z][\u4e00-\u9fa5A-Za-z0-9_-]{0,20}(?:OS|VO)?)|旁白|画外音|男声|女声)\s*[:：])\s*(.+)$/;
+const FIELD_LINE_PATTERN = /^(\s*)(?:[-*+]\s*)?(?:#{1,6}\s*)?(?:(?:\*\*|__)\s*)?([^：:\n]{1,40})\s*[:：]\s*(?:(?:\*\*|__)\s*)?(.*)$/;
+const STORYBOARD_FIELD_LABELS = new Set([
+  "场次",
+  "地点",
+  "时间",
+  "人物",
+  "镜号",
+  "画面内容与构图叙事",
+  "景别",
+  "运镜",
+  "情绪/动作",
+  "音效",
+  "台词",
+  "对白",
+  "时长",
+  "字幕",
+]);
 const PROGRAMMATIC_HARD_RULES = [
   {
     hardRuleId: "storyboard.dialogue.length",
-    topicKeys: new Set(["storyboard.dialogue.length"]),
+    topicKeys: new Set(["storyboard.dialogue.length", "storyboard.dialogue.length.max-chars"]),
+  },
+  {
+    hardRuleId: "storyboard.dialogue.speaker-count",
+    topicKeys: new Set(["storyboard.dialogue.speaker-count", "storyboard.dialogue.speaker-count.single-speaker"]),
   },
 ];
 
@@ -12,9 +34,9 @@ function validateStoryboardContent(content, options = {}) {
   const lines = String(content || "").split(/\r?\n/);
   const issues = [];
   lines.forEach((line, index) => {
-    const match = line.match(DIALOGUE_PREFIX);
-    if (!match) return;
-    const dialogue = extractSpokenDialogue(match[2]);
+    const parsedLine = parseDialogueLine(line);
+    if (!parsedLine) return;
+    const dialogue = trimDialogueQuotes(parsedLine.body);
     if (displayLength(dialogue) <= maxChars) return;
     issues.push({
       type: "dialogue-too-long",
@@ -58,15 +80,18 @@ function validateStoryboardHardRules(content, options = {}) {
     };
   }
 
-  const validation = validateStoryboardContent(content, options);
-  const currentRulesUsedRefs = appliedRules.map((rule) => rule.ruleId).filter(Boolean);
-  const sourceEventIds = collectRuleSourceEventIds(appliedRules);
-  const issues = validation.issues.map((issue) => ({
-    ...issue,
-    hardRuleId: "storyboard.dialogue.length",
-    currentRulesUsedRefs,
-    sourceEventIds,
-  }));
+  const issues = [];
+  const ruleGroups = groupRulesByHardRuleId(appliedRules);
+  if (ruleGroups.has("storyboard.dialogue.length")) {
+    const rules = ruleGroups.get("storyboard.dialogue.length");
+    const validation = validateStoryboardContent(content, options);
+    issues.push(...attachHardRuleMeta(validation.issues, rules, "storyboard.dialogue.length"));
+  }
+  if (ruleGroups.has("storyboard.dialogue.speaker-count")) {
+    const rules = ruleGroups.get("storyboard.dialogue.speaker-count");
+    const validation = validateStoryboardSpeakerCount(content);
+    issues.push(...attachHardRuleMeta(validation.issues, rules, "storyboard.dialogue.speaker-count"));
+  }
   return {
     ok: issues.length === 0,
     issues,
@@ -76,11 +101,12 @@ function validateStoryboardHardRules(content, options = {}) {
 }
 
 function applyStoryboardHardRuleValidation(content, options = {}) {
-  const initial = validateStoryboardHardRules(content, options);
+  const normalizedContent = normalizeStoryboardFieldLabels(content);
+  const initial = validateStoryboardHardRules(normalizedContent, options);
   if (!initial.checked || initial.ok) {
     return {
-      content,
-      validation: initial.checked ? initial : validateStoryboardContent(content, options),
+      content: normalizedContent,
+      validation: initial.checked ? initial : validateStoryboardContent(normalizedContent, options),
       hardRuleValidation: {
         checked: initial.checked,
         repaired: false,
@@ -92,7 +118,7 @@ function applyStoryboardHardRuleValidation(content, options = {}) {
     };
   }
 
-  const repair = repairStoryboardDialogueIssues(content, initial.issues, options);
+  const repair = repairStoryboardDialogueIssues(normalizedContent, initial.issues, options);
   const finalValidation = repair.repaired
     ? validateStoryboardHardRules(repair.content, options)
     : initial;
@@ -109,6 +135,115 @@ function applyStoryboardHardRuleValidation(content, options = {}) {
       finalIssues: finalValidation.issues,
     },
   };
+}
+
+function validateStoryboardSpeakerCount(content) {
+  const shots = parseStoryboardShots(content);
+  const issues = [];
+  for (const shot of shots) {
+    const speakers = new Map();
+    let firstDialogueLineNumber = 0;
+    for (const line of shot.lines) {
+      const parsedLine = parseDialogueLine(line.text);
+      if (!parsedLine) continue;
+      const dialogue = trimDialogueQuotes(parsedLine.body);
+      if (isEmptyDialogue(dialogue)) continue;
+      if (!firstDialogueLineNumber) firstDialogueLineNumber = line.lineNumber;
+      const speakerName = normalizeSpeakerName(parsedLine.speakerMarker);
+      if (speakerName) speakers.set(speakerName, speakerName);
+      for (const embeddedSpeaker of extractEmbeddedSpeakerNames(dialogue, shot.sceneSpeakers)) {
+        speakers.set(embeddedSpeaker, embeddedSpeaker);
+      }
+    }
+    if (speakers.size <= 1) continue;
+    const speakerList = Array.from(speakers.values());
+    issues.push({
+      type: "dialogue-multiple-speakers",
+      severity: "error",
+      lineNumber: firstDialogueLineNumber || shot.lineNumber,
+      shotNumber: shot.shotNumber,
+      speakers: speakerList,
+      message: `同一个镜号只允许一个说话人，当前镜号出现：${speakerList.join("、")}。`,
+    });
+  }
+  return {
+    ok: issues.length === 0,
+    issues,
+  };
+}
+
+function parseStoryboardShots(content) {
+  const lines = String(content || "").split(/\r?\n/);
+  const shots = [];
+  let current = null;
+  let sceneSpeakers = new Set();
+  lines.forEach((line, index) => {
+    const field = matchStoryboardFieldLine(line);
+    if (field?.label === "人物") {
+      sceneSpeakers = parseSceneSpeakers(field.value);
+    }
+    const shotNumber = parseShotNumberLine(line);
+    if (shotNumber) {
+      current = {
+        shotNumber,
+        lineNumber: index + 1,
+        sceneSpeakers: new Set(sceneSpeakers),
+        lines: [],
+      };
+      shots.push(current);
+    }
+    if (current) {
+      current.lines.push({ lineNumber: index + 1, text: line });
+    }
+  });
+  if (shots.length) return shots;
+  return [{
+    shotNumber: "",
+    lineNumber: 1,
+    lines: lines.map((line, index) => ({ lineNumber: index + 1, text: line })),
+  }];
+}
+
+function parseShotNumberLine(line) {
+  const field = matchStoryboardFieldLine(line);
+  if (!field || field.label !== "镜号") return "";
+  const match = field.value.match(/\d+/);
+  return match ? match[0] : field.value.trim();
+}
+
+function normalizeStoryboardFieldLabels(content) {
+  const normalizedLines = String(content || "")
+    .split(/\r?\n/)
+    .map(normalizeStoryboardFieldLabelLine);
+  return stripNonStoryboardScaffolding(normalizedLines).join("\n").trim();
+}
+
+function normalizeStoryboardFieldLabelLine(line) {
+  const field = matchStoryboardFieldLine(line);
+  if (!field || !STORYBOARD_FIELD_LABELS.has(field.label)) return line;
+  return `${field.indent}${field.label}：${field.value}`;
+}
+
+function stripNonStoryboardScaffolding(lines = []) {
+  const withoutMarkdownChrome = lines.filter((line) =>
+    !isMarkdownStoryboardHeading(line) && !isMarkdownSeparator(line)
+  );
+  const startIndex = withoutMarkdownChrome.findIndex(isStoryboardStartLine);
+  if (startIndex <= 0) return withoutMarkdownChrome;
+  return withoutMarkdownChrome.slice(startIndex);
+}
+
+function isMarkdownStoryboardHeading(line) {
+  return /^\s*#{1,6}\s*第.+分镜/.test(String(line || "").trim());
+}
+
+function isMarkdownSeparator(line) {
+  return /^\s*-{3,}\s*$/.test(String(line || ""));
+}
+
+function isStoryboardStartLine(line) {
+  const field = matchStoryboardFieldLine(line);
+  return !!field && ["场次", "地点", "时间", "人物", "镜号"].includes(field.label);
 }
 
 function repairStoryboardDialogueIssues(content, issues = [], options = {}) {
@@ -150,21 +285,48 @@ function repairStoryboardDialogueIssues(content, issues = [], options = {}) {
 }
 
 function parseDialogueLine(line) {
-  const match = String(line || "").match(/^(\s*(?:台词|对白|dialogue)\s*[:：]\s*)(.+)$/i);
+  const match = matchDialogueLine(line);
   if (!match) return null;
-  const rawDialogue = String(match[2] || "").trim();
-  const markerMatch = rawDialogue.match(/^((?:[\u4e00-\u9fa5A-Za-z][\u4e00-\u9fa5A-Za-z0-9_-]{0,20}(?:OS)?)\s*[:：])\s*(.+)$/);
-  if (!markerMatch) {
+  const rawDialogue = String(match.body || "").trim();
+  const markerMatch = rawDialogue.match(SPEAKER_MARKER_PATTERN);
+  if (markerMatch) {
     return {
-      fieldPrefix: match[1],
+      fieldPrefix: match.fieldPrefix,
+      speakerMarker: markerMatch[1],
+      body: markerMatch[2],
+    };
+  }
+  const fallbackMarker = firstDialogueMarker(rawDialogue);
+  if (!fallbackMarker) {
+    return {
+      fieldPrefix: match.fieldPrefix,
       speakerMarker: "",
       body: rawDialogue,
     };
   }
   return {
+    fieldPrefix: match.fieldPrefix,
+    speakerMarker: fallbackMarker.marker,
+    body: fallbackMarker.body,
+  };
+}
+
+function matchDialogueLine(line) {
+  const match = String(line || "").match(DIALOGUE_LINE_PATTERN);
+  if (!match) return null;
+  return {
     fieldPrefix: match[1],
-    speakerMarker: markerMatch[1],
-    body: markerMatch[2],
+    body: match[2],
+  };
+}
+
+function firstDialogueMarker(rawDialogue) {
+  const text = String(rawDialogue || "").trim();
+  const colonMatch = [...text.matchAll(/[：:]/g)].find((match) => match.index > 0 && match.index <= 40);
+  if (!colonMatch) return null;
+  return {
+    marker: text.slice(0, colonMatch.index + 1),
+    body: text.slice(colonMatch.index + 1).trim(),
   };
 }
 
@@ -196,18 +358,92 @@ function splitDialogueLine(dialogue, maxChars = MAX_DIALOGUE_CHARS) {
   return lines;
 }
 
-function extractSpokenDialogue(rawDialogue) {
-  const text = String(rawDialogue || "").trim();
-  const colonMatch = [...text.matchAll(/[：:]/g)].find((match) => match.index > 0 && match.index <= 40);
-  if (!colonMatch) return trimDialogueQuotes(text);
-  return trimDialogueQuotes(text.slice(colonMatch.index + 1).trim());
-}
-
 function trimDialogueQuotes(text) {
   return String(text || "")
     .replace(/^[“"「『]+/, "")
     .replace(/[”"」』]+$/, "")
     .trim();
+}
+
+function isEmptyDialogue(text) {
+  return /^(无|暂无|没有|空|-|—|--)?$/.test(String(text || "").trim());
+}
+
+function matchStoryboardFieldLine(line) {
+  const match = String(line || "").match(FIELD_LINE_PATTERN);
+  if (!match) return null;
+  return {
+    indent: match[1] || "",
+    label: normalizeFieldLabel(match[2]),
+    value: stripClosingMarkdown(match[3]).trimStart(),
+  };
+}
+
+function normalizeFieldLabel(label) {
+  return String(label || "")
+    .replace(/[*_#\s]/g, "")
+    .trim();
+}
+
+function stripClosingMarkdown(value) {
+  return String(value || "")
+    .replace(/\s*(?:\*\*|__)\s*$/, "")
+    .trimEnd();
+}
+
+function normalizeSpeakerName(marker) {
+  let speaker = String(marker || "")
+    .replace(/[：:]\s*$/, "")
+    .trim();
+  speaker = speaker.replace(/^[（(][^）)]{1,20}[）)]\s*/, "").trim();
+  speaker = speaker.replace(/[（(]\s*(?:os|vo|旁白|画外音)\s*[）)]$/i, "").trim();
+  speaker = speaker.replace(/(?:OS|VO)$/i, "").trim();
+  return speaker;
+}
+
+function parseSceneSpeakers(value) {
+  const speakers = new Set();
+  for (const part of String(value || "").split(/[、,，/／;；\s]+/)) {
+    const name = normalizeSpeakerName(part)
+      .replace(/[（(].*?[）)]/g, "")
+      .trim();
+    if (name) speakers.add(name);
+  }
+  return speakers;
+}
+
+function extractEmbeddedSpeakerNames(text, allowedSpeakers = new Set()) {
+  const allowed = allowedSpeakers instanceof Set ? allowedSpeakers : new Set();
+  if (!allowed.size) return [];
+  const names = [];
+  const pattern = /(?:^|[，。！？；,.!?;\s])((?:[（(][^）)]{1,20}[）)]\s*)?(?:(?:[\u4e00-\u9fa5A-Za-z][\u4e00-\u9fa5A-Za-z0-9_-]{0,20}(?:OS|VO)?)|旁白|画外音|男声|女声))\s*[:：]/g;
+  for (const match of String(text || "").matchAll(pattern)) {
+    const name = normalizeSpeakerName(match[1]);
+    if (name && allowed.has(name)) names.push(name);
+  }
+  return names;
+}
+
+function groupRulesByHardRuleId(rules = []) {
+  const groups = new Map();
+  for (const rule of Array.isArray(rules) ? rules : []) {
+    const hardRuleId = String(rule?.hardRuleId || "").trim();
+    if (!hardRuleId) continue;
+    if (!groups.has(hardRuleId)) groups.set(hardRuleId, []);
+    groups.get(hardRuleId).push(rule);
+  }
+  return groups;
+}
+
+function attachHardRuleMeta(issues = [], rules = [], hardRuleId = "") {
+  const currentRulesUsedRefs = rules.map((rule) => rule.ruleId).filter(Boolean);
+  const sourceEventIds = collectRuleSourceEventIds(rules);
+  return (Array.isArray(issues) ? issues : []).map((issue) => ({
+    ...issue,
+    hardRuleId,
+    currentRulesUsedRefs,
+    sourceEventIds,
+  }));
 }
 
 function chunkByDisplayLength(text, maxChars) {
@@ -271,9 +507,11 @@ module.exports = {
   getApplicableStoryboardHardRules,
   isStoryboardValidationResolved,
   MAX_DIALOGUE_CHARS,
+  normalizeStoryboardFieldLabels,
   repairStoryboardDialogueIssues,
   storyboardContentFingerprint,
   splitDialogueLine,
   validateStoryboardHardRules,
   validateStoryboardContent,
+  validateStoryboardSpeakerCount,
 };
