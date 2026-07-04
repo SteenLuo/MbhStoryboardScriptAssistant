@@ -6200,7 +6200,7 @@ function renderLearningRecordItem(record) {
   const item = document.createElement("article");
   const key = learningRecordKey(record);
   const failed = isFailedLearningRecord(record);
-  const displayStatus = normalizeLearningDisplayStatus(record.displayStatus, "待确认");
+  const displayStatus = normalizeLearningDisplayStatus(record.displayStatus || record.status, "待确认");
   item.className = `learning-library-item status-${safeClassName(displayStatus)}`;
   item.dataset.learningRecordKey = key;
   item.classList.toggle("failed", failed);
@@ -6309,10 +6309,11 @@ function readableLearningFailureValue(value, fallback, options = {}) {
   const text = String(value || "").trim();
   if (!text) return fallback;
   const firstLine = text.split(/\r?\n/).find((line) => line.trim()) || "";
-  if (options.hideTechnical && (
-    !hasChineseText(firstLine)
-    || isShortEnglishLearningFailureValue(firstLine)
+  const firstLineHasChinese = hasChineseText(firstLine);
+  if (options.hideTechnical && !firstLineHasChinese && (
+    isShortEnglishLearningFailureValue(firstLine)
     || isTechnicalLearningFailureValue(firstLine)
+    || isInternalLearningCode(firstLine)
   )) {
     return "学习流程处理失败，详情可在高级详情中查看。";
   }
@@ -6321,7 +6322,11 @@ function readableLearningFailureValue(value, fallback, options = {}) {
     .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "已隐藏邮箱")
     .replace(/\b(api[_-]?key|token|secret)\b\s*[:=]\s*\S+/gi, "$1 已隐藏")
     .replace(/\b[A-Za-z]:\\[^\s"'<>]+/g, "已隐藏路径")
-    .replace(/\/(?:Users|home|var|tmp|app|src|mnt)\/[^\s"'<>]+/g, "已隐藏路径");
+    .replace(/\/(?:Users|home|var|tmp|app|src|mnt)\/[^\s"'<>]+/g, "已隐藏路径")
+    .replace(/\b(?:disk full|permission denied|timeout|network error|request failed)\b/gi, "技术细节")
+    .replace(/\b(?:ENOENT|EACCES|EPERM|ECONNREFUSED|ETIMEDOUT)\b/g, "技术细节")
+    .replace(/\b(?:Error|TypeError|ReferenceError|SyntaxError|RangeError)(?::|\b)/gi, "技术细节")
+    .replace(/\b[a-z][a-z0-9]+(?:[-_][a-z0-9]+){1,6}\b/gi, "内部信息");
   if (options.hideTechnical && !hasChineseText(sanitized)) {
     return "学习流程处理失败，详情可在高级详情中查看。";
   }

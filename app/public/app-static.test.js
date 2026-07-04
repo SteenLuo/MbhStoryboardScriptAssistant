@@ -23,6 +23,50 @@ function evaluateAppFunctions(names) {
   return sandbox;
 }
 
+function evaluateLearningRecordRenderer() {
+  const sandbox = {
+    document: {
+      createElement(tagName) {
+        return {
+          tagName,
+          className: "",
+          dataset: {},
+          innerHTML: "",
+          classList: {
+            toggle() {},
+          },
+        };
+      },
+    },
+    state: {
+      viewedLearningFailureIds: new Set(),
+    },
+  };
+  const names = [
+    "escapeHtml",
+    "safeClassName",
+    "normalizeLearningDisplayStatus",
+    "formatLearningStatus",
+    "learningRecordLine",
+    "hasChineseText",
+    "isInternalLearningCode",
+    "isShortEnglishLearningFailureValue",
+    "isTechnicalLearningFailureValue",
+    "readableLearningFailureStage",
+    "readableLearningFailureValue",
+    "renderLearningFailureSummary",
+    "renderLearningAdvancedDetails",
+    "learningAdvancedPayload",
+    "learningRecordKeyHash",
+    "learningRecordKey",
+    "isFailedLearningRecord",
+    "renderLearningRecordItem",
+  ];
+  const source = `${names.map(extractFunction).join("\n")}\nglobalThis.renderLearningRecordItem = renderLearningRecordItem;`;
+  vm.runInNewContext(source, sandbox);
+  return sandbox.renderLearningRecordItem;
+}
+
 function extractStyleBlock(selector) {
   const marker = `${selector} {`;
   const start = stylesSource.indexOf(marker);
@@ -323,7 +367,7 @@ test("learning record renderer keeps novice fields in the default card", () => {
   const failedSource = extractFunction("isFailedLearningRecord");
 
   assert.match(renderRecordSource, /record\.learnedText/);
-  assert.match(renderRecordSource, /normalizeLearningDisplayStatus\(record\.displayStatus,\s*"待确认"\)/);
+  assert.match(renderRecordSource, /normalizeLearningDisplayStatus\(record\.displayStatus\s*\|\|\s*record\.status,\s*"待确认"\)/);
   assert.doesNotMatch(renderRecordSource, /record\.displayStatus\s*\|\|\s*"待确认"/);
   assert.match(normalizeDisplayStatusSource, /"已生效"\s*:\s*"已保存"/);
   assert.match(normalizeDisplayStatusSource, /active\s*:\s*"已保存"/);
@@ -377,7 +421,6 @@ test("learning record renderer keeps novice fields in the default card", () => {
   assert.match(keySource, /learning-record-/);
   assert.match(keySource, /learningRecordKeyHash/);
   assert.match(failedSource, /record\?\.displayStatus\s*\|\|\s*record\?\.status/);
-  assert.doesNotMatch(renderRecordSource, /record\.displayStatus\s*\|\|\s*record\.status/);
   assert.doesNotMatch(renderRecordSource, /record\.summary \|\| record\.rawTrigger \|\| record\.topicKey/);
   assert.doesNotMatch(renderRecordSource, /record\.advanced\?\.topicKey/);
   assert.doesNotMatch(renderRecordSource, /record\.tokenUsage/);
@@ -411,7 +454,20 @@ test("learning visible status normalizes legacy active display text", () => {
   assert.equal(formatLearningStatus("已生效"), "已保存");
 });
 
-test("learning failure summaries hide mixed Chinese technical details", () => {
+test("learning record renderer falls back to legacy status-only records", () => {
+  const renderLearningRecordItem = evaluateLearningRecordRenderer();
+
+  const item = renderLearningRecordItem({
+    recordId: "legacy-status-only",
+    status: "active",
+    learnedText: "旧学习记录",
+  });
+
+  assert.match(item.innerHTML, /已保存/);
+  assert.doesNotMatch(item.innerHTML, /待确认/);
+});
+
+test("learning failure summaries sanitize mixed Chinese technical details", () => {
   const {
     readableLearningFailureStage,
     readableLearningFailureValue,
@@ -427,8 +483,20 @@ test("learning failure summaries hide mixed Chinese technical details", () => {
   assert.equal(readableLearningFailureStage("write-learning-evidence 写入失败", "未返回明确阶段"), "写入学习证据");
   assert.equal(
     readableLearningFailureValue("学习失败：disk full", "fallback", { hideTechnical: true }),
+    "学习失败：技术细节",
+  );
+  assert.equal(
+    readableLearningFailureValue("disk full", "fallback", { hideTechnical: true }),
     "学习流程处理失败，详情可在高级详情中查看。",
   );
+  const conflictReason = readableLearningFailureValue(
+    "当前规则冲突：topic-key 已存在，需要人工确认",
+    "fallback",
+    { hideTechnical: true },
+  );
+  assert.match(conflictReason, /当前规则冲突/);
+  assert.match(conflictReason, /需要人工确认/);
+  assert.doesNotMatch(conflictReason, /topic-key/);
 });
 
 test("learning correction button fills composer and sends pending correction payload", () => {
