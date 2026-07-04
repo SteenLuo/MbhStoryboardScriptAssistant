@@ -1,7 +1,6 @@
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
-const { buildCurrentRulesetContext } = require("./currentRulesetContext");
 
 const SKILL_ROUTES = [
   {
@@ -103,21 +102,13 @@ async function loadLocalSkillContext(root, route, options = {}) {
     }
   }
 
-  const currentRulesetContext = await buildCurrentRulesetContext(root, { route: selected });
-  if (currentRulesetContext.promptText) {
-    sections.push(currentRulesetContext.promptText);
-    if (currentRulesetContext.sourceFile && !files.includes(currentRulesetContext.sourceFile)) {
-      files.push(currentRulesetContext.sourceFile);
-    }
-  }
-
   return {
     id: selected.id,
     name: selected.name,
     path: selected.path,
     files,
-    currentRulesUsed: currentRulesetContext.currentRulesUsed,
-    currentRulesLoadError: currentRulesetContext.loadError,
+    currentRulesUsed: [],
+    currentRulesLoadError: null,
     prompt: [
       `【本轮本地技能】${selected.name}（${selected.id}）`,
       "以下内容来自本项目本地 skills 目录。你必须优先遵守这些技能说明；如果与普通聊天习惯冲突，以本地技能为准。",

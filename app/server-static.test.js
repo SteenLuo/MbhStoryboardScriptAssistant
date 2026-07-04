@@ -38,16 +38,17 @@ test("canvas storyboard generation loads the local storyboard skill context", ()
   assert.match(generateSource, /storyboardSkillContext/);
 });
 
-test("canvas storyboard nodes retain current rules trace refs", () => {
+test("canvas storyboard nodes use stable skill rule refs instead of dynamic current rules", () => {
   const contextSource = extractFunction("canvasStoryboardSkillContext");
   const promptSource = extractFunction("canvasStoryboardSkillPrompt");
   const generateSource = extractFunction("generateCanvasStoryboards");
 
-  assert.match(contextSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
+  assert.doesNotMatch(contextSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
   assert.match(promptSource, /canvasStoryboardSkillContext\(\)/);
   assert.match(generateSource, /const storyboardSkillContext = await canvasStoryboardSkillContext\(\)/);
   assert.match(generateSource, /skillPrompt:\s*storyboardSkillContext\.prompt/);
-  assert.match(generateSource, /currentRulesUsed:\s*storyboardSkillContext\.currentRulesUsed/);
+  assert.doesNotMatch(generateSource, /currentRulesUsed:\s*storyboardSkillContext\.currentRulesUsed/);
+  assert.match(generateSource, /skillRulesUsed/);
 });
 
 test("canvas storyboard generation applies hard-rule validation repair and failure feedback", () => {
@@ -63,12 +64,13 @@ test("canvas storyboard generation applies hard-rule validation repair and failu
   assert.match(reviseSource, /hardRuleValidation/);
 });
 
-test("workflow storyboard generation applies hard-rule validation and keeps current rule trace refs", () => {
+test("workflow storyboard generation applies stable skill validation without current rule trace refs", () => {
   const workflowSource = extractFunction("runWorkflowTask");
 
   assert.match(workflowSource, /taskSkillContext\(task\)/);
   assert.match(workflowSource, /applyStoryboardHardRuleValidation\(result\.content/);
-  assert.match(workflowSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
+  assert.doesNotMatch(workflowSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
+  assert.match(workflowSource, /skillRulesUsed/);
   assert.match(workflowSource, /recordStoryboardHardRuleFailure/);
 });
 
@@ -98,12 +100,14 @@ test("generic storyboard generation and canvas save apply storyboard validation"
   const workbenchSource = extractFunction("generateWithDeepSeek");
   const saveSource = extractFunction("saveCanvas");
 
+  assert.doesNotMatch(serverSource, /buildCurrentRulesetContext/);
   assert.match(workbenchSource, /body\.task === "storyboard-generate"/);
   assert.match(workbenchSource, /applyStoryboardHardRuleValidation\(result\.content/);
-  assert.match(workbenchSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
+  assert.doesNotMatch(workbenchSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
+  assert.match(workbenchSource, /skillRulesUsed/);
   assert.match(workbenchSource, /recordStoryboardHardRuleFailure/);
   assert.match(saveSource, /applyCanvasStoryboardValidation/);
-  assert.match(saveSource, /currentStoryboardRulesUsed\(\)/);
+  assert.doesNotMatch(saveSource, /currentStoryboardRulesUsed\(\)/);
 });
 
 test("server prompts no longer apply script level rules", () => {
@@ -123,8 +127,10 @@ test("explicit skill learning mode is handled locally without model generation",
   assert.match(learningSource, /applyAutonomousConversationLearning/);
   assert.match(learningSource, /local-learning/);
   assert.match(learningSource, /已记录为技能学习材料/);
-  assert.match(learningSource, /learningEventStatus === "已生效"/);
-  assert.match(learningSource, /已同步到当前规则/);
+  assert.match(learningSource, /已保存到学习资料库/);
+  assert.match(learningSource, /不会自动改写生成规则/);
+  assert.match(learningSource, /沉淀到稳定 skill/);
+  assert.doesNotMatch(learningSource, /已同步到当前规则/);
   assert.doesNotMatch(learningSource, /deepseekChat/);
 });
 
@@ -137,10 +143,11 @@ test("chat composer can force dedicated review and adaptation skills", () => {
   assert.match(chatSource, /forcedSkillRoute \|\| routeLocalSkill/);
 });
 
-test("chat assistant skillRoute includes current rules trace refs", () => {
+test("chat assistant skillRoute does not expose dynamic current rules trace refs", () => {
   const chatSource = extractFunction("chatWithAssistant");
 
-  assert.match(chatSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
+  assert.doesNotMatch(chatSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
+  assert.match(chatSource, /skillRulesUsed:\s*skillContext\.skillRulesUsed/);
 });
 
 test("canvas revision endpoint only updates revision nodes once", () => {
@@ -238,7 +245,7 @@ test("learning correction API writes referenced correction events without blind 
   assert.match(correctionSource, /buildLearningLibrary/);
 });
 
-test("chat flow applies explicit learning rules into the current ruleset", () => {
+test("chat flow saves explicit learning into the learning event pipeline without generation", () => {
   const chatSource = extractFunction("chatWithAssistant");
   const helperSource = extractFunction("applyAutonomousConversationLearning");
 

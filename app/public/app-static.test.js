@@ -301,17 +301,19 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(indexSource, /learningSkillsTabCount/);
   assert.match(indexSource, /learningRecordHelp/);
   assert.match(indexSource, /学习记录说明/);
-  assert.match(learningPageSource, /系统会把长期规则、满意样例、纠错和归档证据记到这里。每条记录都会说明是否会被后续生成读取；硬规则最终是否执行成功，要看输出后校验。学错了可以点“带引用去纠正”回到对话处理。/);
+  assert.match(learningPageSource, /系统会把长期规则、满意样例、纠错和归档证据记到这里。已保存不等于影响生成；当前生成只读取稳定 skill。学错了可以点“带引用去纠正”回到对话处理。/);
   assert.match(learningPageSource, /已保存/);
   assert.match(learningPageSource, /已影响生成/);
-  assert.match(learningPageSource, /输出后校验/);
+  assert.match(learningPageSource, /普通学习记录和待沉淀规则不会自动影响生成/);
+  assert.match(learningPageSource, /沉淀规则/);
   assert.match(learningPageSource, /待确认/);
   assert.match(learningPageSource, /学错了怎么改/);
   assert.doesNotMatch(learningPageSource, /已生效/);
   assert.match(indexSource, /data-learning-library-tab="records"[\s\S]*learningRecordHelp[\s\S]*学习记录状态[\s\S]*已保存[\s\S]*已影响生成[\s\S]*待确认[\s\S]*失败[\s\S]*<\/button>/);
   assert.match(indexSource, /learningSkillHelp/);
   assert.match(indexSource, /技能库说明/);
-  assert.match(indexSource, /对话可以先影响当前规则层/);
+  assert.match(indexSource, /对话学习会先保存为沉淀材料/);
+  assert.match(indexSource, /进入稳定 skill 后，才会影响生成/);
   assert.match(indexSource, /不会直接编辑技能文件/);
   assert.match(indexSource, /data-learning-library-tab="skills"[\s\S]*learningSkillHelp[\s\S]*<\/button>/);
   assert.doesNotMatch(indexSource, /<\/div>\s*<div class="learning-help-wrap">[\s\S]*learningSkillHelp/);
@@ -341,8 +343,8 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(appSource, /function formatCurrentRuleStatus/);
   assert.match(appSource, /\/api\/learning-rules\/status/);
   assert.match(appSource, /data-rule-status-action/);
-  assert.match(appSource, /active: "已启用"/);
-  assert.match(appSource, /disabled: "已停用"/);
+  assert.match(appSource, /active: "已保存"/);
+  assert.match(appSource, /disabled: "已暂停"/);
   assert.match(appSource, /rule\.status === "active" \? "disabled" : "active"/);
   assert.match(appSource, /viewedLearningFailureIds/);
   assert.match(appSource, /function renderSkillLibraryItem/);
@@ -537,13 +539,13 @@ test("learning record renderer surfaces readable advanced error messages in defa
     generationImpactText: "未影响生成",
     advanced: {
       error: {
-        message: "当前规则冲突：topic-key 已存在，需要人工确认",
+        message: "沉淀规则冲突：topic-key 已存在，需要人工确认",
       },
     },
   });
   const defaultHtml = learningRecordDefaultHtml(item);
 
-  assert.match(defaultHtml, /当前规则冲突/);
+  assert.match(defaultHtml, /沉淀规则冲突/);
   assert.match(defaultHtml, /需要人工确认/);
   assert.doesNotMatch(defaultHtml, /topic-key/);
   assert.doesNotMatch(defaultHtml, /学习流程处理失败，详情可在高级详情中查看。/);
@@ -591,11 +593,11 @@ test("learning failure summaries sanitize mixed Chinese technical details", () =
     "学习流程处理失败，详情可在高级详情中查看。",
   );
   const conflictReason = readableLearningFailureValue(
-    "当前规则冲突：topic-key 已存在，需要人工确认",
+    "沉淀规则冲突：topic-key 已存在，需要人工确认",
     "fallback",
     { hideTechnical: true },
   );
-  assert.match(conflictReason, /当前规则冲突/);
+  assert.match(conflictReason, /沉淀规则冲突/);
   assert.match(conflictReason, /需要人工确认/);
   assert.doesNotMatch(conflictReason, /topic-key/);
 });

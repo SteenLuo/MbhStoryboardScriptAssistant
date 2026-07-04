@@ -6152,7 +6152,7 @@ function renderLearningLibrary() {
     panel.hidden = panel.dataset.learningLibraryPanel !== state.learningLibraryTab;
   });
   renderLearningLibraryList("learningLibraryRecords", data.records || [], renderLearningRecordItem, "还没有学习记录；当你说以后都这样、投喂样例或归档画布后，会出现在这里");
-  renderLearningLibraryList("learningLibraryRules", data.currentRules || [], renderCurrentRuleItem, "暂无当前规则");
+  renderLearningLibraryList("learningLibraryRules", data.currentRules || [], renderCurrentRuleItem, "暂无沉淀规则");
   renderLearningLibraryList("learningLibrarySkills", skillItems, renderSkillLibraryItem, "暂无技能草案，正式技能仍可用");
 }
 
@@ -6291,9 +6291,9 @@ function readableLearningFailureStage(value, fallback) {
     "write-learning-evidence": "写入学习证据",
     "archive-evidence": "写入学习证据",
     evidence: "写入学习证据",
-    "publish-current-ruleset": "发布当前规则",
-    "current-ruleset": "发布当前规则",
-    "ruleset-publish": "发布当前规则",
+    "publish-current-ruleset": "整理沉淀规则",
+    "current-ruleset": "整理沉淀规则",
+    "ruleset-publish": "整理沉淀规则",
     "hard-rule-validation": "校验生成结果",
     "hard-rule-validation-failed": "校验生成结果",
     "learning-correction": "处理纠错说明",
@@ -6512,13 +6512,17 @@ function renderCurrentRuleItem(rule) {
   item.className = `learning-library-item status-${safeClassName(rule.status)}`;
   const canToggle = ["active", "disabled"].includes(rule.status) && !rule.coveredByRuleId;
   const nextStatus = rule.status === "active" ? "disabled" : "active";
-  const actionLabel = rule.status === "active" ? "停用" : "启用";
+  const actionLabel = rule.status === "active" ? "暂停沉淀" : "恢复沉淀";
+  const impactText = rule.generationImpactText || "已保存为待沉淀规则，不会自动影响生成；稳定 skill 才会被生成读取。";
+  const nextStepText = rule.nextStepText || "需要时人工评审，再沉淀到稳定 skill。";
   item.innerHTML = `
     <div class="learning-library-item-head">
       <strong>${escapeHtml(rule.content || rule.topicKey || "规则")}</strong>
       <span>${escapeHtml(formatCurrentRuleStatus(rule.status))}</span>
     </div>
     <p>适用：${escapeHtml(formatLearningCapability(rule.capability))} · ${escapeHtml(formatLearningTopic(rule.topicKey))} · 更新时间 ${escapeHtml(formatDateTime(rule.updatedAt || rule.createdAt))}</p>
+    <p><b>是否影响生成：</b>${escapeHtml(impactText)}</p>
+    <p><b>下一步：</b>${escapeHtml(nextStepText)}</p>
     ${canToggle ? `
       <div class="learning-rule-actions">
         <button type="button" data-rule-status-action data-rule-id="${escapeHtml(rule.ruleId)}" data-next-status="${nextStatus}">
@@ -6538,7 +6542,7 @@ async function setCurrentRuleStatus(ruleId, status) {
   const statusNode = $("learningStatus");
   if (statusNode) {
     statusNode.hidden = false;
-    statusNode.textContent = status === "disabled" ? "正在停用当前规则..." : "正在启用当前规则...";
+    statusNode.textContent = status === "disabled" ? "正在暂停沉淀规则..." : "正在恢复沉淀规则...";
   }
   try {
     const result = await api("/api/learning-rules/status", {
@@ -6553,12 +6557,12 @@ async function setCurrentRuleStatus(ruleId, status) {
     }
     if (statusNode) {
       statusNode.hidden = false;
-      statusNode.textContent = status === "disabled" ? "当前规则已停用。" : "当前规则已启用。";
+      statusNode.textContent = status === "disabled" ? "沉淀规则已暂停。" : "沉淀规则已恢复。";
     }
   } catch (error) {
     if (statusNode) {
       statusNode.hidden = false;
-      statusNode.textContent = `当前规则状态更新失败：${error.message}`;
+      statusNode.textContent = `沉淀规则状态更新失败：${error.message}`;
     }
   }
 }
@@ -6671,8 +6675,8 @@ function formatLearningStatus(status) {
 function formatCurrentRuleStatus(status) {
   const value = String(status || "").trim();
   const labels = {
-    active: "已启用",
-    disabled: "已停用",
+    active: "已保存",
+    disabled: "已暂停",
     covered: "已被覆盖",
   };
   return labels[value] || formatLearningStatus(value);

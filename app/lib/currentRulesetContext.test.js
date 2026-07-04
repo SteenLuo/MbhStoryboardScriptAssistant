@@ -75,7 +75,7 @@ test("buildCurrentRulesetContext filters active rules by capability and exposes 
 
   assert.strictEqual(context.ok, true);
   assert.strictEqual(context.loadError, null);
-  assert.match(context.promptText, /当前规则层/);
+  assert.match(context.promptText, /沉淀规则（不直接影响生成）/);
   assert.match(context.promptText, /分镜台词每句 20 字以内/);
   assert.match(context.promptText, /输出保持简洁/);
   assert.doesNotMatch(context.promptText, /SCRIPT_RULE_SHOULD_NOT_LOAD/);

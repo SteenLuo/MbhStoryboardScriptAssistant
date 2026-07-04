@@ -24,13 +24,13 @@ skills/
 - `02-script/script-review-rewrite`：AI 漫剧剧本评审和改写。
 - `03-storyboard/storyboard-generate`：根据剧本生成 AI 漫剧分镜。
 - `04-learning/sample-ingest`：学习已有 AI 漫剧剧本和分镜样例，沉淀学习记录和规则建议。
-- `05-evolution/skill-evolution`：根据反馈、评测、学习记录和当前规则层改进技能。
+- `05-evolution/skill-evolution`：根据反馈、评测、学习记录和沉淀规则材料改进技能。
 
 ## 使用原则
 
 - 技能说明以中文为主。
 - 英文目录名仅用于工具兼容。
 - 每个技能只做一类事。
-- 学习记录、当前规则层和技能版本分开。
-- 样例学习不能直接污染当前规则层和正式技能。
+- 学习记录、沉淀规则材料和技能版本分开。
+- 样例学习不能直接污染正式技能。
 - 总控技能只负责路由，不替代专业技能。

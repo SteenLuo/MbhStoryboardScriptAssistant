@@ -19,6 +19,7 @@ const GENERATION_PROOF_STRING_FIELDS = [
 ];
 const GENERATION_PROOF_ARRAY_FIELDS = [
   "currentRulesUsedRefs",
+  "skillRulesUsedRefs",
   "validationResultRefs",
   "failureEventIds",
 ];
@@ -80,6 +81,7 @@ function normalizeLearningEvent(input = {}) {
     neededCount: normalizeNonNegativeInteger(input.neededCount),
     relatedRecordIds: normalizeStringArray(input.relatedRecordIds),
     currentRulesUsedRefs: normalizeStringArray(input.currentRulesUsedRefs),
+    skillRulesUsedRefs: normalizeStringArray(input.skillRulesUsedRefs),
     sampleCount: normalizeNonNegativeInteger(input.sampleCount),
     sampleRecordIds: normalizeStringArray(input.sampleRecordIds),
     evidenceRecordIds: normalizeStringArray(input.evidenceRecordIds),

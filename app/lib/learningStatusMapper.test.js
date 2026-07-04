@@ -70,7 +70,7 @@ test("normalized minimal sample and evidence landings stay saved despite default
   }
 });
 
-test("current rule landing affects generation but can be pending first hit", () => {
+test("current rule landing is saved for skill sedimentation and does not affect generation", () => {
   const record = mapLearningDisplayRecord({
     eventId: "event-rule",
     ruleId: "rule-event-rule",
@@ -82,13 +82,13 @@ test("current rule landing affects generation but can be pending first hit", () 
   });
 
   assertKnownDisplayStatus(record);
-  assert.equal(record.displayStatus, "已影响生成");
+  assert.equal(record.displayStatus, "已保存");
   assert.equal(record.actionLabel, "不用管");
-  assert.equal(record.affectsGeneration, true);
-  assert.match(record.generationImpactText, /会被后续生成读取/);
-  assert.match(record.generationImpactText, /输出后校验/);
-  assert.equal(record.generationProof.proofStatus, "pending_first_hit");
-  assert.match(record.generationProof.claimText, /输出后校验/);
+  assert.equal(record.affectsGeneration, false);
+  assert.match(record.generationImpactText, /待沉淀规则/);
+  assert.match(record.generationImpactText, /稳定 skill/);
+  assert.equal(record.generationProof.proofStatus, "not_applicable");
+  assert.match(record.nextStepText, /沉淀到稳定 skill/);
 });
 
 test("unfinished generation landings wait for confirmation before affecting generation", () => {
@@ -139,7 +139,7 @@ test("failed learning exposes correction action and failed proof", () => {
     internalStatus: "failed",
     jobStatus: "failed",
     summary: "规则内容为空",
-    error: { stage: "publish-current-ruleset", message: "规则内容为空，无法发布到当前规则层" },
+    error: { stage: "publish-current-ruleset", message: "规则内容为空，无法沉淀为规则材料" },
   });
 
   assertKnownDisplayStatus(record);
@@ -190,7 +190,7 @@ test("unknown proof affecting generation explains incomplete evidence", () => {
 test("mapper exposes only public generation proof fields", () => {
   const record = mapLearningDisplayRecord({
     eventId: "event-proof-public",
-    landingType: "current-rule",
+    landingType: "formal-skill",
     learningMode: "overall",
     internalStatus: "landed",
     jobStatus: "completed",

@@ -18,6 +18,30 @@ const STORYBOARD_FIELD_LABELS = new Set([
   "时长",
   "字幕",
 ]);
+const STABLE_STORYBOARD_SKILL_RULES = [
+  {
+    ruleId: "stable-skill-storyboard-dialogue-length",
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length.max-chars",
+    capability: "storyboard",
+    status: "active",
+    hardRuleId: "storyboard.dialogue.length",
+    sourceEventIds: [],
+    sourceFile: "skills/03-storyboard/storyboard-generate/SKILL.md",
+    origin: "stable-skill",
+  },
+  {
+    ruleId: "stable-skill-storyboard-single-speaker",
+    topicKey: "storyboard.dialogue.speaker-count",
+    conflictKey: "storyboard.dialogue.speaker-count.single-speaker",
+    capability: "storyboard",
+    status: "active",
+    hardRuleId: "storyboard.dialogue.speaker-count",
+    sourceEventIds: [],
+    sourceFile: "skills/03-storyboard/storyboard-generate/SKILL.md",
+    origin: "stable-skill",
+  },
+];
 const PROGRAMMATIC_HARD_RULES = [
   {
     hardRuleId: "storyboard.dialogue.length",
@@ -70,7 +94,7 @@ function getApplicableStoryboardHardRules(currentRulesUsed = []) {
 }
 
 function validateStoryboardHardRules(content, options = {}) {
-  const appliedRules = getApplicableStoryboardHardRules(options.currentRulesUsed);
+  const appliedRules = getStoryboardValidationRules(options);
   if (!appliedRules.length) {
     return {
       ok: true,
@@ -98,6 +122,21 @@ function validateStoryboardHardRules(content, options = {}) {
     appliedRules,
     checked: true,
   };
+}
+
+function getStoryboardValidationRules(options = {}) {
+  const stableRules = options.useStableSkillRules === false ? [] : getStableStoryboardSkillRules();
+  const currentRules = options.includeCurrentRules
+    ? getApplicableStoryboardHardRules(options.currentRulesUsed)
+    : [];
+  return [...stableRules, ...currentRules];
+}
+
+function getStableStoryboardSkillRules() {
+  return STABLE_STORYBOARD_SKILL_RULES.map((rule) => ({
+    ...rule,
+    sourceEventIds: [...rule.sourceEventIds],
+  }));
 }
 
 function applyStoryboardHardRuleValidation(content, options = {}) {
@@ -436,11 +475,19 @@ function groupRulesByHardRuleId(rules = []) {
 }
 
 function attachHardRuleMeta(issues = [], rules = [], hardRuleId = "") {
-  const currentRulesUsedRefs = rules.map((rule) => rule.ruleId).filter(Boolean);
+  const skillRulesUsedRefs = rules
+    .filter((rule) => rule.origin === "stable-skill")
+    .map((rule) => rule.ruleId)
+    .filter(Boolean);
+  const currentRulesUsedRefs = rules
+    .filter((rule) => rule.origin !== "stable-skill")
+    .map((rule) => rule.ruleId)
+    .filter(Boolean);
   const sourceEventIds = collectRuleSourceEventIds(rules);
   return (Array.isArray(issues) ? issues : []).map((issue) => ({
     ...issue,
     hardRuleId,
+    skillRulesUsedRefs,
     currentRulesUsedRefs,
     sourceEventIds,
   }));
@@ -505,6 +552,7 @@ function isStoryboardValidationResolved(node) {
 module.exports = {
   applyStoryboardHardRuleValidation,
   getApplicableStoryboardHardRules,
+  getStableStoryboardSkillRules,
   isStoryboardValidationResolved,
   MAX_DIALOGUE_CHARS,
   normalizeStoryboardFieldLabels,

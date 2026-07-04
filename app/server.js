@@ -23,7 +23,6 @@ const { applyLearningCorrectionRequest } = require("./lib/learningCorrection");
 const { appendLearningEvent, learnExplicitRule, updateCurrentRuleStatus } = require("./lib/autonomousLearning");
 const { recordArchiveLearningEvidence } = require("./lib/learningEvidence");
 const { analyzeCanvasArchiveReadiness } = require("./lib/canvasArchive");
-const { buildCurrentRulesetContext } = require("./lib/currentRulesetContext");
 const { applyStoryboardHardRuleValidation, isStoryboardValidationResolved, validateStoryboardContent } = require("./lib/storyboardValidation");
 
 const ROOT = path.resolve(__dirname, "..");
@@ -385,21 +384,10 @@ async function saveCanvas(canvas, options = {}) {
     if (existing.deletedAt) throw new Error("画布已在回收站，不能继续编辑。");
   }
   if (!options.skipStoryboardValidation) {
-    normalized = normalizeCanvas(applyCanvasStoryboardValidation(normalized, {
-      currentRulesUsed: await currentStoryboardRulesUsed(),
-    }));
+    normalized = normalizeCanvas(applyCanvasStoryboardValidation(normalized));
   }
   await fsp.writeFile(file, JSON.stringify(normalized, null, 2), "utf8");
   return normalized;
-}
-
-async function currentStoryboardRulesUsed() {
-  try {
-    const context = await buildCurrentRulesetContext(BUSINESS_ROOT, { capability: "storyboard" });
-    return Array.isArray(context.currentRulesUsed) ? context.currentRulesUsed : [];
-  } catch {
-    return [];
-  }
 }
 
 async function getCanvas(id) {
@@ -977,8 +965,7 @@ async function chatWithAssistant(body) {
           name: skillContext.name,
           path: skillContext.path,
           files: skillContext.files,
-          currentRulesUsed: skillContext.currentRulesUsed,
-          currentRulesLoadError: skillContext.currentRulesLoadError,
+          skillRulesUsed: skillContext.skillRulesUsed || [],
         }
       : null,
   });
@@ -1037,11 +1024,7 @@ async function handleLearningCompose({ conversation, userMessage, chatIntent, sk
   if (assistantMessage.learningRecord) {
     lines.push(`本地记录：${assistantMessage.learningRecord}`);
   }
-  if (assistantMessage.learningEventStatus === "已生效") {
-    lines.push("已同步到当前规则，后续技能调用会读取。");
-  } else {
-    lines.push("已记录到学习资料库。");
-  }
+  lines.push("已保存到学习资料库；不会自动改写生成规则，后续需要人工沉淀到稳定 skill。");
   if (assistantMessage.learningError) {
     lines.push(`学习记录异常：${assistantMessage.learningError}`);
   }
@@ -1221,15 +1204,12 @@ async function runWorkflowTask({ runDir, task, model, apiKey, force = false }) {
   let finalContent = result.content;
   let hardRuleValidation = null;
   if (task === "storyboard-generate") {
-    const hardRuleResult = applyStoryboardHardRuleValidation(result.content, {
-      currentRulesUsed: skillContext.currentRulesUsed || [],
-    });
+    const hardRuleResult = applyStoryboardHardRuleValidation(result.content);
     hardRuleValidation = hardRuleResult.hardRuleValidation;
     if (hardRuleValidation.checked && !hardRuleValidation.finalOk) {
       await recordStoryboardHardRuleFailure({
         canvasId: path.basename(runDir),
         outputId: config.file,
-        currentRulesUsed: skillContext.currentRulesUsed || [],
         hardRuleValidation,
       });
       throw new Error("标准工作流分镜产物违反已命中的硬规则，自动拆分修复后仍未通过，已写入学习失败事件。");
@@ -1243,7 +1223,7 @@ async function runWorkflowTask({ runDir, task, model, apiKey, force = false }) {
     lastModel: result.model,
     updatedAt: new Date().toISOString(),
     ...(task === "storyboard-generate" ? {
-      currentRulesUsed: skillContext.currentRulesUsed || [],
+      skillRulesUsed: hardRuleValidation?.appliedRules || [],
       hardRuleValidation,
     } : {}),
   });
@@ -1254,7 +1234,7 @@ async function runWorkflowTask({ runDir, task, model, apiKey, force = false }) {
     model: result.model,
     reused: false,
     ...(task === "storyboard-generate" ? {
-      currentRulesUsed: skillContext.currentRulesUsed || [],
+      skillRulesUsed: hardRuleValidation?.appliedRules || [],
       hardRuleValidation,
     } : {}),
   };
@@ -1308,7 +1288,7 @@ async function taskSkillContext(task) {
   }
   return {
     prompt: await taskSkillPrompt(task),
-    currentRulesUsed: [],
+    skillRulesUsed: [],
   };
 }
 
@@ -1334,7 +1314,7 @@ async function canvasStoryboardSkillContext() {
   ].join("\n\n");
   return {
     prompt,
-    currentRulesUsed: skillContext.currentRulesUsed || [],
+    skillRulesUsed: [],
   };
 }
 
@@ -1437,14 +1417,11 @@ async function generateCanvasStoryboards(body) {
     usages.push(result.usage);
     lastModel = result.model || lastModel;
     const titleScope = { nodes: [...(canvas.nodes || []), ...generatedNodes] };
-    const hardRuleResult = applyStoryboardHardRuleValidation(result.content, {
-      currentRulesUsed: storyboardSkillContext.currentRulesUsed || [],
-    });
+    const hardRuleResult = applyStoryboardHardRuleValidation(result.content);
     if (hardRuleResult.hardRuleValidation.checked && !hardRuleResult.hardRuleValidation.finalOk) {
       await recordStoryboardHardRuleFailure({
         canvasId: canvas.id,
         outputId: plannedNode.id,
-        currentRulesUsed: storyboardSkillContext.currentRulesUsed || [],
         hardRuleValidation: hardRuleResult.hardRuleValidation,
       });
       throw new Error("分镜输出违反已命中的硬规则，自动拆分修复后仍未通过，已写入学习失败事件。");
@@ -1458,7 +1435,7 @@ async function generateCanvasStoryboards(body) {
         model: result.model,
         usage: result.usage,
         generatedAt: new Date().toISOString(),
-        currentRulesUsed: storyboardSkillContext.currentRulesUsed || [],
+        skillRulesUsed: hardRuleResult.hardRuleValidation.appliedRules || [],
         validation: hardRuleResult.validation,
         hardRuleValidation: hardRuleResult.hardRuleValidation,
       },
@@ -1476,7 +1453,6 @@ async function generateCanvasStoryboards(body) {
 }
 
 async function recordStoryboardHardRuleFailure(input = {}) {
-  const currentRulesUsed = Array.isArray(input.currentRulesUsed) ? input.currentRulesUsed : [];
   const appliedRules = Array.isArray(input.hardRuleValidation?.appliedRules)
     ? input.hardRuleValidation.appliedRules
     : [];
@@ -1484,7 +1460,7 @@ async function recordStoryboardHardRuleFailure(input = {}) {
   const sourceEventIds = Array.from(new Set(appliedRules.flatMap((rule) =>
     Array.isArray(rule.sourceEventIds) ? rule.sourceEventIds : []
   ).map(String).filter(Boolean)));
-  const firstRule = appliedRules[0] || currentRulesUsed[0] || {};
+  const firstRule = appliedRules[0] || {};
   const failedAt = new Date().toISOString();
   const eventId = `hard-rule-validation-failed-${safeEventSegment(input.canvasId)}-${safeEventSegment(input.outputId)}-${Date.now()}`;
   await appendLearningEvent(BUSINESS_ROOT, {
@@ -1499,8 +1475,9 @@ async function recordStoryboardHardRuleFailure(input = {}) {
     canvasId: input.canvasId,
     outputId: input.outputId,
     sourceEventIds,
-    currentRulesUsedRefs: ruleRefs,
-    summary: "分镜输出违反已影响生成的硬规则，自动修正后仍失败。",
+    currentRulesUsedRefs: [],
+    skillRulesUsedRefs: ruleRefs,
+    summary: "分镜输出违反稳定分镜技能硬规则，自动修正后仍失败。",
     error: {
       stage: "storyboard-hard-rule-post-validation",
       code: "STORYBOARD_HARD_RULE_VALIDATION_FAILED",
@@ -1509,7 +1486,8 @@ async function recordStoryboardHardRuleFailure(input = {}) {
     },
     generationProof: {
       proofStatus: "failed",
-      currentRulesUsedRefs: ruleRefs,
+      currentRulesUsedRefs: [],
+      skillRulesUsedRefs: ruleRefs,
       validationResultRefs: [String(input.outputId || "").trim()].filter(Boolean),
       failureEventIds: [eventId],
     },
@@ -1610,15 +1588,12 @@ async function reviseCanvasNode(body) {
     messages,
   });
   const hardRuleResult = node.type === "storyboard"
-    ? applyStoryboardHardRuleValidation(result.content, {
-        currentRulesUsed: storyboardSkillContext?.currentRulesUsed || [],
-      })
+    ? applyStoryboardHardRuleValidation(result.content)
     : null;
   if (hardRuleResult?.hardRuleValidation?.checked && !hardRuleResult.hardRuleValidation.finalOk) {
     await recordStoryboardHardRuleFailure({
       canvasId: canvas.id,
       outputId: node.id,
-      currentRulesUsed: storyboardSkillContext?.currentRulesUsed || [],
       hardRuleValidation: hardRuleResult.hardRuleValidation,
     });
     throw new Error("分镜修改结果违反已命中的硬规则，自动拆分修复后仍未通过，已写入学习失败事件。");
@@ -1650,7 +1625,7 @@ async function reviseCanvasNode(body) {
             revisedAt,
             model: result.model,
             usage: result.usage,
-            currentRulesUsed: storyboardSkillContext?.currentRulesUsed || item.meta?.currentRulesUsed || [],
+            skillRulesUsed: hardRuleResult?.hardRuleValidation?.appliedRules || item.meta?.skillRulesUsed || [],
             ...(hardRuleResult ? { hardRuleValidation: hardRuleResult.hardRuleValidation } : {}),
             ...(revisedValidation ? { validation: revisedValidation } : {}),
           },
@@ -1889,15 +1864,12 @@ async function generateWithDeepSeek(body) {
   let finalContent = result.content;
   let hardRuleValidation = null;
   if (body.task === "storyboard-generate") {
-    const hardRuleResult = applyStoryboardHardRuleValidation(result.content, {
-      currentRulesUsed: skillContext.currentRulesUsed || [],
-    });
+    const hardRuleResult = applyStoryboardHardRuleValidation(result.content);
     hardRuleValidation = hardRuleResult.hardRuleValidation;
     if (hardRuleValidation.checked && !hardRuleValidation.finalOk) {
       await recordStoryboardHardRuleFailure({
         canvasId: path.basename(runDir),
         outputId: config.file,
-        currentRulesUsed: skillContext.currentRulesUsed || [],
         hardRuleValidation,
       });
       throw new Error("分镜产物违反已命中的硬规则，自动拆分修复后仍未通过，已写入学习失败事件。");
@@ -1912,7 +1884,7 @@ async function generateWithDeepSeek(body) {
     lastModel: result.model,
     updatedAt: new Date().toISOString(),
     ...(body.task === "storyboard-generate" ? {
-      currentRulesUsed: skillContext.currentRulesUsed || [],
+      skillRulesUsed: hardRuleValidation?.appliedRules || [],
       hardRuleValidation,
     } : {}),
   });
@@ -1921,7 +1893,7 @@ async function generateWithDeepSeek(body) {
     content: finalContent,
     usage: result.usage,
     ...(body.task === "storyboard-generate" ? {
-      currentRulesUsed: skillContext.currentRulesUsed || [],
+      skillRulesUsed: hardRuleValidation?.appliedRules || [],
       hardRuleValidation,
     } : {}),
   };

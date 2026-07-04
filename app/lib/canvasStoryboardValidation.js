@@ -5,11 +5,10 @@ const {
 } = require("./storyboardValidation");
 
 function applyCanvasStoryboardValidation(canvas = {}, options = {}) {
-  const currentRulesUsed = Array.isArray(options.currentRulesUsed) ? options.currentRulesUsed : [];
   return {
     ...canvas,
     nodes: Array.isArray(canvas.nodes)
-      ? canvas.nodes.map((node) => applyStoryboardNodeValidation(node, { currentRulesUsed }))
+      ? canvas.nodes.map((node) => applyStoryboardNodeValidation(node, options))
       : [],
   };
 }
@@ -18,21 +17,22 @@ function applyStoryboardNodeValidation(node = {}, options = {}) {
   if (node.type !== "storyboard") return node;
   if (isStoryboardValidationResolved(node)) return node;
 
-  const currentRulesUsed = Array.isArray(options.currentRulesUsed) ? options.currentRulesUsed : [];
-  const hardRuleResult = applyStoryboardHardRuleValidation(node.content || "", { currentRulesUsed });
+  const hardRuleResult = applyStoryboardHardRuleValidation(node.content || "", {
+    useStableSkillRules: options.useStableSkillRules !== false,
+  });
   const validation = hardRuleResult.validation || validateStoryboardContent(hardRuleResult.content || node.content || "");
   const nextMeta = {
     ...(node.meta || {}),
     validation,
   };
 
-  if (currentRulesUsed.length) {
-    nextMeta.currentRulesUsed = currentRulesUsed;
-  }
+  delete nextMeta.currentRulesUsed;
   if (hardRuleResult.hardRuleValidation?.checked) {
     nextMeta.hardRuleValidation = hardRuleResult.hardRuleValidation;
+    nextMeta.skillRulesUsed = hardRuleResult.hardRuleValidation.appliedRules || [];
   } else {
     delete nextMeta.hardRuleValidation;
+    delete nextMeta.skillRulesUsed;
   }
   if (!validation.ok) {
     delete nextMeta.validationResolution;

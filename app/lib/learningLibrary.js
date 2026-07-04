@@ -262,17 +262,15 @@ function savedMaterialRecord(input) {
 function publicImpactRule(rule) {
   const record = {
     recordId: prefixedId("rule", rule.ruleId),
-    displayStatus: rule.status === "active" ? "已影响生成" : "已保存",
-    status: rule.status,
+    displayStatus: rule.status === "covered" ? "已被覆盖" : "已保存",
+    status: rule.status === "covered" ? "已被覆盖" : "已保存",
     actionLabel: "不用管",
-    affectsGeneration: rule.status === "active",
-    generationImpactText: rule.status === "active"
-      ? "会被后续生成读取；硬规则必须通过输出后校验才算本次执行成功。"
-      : "当前规则已保留在规则层，但未处于启用状态。",
+    affectsGeneration: false,
+    generationImpactText: "已保存为待沉淀规则，不会自动影响生成；稳定 skill 才会被生成读取。",
     learnedText: rule.content,
-    sourceText: "当前规则",
-    usedWhereText: "当前规则层",
-    nextStepText: "无需处理，可通过规则列表启用或停用。",
+    sourceText: "学习资料库",
+    usedWhereText: "学习资料库：待沉淀规则",
+    nextStepText: "无需处理；后续人工评审后，可沉淀到稳定 skill。",
     createdAt: rule.createdAt,
     updatedAt: rule.updatedAt,
     advanced: {
@@ -305,6 +303,8 @@ function publicCurrentRule(rule) {
     coveredByRuleId: rule.coveredByRuleId,
     createdAt: rule.createdAt,
     updatedAt: rule.updatedAt,
+    generationImpactText: "已保存为待沉淀规则，不会自动影响生成；稳定 skill 才会被生成读取。",
+    nextStepText: "需要时人工评审，再沉淀到稳定 skill。",
     advanced: {
       topicKey: rule.topicKey,
       conflictKey: rule.conflictKey,
@@ -323,28 +323,28 @@ function applyCurrentRuleImpactOverlay(record, rulesetResult, promptSafeRuleById
   let overlay;
   if (promptSafeRule?.status === "active") {
     overlay = {
-      displayStatus: "已影响生成",
-      status: "active",
+      displayStatus: "已保存",
+      status: "已保存",
       actionLabel: "不用管",
-      generationImpactText: "会被后续生成读取；硬规则必须通过输出后校验才算本次执行成功。",
-      usedWhereText: "当前规则层",
-      nextStepText: "无需处理；如果生成结果违规，系统必须自动修复或记录失败，不能静默交付。",
+      generationImpactText: "已保存为待沉淀规则，不会自动影响生成；稳定 skill 才会被生成读取。",
+      usedWhereText: "学习资料库：待沉淀规则",
+      nextStepText: "无需处理；后续人工评审后，可沉淀到稳定 skill。当前不会自动影响生成。",
       generationProof: {
-        proofStatus: "ready",
-        claimText: "这条规则已通过当前规则层校验，会被生成链路读取；本次是否执行成功以输出后校验为准。",
+        proofStatus: "not_applicable",
+        claimText: "这条规则只作为学习资料沉淀，不参与当前生成。",
       },
     };
   } else if (!rulesetResult.ok) {
     overlay = {
-      displayStatus: "失败",
-      status: "失败",
+      displayStatus: "待确认",
+      status: "待确认 / 待纠正",
       actionLabel: "待纠正",
-      generationImpactText: "当前规则层加载失败，这条规则暂不影响生成。",
-      usedWhereText: "未进入生成链路。",
-      nextStepText: "需要修复规则结构，或带引用去纠正后重新发布。",
+      generationImpactText: "沉淀规则文件加载失败，但生成不读取该文件；需要整理学习资料库。",
+      usedWhereText: "学习资料库：规则沉淀文件异常。",
+      nextStepText: "请带引用去纠正，或整理这条规则后再决定是否沉淀到稳定 skill。",
       generationProof: {
-        proofStatus: "failed",
-        claimText: "规则文件未通过生成加载校验，不能作为正常生成证据。",
+        proofStatus: "not_applicable",
+        claimText: "沉淀规则文件异常，但当前生成由稳定 skill 驱动。",
       },
     };
   } else if (promptSafeRule?.status === "disabled") {
@@ -352,12 +352,12 @@ function applyCurrentRuleImpactOverlay(record, rulesetResult, promptSafeRuleById
       displayStatus: "已保存",
       status: "已保存",
       actionLabel: "不用管",
-      generationImpactText: "当前规则已停用，暂不影响生成。",
-      usedWhereText: "学习资料库。",
-      nextStepText: "无需处理；需要恢复时可重新启用或重新说明。",
+      generationImpactText: "已保存为待沉淀规则，不会自动影响生成；稳定 skill 才会被生成读取。",
+      usedWhereText: "学习资料库：待沉淀规则。",
+      nextStepText: "无需处理；后续人工评审后，可沉淀到稳定 skill。",
       generationProof: {
         proofStatus: "not_applicable",
-        claimText: "这条规则当前未启用，不参与生成。",
+        claimText: "这条规则只作为学习资料沉淀，不参与当前生成。",
       },
     };
   } else if (promptSafeRule?.status === "covered") {
@@ -378,9 +378,9 @@ function applyCurrentRuleImpactOverlay(record, rulesetResult, promptSafeRuleById
       displayStatus: "待确认",
       status: "待确认 / 待纠正",
       actionLabel: "待纠正",
-      generationImpactText: "未在当前可加载规则层中找到对应规则，暂不影响生成。",
-      usedWhereText: "尚未进入生成链路。",
-      nextStepText: "请带引用去纠正，或重新说明这条是否要作为长期规则。",
+      generationImpactText: "未在沉淀规则列表中找到对应规则；当前不会自动影响生成。",
+      usedWhereText: "学习资料库：待整理。",
+      nextStepText: "请带引用去纠正，或重新说明这条是否值得沉淀到稳定 skill。",
       generationProof: {
         proofStatus: "not_applicable",
         claimText: "当前没有可追溯的生成规则，不需要生成命中证据。",
@@ -391,9 +391,15 @@ function applyCurrentRuleImpactOverlay(record, rulesetResult, promptSafeRuleById
   const nextRecord = {
     ...record,
     ...overlay,
-    affectsGeneration: promptSafeRule?.status === "active",
+    affectsGeneration: false,
     advanced: {
       ...(record.advanced || {}),
+      topicKey: promptSafeRule?.topicKey || record.advanced?.topicKey || "",
+      conflictKey: promptSafeRule?.conflictKey || record.advanced?.conflictKey || "",
+      capability: promptSafeRule?.capability || record.advanced?.capability || "",
+      sourceEventIds: normalizeStringArray(promptSafeRule?.sourceEventIds).length
+        ? normalizeStringArray(promptSafeRule.sourceEventIds)
+        : normalizeStringArray(record.advanced?.sourceEventIds),
       rulesetLoadError: rulesetResult.loadError || "",
       currentRuleStatus: promptSafeRule?.status || "",
     },

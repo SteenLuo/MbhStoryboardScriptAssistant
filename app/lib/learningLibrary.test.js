@@ -69,10 +69,10 @@ test("buildLearningLibrary does not claim current rules affect generation when p
   const record = library.records.find((item) => item.recordId === "rule:rule-invalid");
 
   assert.ok(record);
-  assert.strictEqual(record.displayStatus, "失败");
+  assert.strictEqual(record.displayStatus, "待确认");
   assert.strictEqual(record.affectsGeneration, false);
-  assert.match(record.generationImpactText, /加载失败/);
-  assert.strictEqual(record.generationProof.proofStatus, "failed");
+  assert.match(record.generationImpactText, /沉淀规则文件加载失败/);
+  assert.strictEqual(record.generationProof.proofStatus, "not_applicable");
   assert.strictEqual(library.impactItems.some((item) => item.recordId === "rule:rule-invalid"), false);
   assert.ok(library.accessIssues.some((issue) => issue.area === "rules" && /conflictKey/.test(issue.message)));
 });
@@ -325,7 +325,8 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   assert.strictEqual(eventRecord.status, "已保存");
   assert.strictEqual(eventRecord.actionLabel, "不用管");
   assert.strictEqual(eventRecord.affectsGeneration, false);
-  assert.match(eventRecord.generationImpactText, /停用/);
+  assert.match(eventRecord.generationImpactText, /待沉淀规则/);
+  assert.match(eventRecord.generationImpactText, /稳定 skill/);
   assert.strictEqual(eventRecord.generationProof.proofStatus, "not_applicable");
   assert.strictEqual(eventRecord.advanced.internalStatus, "landed");
   assert.strictEqual(eventRecord.advanced.jobStatus, "completed");
@@ -513,7 +514,7 @@ test("buildLearningLibrary keeps raw failure and coverage fields in advanced onl
   assert.strictEqual(record.advanced.error.message, "旧失败信息");
 });
 
-test("buildLearningLibrary restores covered current-rule records when the current ruleset is active", async () => {
+test("buildLearningLibrary restores covered current-rule records as saved sedimentation material", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-restored-rule-"));
   const learningDir = path.join(root, "learning");
   await fsp.mkdir(learningDir, { recursive: true });
@@ -558,11 +559,11 @@ test("buildLearningLibrary restores covered current-rule records when the curren
   const library = await buildLearningLibrary(root);
   const record = library.records.find((item) => item.recordId === "rule:rule-event-restored");
 
-  assert.strictEqual(record.displayStatus, "已影响生成");
-  assert.strictEqual(record.status, "active");
-  assert.strictEqual(record.affectsGeneration, true);
-  assert.match(record.generationImpactText, /输出后校验/);
-  assert.match(record.generationProof.claimText, /输出后校验/);
+  assert.strictEqual(record.displayStatus, "已保存");
+  assert.strictEqual(record.status, "已保存");
+  assert.strictEqual(record.affectsGeneration, false);
+  assert.match(record.generationImpactText, /待沉淀规则/);
+  assert.match(record.generationProof.claimText, /不参与当前生成/);
   assert.strictEqual(record.advanced.currentRuleStatus, "active");
 });
 
@@ -595,9 +596,9 @@ test("buildLearningLibrary maps persisted generation proof from normalized JSONL
   const library = await buildLearningLibrary(root);
   const record = library.records[0];
 
-  assert.strictEqual(record.displayStatus, "已影响生成");
-  assert.strictEqual(record.generationProof.proofStatus, "validated");
-  assert.strictEqual(record.generationProof.claimText, "已在生成 output-1 中验证");
+  assert.strictEqual(record.displayStatus, "已保存");
+  assert.strictEqual(record.generationProof.proofStatus, "not_applicable");
+  assert.strictEqual(record.generationProof.claimText, "这条学习现在只作为资料沉淀，不参与当前生成。");
   assert.deepEqual(record.generationProof.validationResultRefs, ["run-1"]);
   assert.equal(Object.hasOwn(record.generationProof, "stack"), false);
 });
@@ -744,7 +745,7 @@ test("buildLearningLibrary skips event records that fail public display mapping"
       eventId: "event-bad-proof",
       internalStatus: "landed",
       jobStatus: "completed",
-      landingType: "current-rule",
+      landingType: "formal-skill",
       ruleId: "rule-bad-proof",
       summary: "bad proof event",
       generationProof: {
@@ -868,11 +869,13 @@ test("buildLearningLibrary assigns stable prefixed record ids for every learning
   for (const listName of ["impactItems", "sampleItems", "evalItems", "skillItems"]) {
     assertNoDuplicateRecordIds(library[listName], listName);
   }
-  assert.strictEqual(library.impactItems.filter((item) => item.recordId === "rule:rule-record").length, 1);
-  const impactRule = library.impactItems.find((item) => item.recordId === "rule:rule-record");
+  assert.strictEqual(library.impactItems.filter((item) => item.recordId === "rule:rule-record").length, 0);
+  const impactRule = library.records.find((item) => item.recordId === "rule:rule-record");
   for (const internalField of ["topicKey", "conflictKey", "sourceEventIds", "ruleId"]) {
     assert.equal(Object.hasOwn(impactRule, internalField), false);
   }
+  assert.strictEqual(impactRule.affectsGeneration, false);
+  assert.match(impactRule.generationImpactText, /稳定 skill/);
   assert.strictEqual(impactRule.advanced.ruleId, "rule-record");
   assert.strictEqual(impactRule.advanced.topicKey, "storyboard.general");
   assert.deepStrictEqual(impactRule.advanced.sourceEventIds, ["event-rule"]);

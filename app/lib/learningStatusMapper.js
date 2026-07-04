@@ -4,8 +4,9 @@ const {
   validateGenerationProofCombination,
 } = require("./learningContracts");
 
-const GENERATION_LANDING_TYPES = new Set(["current-rule", "formal-skill", "callable-skill"]);
+const GENERATION_LANDING_TYPES = new Set(["formal-skill", "callable-skill"]);
 const SAVED_LANDING_TYPES = new Set([
+  "current-rule",
   "sample",
   "evidence",
   "eval",
@@ -19,6 +20,7 @@ const WAITING_LANDING_TYPES = new Set([
   "conflict",
   "correction-location-missing",
 ]);
+const GENERATION_PASS_PROOF_STATUSES = new Set(["pending_first_hit", "participated", "validated"]);
 
 function mapLearningDisplayRecord(event = {}, context = {}) {
   const displayStatus = resolveDisplayStatus(event);
@@ -63,7 +65,7 @@ function resolveDisplayStatus(event) {
     return "待确认";
   }
   if (
-    internalStatus === "validated" ||
+    (internalStatus === "validated" && (GENERATION_LANDING_TYPES.has(landingType) || !landingType)) ||
     (GENERATION_LANDING_TYPES.has(landingType) && (internalStatus === "landed" || jobStatus === "completed"))
   ) {
     return "已影响生成";
@@ -104,11 +106,16 @@ function resolveActionLabel(event, displayStatus) {
 function resolveGenerationProof(event, state) {
   const suppliedProof = normalizeGenerationProof(event.generationProof) || {};
   const suppliedProofStatus = normalizeString(suppliedProof.proofStatus);
-  const proofStatus = GENERATION_PROOF_STATUSES.has(suppliedProofStatus)
+  let proofStatus = GENERATION_PROOF_STATUSES.has(suppliedProofStatus)
     ? suppliedProofStatus
     : defaultProofStatus(state);
   let claimText = normalizeString(suppliedProof.claimText) ||
     defaultProofClaim(proofStatus, state.displayStatus, state.affectsGeneration);
+
+  if (!state.affectsGeneration && GENERATION_PASS_PROOF_STATUSES.has(proofStatus)) {
+    proofStatus = "not_applicable";
+    claimText = "这条学习现在只作为资料沉淀，不参与当前生成。";
+  }
 
   if (proofStatus === "unknown" && state.affectsGeneration && !hasUnknownProofWarning(claimText)) {
     claimText = "当前仍会影响生成，证据不完整需排查。";
@@ -152,13 +159,14 @@ function hasUnknownProofWarning(claimText) {
 }
 
 function resolveGenerationImpactText(event, displayStatus, affectsGeneration) {
+  const landingType = normalizeString(event.landingType);
   if (affectsGeneration) {
-    if (normalizeString(event.landingType) === "current-rule") return "会被后续生成读取；硬规则以输出后校验通过为准，不能只看规则已启用。";
     return "会被后续生成读取；是否执行成功要看本次输出校验和命中证据。";
   }
   if (displayStatus === "失败") return "学习未落地，不会影响生成。";
   if (displayStatus === "已被覆盖") return "已被后续学习覆盖，不再影响生成。";
   if (displayStatus === "待确认") return "尚未确认长期落点，暂不会直接改变生成。";
+  if (landingType === "current-rule") return "已保存为待沉淀规则，不会自动影响生成；稳定 skill 才会被生成读取。";
   return "已保存为学习资料，不会直接改变生成。";
 }
 
@@ -186,14 +194,12 @@ function resolveUsedWhereText(event, displayStatus) {
 
   const landingType = normalizeString(event.landingType);
   if (displayStatus === "已影响生成") {
-    if (landingType === "current-rule") {
-      return `当前规则层：${normalizeString(event.ruleId || firstValue(event.landingIds)) || "等待规则编号"}`;
-    }
     if (landingType === "formal-skill") return "正式技能：后续生成会读取。";
     if (landingType === "callable-skill") return "可调用技能：后续生成可按路由使用。";
     return "生成流程：后续生成会读取。";
   }
   if (displayStatus === "待确认") return "尚未落地。";
+  if (landingType === "current-rule") return "学习资料库：待沉淀规则。";
   return "学习资料库。";
 }
 
@@ -202,6 +208,7 @@ function resolveNextStepText(event, displayStatus, actionLabel) {
   if (displayStatus === "失败") return "请修正学习内容或落点后重试。";
   if (displayStatus === "已影响生成") return "后续生成会读取；若本次输出违规，必须自动修复或记录失败，不能静默交付。";
   if (displayStatus === "已被覆盖") return "无需处理，查看覆盖它的新学习即可。";
+  if (displayStatus === "已保存" && landingType === "current-rule") return "无需处理；后续人工评审后，可沉淀到稳定 skill。当前不会自动影响生成。";
   if (displayStatus === "已保存") return "无需处理，可在需要时作为资料回看。";
   if (landingType === "sample-insufficient") {
     const neededSampleType = normalizeString(event.neededSampleType) || "同类样例";
@@ -243,6 +250,7 @@ function buildAdvanced(event, context) {
     neededCount: Number(event.neededCount || 0),
     relatedRecordIds: normalizeStringArray(event.relatedRecordIds),
     currentRulesUsedRefs: normalizeStringArray(event.currentRulesUsedRefs),
+    skillRulesUsedRefs: normalizeStringArray(event.skillRulesUsedRefs),
     sampleCount: Number(event.sampleCount || 0),
     sampleRecordIds: normalizeStringArray(event.sampleRecordIds),
     evidenceRecordIds: normalizeStringArray(event.evidenceRecordIds),

@@ -70,6 +70,7 @@ test("normalizeLearningEvent preserves only public generation proof fields", () 
       proofStatus: "validated",
       claimText: "已在生成中验证",
       currentRulesUsedRefs: ["rule-a", " ", 42],
+      skillRulesUsedRefs: ["stable-a", " "],
       validationResultRefs: ["run-a", null, "run-b"],
       lastCheckedOutputId: 123,
       lastCheckedAt: "2026-07-04T00:00:00.000Z",
@@ -83,6 +84,7 @@ test("normalizeLearningEvent preserves only public generation proof fields", () 
     proofStatus: "validated",
     claimText: "已在生成中验证",
     currentRulesUsedRefs: ["rule-a", "42"],
+    skillRulesUsedRefs: ["stable-a"],
     validationResultRefs: ["run-a", "run-b"],
     lastCheckedOutputId: "123",
     lastCheckedAt: "2026-07-04T00:00:00.000Z",
@@ -103,7 +105,7 @@ test("validateGenerationProofCombination accepts valid proof and display status 
     displayStatus: "已影响生成",
     affectsGeneration: true,
     proofStatus: "pending_first_hit",
-    claimText: "规则已进入当前规则层，等待下一次生成命中验证。",
+    claimText: "正式稳定 skill 已准备参与后续生成，等待下一次命中验证。",
   }));
   assert.doesNotThrow(() => validateGenerationProofCombination({
     displayStatus: "已影响生成",

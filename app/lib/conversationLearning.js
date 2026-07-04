@@ -78,7 +78,7 @@ async function writeConversationLearningRecord(root, { conversation, userMessage
     "",
     "- 如果是否需要学习为[否]，本记录仅作为跳过依据，不进入规则升级。",
     "- 如果质量信号为[变差]，必须优先生成或关联降质和回退记录。",
-    "- 如果学习动作是[学习记录]，该内容进入学习资料库；用户主动点击技能学习时，同步发布到当前规则，供后续技能调用读取。",
+    "- 如果学习动作是[学习记录]，该内容进入学习资料库；用户主动点击技能学习时，只保存为沉淀材料，不自动改写生成规则。后续需要人工评审后再沉淀到稳定 skill。",
     "",
   ];
   await fsp.writeFile(outPath, lines.join("\r\n"), "utf8");

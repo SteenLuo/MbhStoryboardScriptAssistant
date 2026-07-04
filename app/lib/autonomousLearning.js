@@ -105,10 +105,10 @@ async function learnExplicitRule(root, input = {}, options = {}) {
   try {
     const content = String(input.content || baseEvent.summary).trim();
     if (baseEvent.learningMode !== "overall") {
-      throw new Error(`只有 learningMode=overall 可以发布到当前规则层：${baseEvent.learningMode}`);
+      throw new Error(`只有 learningMode=overall 可以沉淀为规则材料：${baseEvent.learningMode}`);
     }
-    if (!content) throw new Error("规则内容为空，无法发布到当前规则层");
-    if (!conflictKey) throw new Error("conflictKey 不能为空，无法发布到当前规则层");
+    if (!content) throw new Error("规则内容为空，无法沉淀为规则材料");
+    if (!conflictKey) throw new Error("conflictKey 不能为空，无法沉淀为规则材料");
 
     const expectedVersion = normalizeOptionalVersion(
       Object.hasOwn(input, "expectedVersion") ? input.expectedVersion : options.expectedVersion,
@@ -531,17 +531,17 @@ async function appendSampleInsufficientLearningEvent(root, input = {}, options =
 }
 
 function validateRuleset(ruleset) {
-  if (!ruleset || typeof ruleset !== "object") throw new Error("当前规则层结构不合法");
-  if (!Array.isArray(ruleset.rules)) throw new Error("当前规则层缺少 rules 数组");
+  if (!ruleset || typeof ruleset !== "object") throw new Error("沉淀规则结构不合法");
+  if (!Array.isArray(ruleset.rules)) throw new Error("沉淀规则缺少 rules 数组");
   const activeConflicts = new Set();
   for (const rule of ruleset.rules) {
     const normalizedRule = normalizeRule(rule);
-    if (!normalizedRule) throw new Error("当前规则层规则字段不完整");
+    if (!normalizedRule) throw new Error("沉淀规则字段不完整");
     if (!normalizedRule.ruleId || !normalizedRule.topicKey || !normalizedRule.conflictKey || !normalizedRule.capability || !normalizedRule.content || !normalizedRule.status) {
-      throw new Error("当前规则层规则字段不完整");
+      throw new Error("沉淀规则字段不完整");
     }
     if (!RULE_STATUSES.has(normalizedRule.status)) {
-      throw new Error(`当前规则状态不合法：${normalizedRule.status}`);
+      throw new Error(`沉淀规则状态不合法：${normalizedRule.status}`);
     }
     if (normalizedRule.status === ACTIVE_STATUS) {
       if (activeConflicts.has(normalizedRule.conflictKey)) throw new Error(`同一冲突键存在多个生效规则：${normalizedRule.conflictKey}`);

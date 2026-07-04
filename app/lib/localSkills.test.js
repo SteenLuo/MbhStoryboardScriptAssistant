@@ -92,7 +92,7 @@ test("loadLocalSkillContext ignores legacy web confirmed preferences", async () 
   assert.ok(!context.files.includes("learning/accepted-rules/web-confirmed-preferences.md"));
 });
 
-test("loadLocalSkillContext includes current rules context and exposes currentRulesUsed", async () => {
+test("loadLocalSkillContext does not load current rules into generation prompts", async () => {
   const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-skill-rules-"));
   const skillDir = path.join(tempRoot, "skills/03-storyboard/storyboard-generate");
   await fsp.mkdir(skillDir, { recursive: true });
@@ -120,18 +120,10 @@ test("loadLocalSkillContext includes current rules context and exposes currentRu
 
   const context = await loadLocalSkillContext(tempRoot, routeLocalSkill("帮我生成分镜"));
 
-  assert.match(context.prompt, /当前规则层/);
-  assert.match(context.prompt, /分镜台词每句 20 字以内/);
-  assert.ok(context.files.includes("learning/current-ruleset.json"));
-  assert.deepStrictEqual(context.currentRulesUsed, [{
-    ruleId: "rule-storyboard",
-    topicKey: "storyboard.dialogue.length",
-    conflictKey: "storyboard.dialogue.length",
-    capability: "storyboard",
-    sourceEventIds: ["event-storyboard"],
-    sourceFile: "learning/current-ruleset.json",
-    version: 1,
-  }]);
+  assert.doesNotMatch(context.prompt, /当前规则层/);
+  assert.doesNotMatch(context.prompt, /分镜台词每句 20 字以内/);
+  assert.ok(!context.files.includes("learning/current-ruleset.json"));
+  assert.deepStrictEqual(context.currentRulesUsed, []);
 });
 
 test("pending skill evolution drafts stay out of generated local skill context and routes", async () => {

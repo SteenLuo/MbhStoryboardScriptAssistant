@@ -226,7 +226,7 @@
         <div class="learning-page-head">
           <div>
             <h2 id="learningPageTitle">学习资料库</h2>
-            <p>系统会把长期规则、满意样例、纠错和归档证据记到这里。每条记录都会说明是否会被后续生成读取；硬规则最终是否执行成功，要看输出后校验。学错了可以点“带引用去纠正”回到对话处理。</p>
+            <p>系统会把长期规则、满意样例、纠错和归档证据记到这里。已保存不等于影响生成；当前生成只读取稳定 skill。学错了可以点“带引用去纠正”回到对话处理。</p>
           </div>
           <button id="closeLearningPage" class="ghost" type="button">关闭</button>
         </div>
@@ -235,7 +235,7 @@
             <section class="learning-guide" aria-label="学习逻辑说明">
               <div class="learning-guide-intro">
                 <strong>新手说明</strong>
-                <span>默认只看这三件事：已保存了什么、是否会被后续生成读取、下一步要不要待确认。</span>
+                <span>默认只看这三件事：已保存了什么、是否已经进入稳定 skill、下一步要不要待确认。</span>
               </div>
               <div class="learning-guide-grid">
                 <article>
@@ -244,7 +244,7 @@
                 </article>
                 <article>
                   <strong>已影响生成</strong>
-                  <p>表示这条记录会被后续生成读取；如果是硬规则，本次结果还必须通过输出后校验，不能只看规则已启用。</p>
+                  <p>只表示正式稳定 skill 或可调用小技能会被后续生成读取；普通学习记录和待沉淀规则不会自动影响生成。</p>
                 </article>
                 <article>
                   <strong>学错了怎么改</strong>
@@ -266,10 +266,10 @@
                       <span id="learningRecordHelp" class="learning-help-button" aria-label="学习记录说明" aria-describedby="learningRecordHelpText">?</span>
                       <span id="learningRecordHelpText" class="learning-help-popover" role="tooltip">
                         <strong>学习记录说明</strong>
-                        <span>这里记录系统从对话、样例和归档画布里学到了什么，以及这些内容是否会被后续生成读取。</span>
+                        <span>这里记录系统从对话、样例和归档画布里学到了什么，以及这些内容是否已经沉淀到稳定 skill。</span>
                         <strong>学习记录状态</strong>
                         <span><b>已保存</b>已经形成学习记录</span>
-                        <span><b>已影响生成</b>后续生成会读取；硬规则还要看输出后校验</span>
+                        <span><b>已影响生成</b>正式稳定 skill 会被后续生成读取；普通学习不会自动影响生成</span>
                         <span><b>待确认</b>还需要继续判断或补充证据</span>
                         <span><b>失败</b>会显示失败阶段、原因、是否影响生成和下一步</span>
                       </span>
@@ -277,7 +277,7 @@
                     <strong id="learningRecordsTabCount" class="learning-tab-count">0</strong>
                   </button>
                   <button type="button" data-learning-library-tab="rules">
-                    <span>当前规则</span>
+                    <span>沉淀规则</span>
                     <strong id="learningRulesTabCount" class="learning-tab-count">0</strong>
                   </button>
                   <button type="button" data-learning-library-tab="skills">
@@ -286,7 +286,7 @@
                       <span id="learningSkillHelp" class="learning-help-button" aria-label="技能库说明" aria-describedby="learningSkillHelpText">?</span>
                       <span id="learningSkillHelpText" class="learning-help-popover" role="tooltip">
                         <strong>技能库说明</strong>
-                        <span>这里只说明技能库：展示系统正在使用的基础技能，以及后续可能沉淀出的小技能。对话可以先影响当前规则层；只有稳定方法论通过校验后，才可能调整或新增技能。这里不会直接编辑技能文件。</span>
+                        <span>这里只说明技能库：展示系统正在使用的基础技能，以及后续可能沉淀出的小技能。对话学习会先保存为沉淀材料；只有人工确认并进入稳定 skill 后，才会影响生成。这里不会直接编辑技能文件。</span>
                       </span>
                     </span>
                     <strong id="learningSkillsTabCount" class="learning-tab-count">0</strong>

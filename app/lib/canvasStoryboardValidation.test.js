@@ -29,7 +29,7 @@ test("applyCanvasStoryboardValidation repairs long dialogue on canvas save", () 
     ],
   };
 
-  const next = applyCanvasStoryboardValidation(canvas, { currentRulesUsed: [dialogueRule] });
+  const next = applyCanvasStoryboardValidation(canvas);
   const node = next.nodes[0];
 
   assert.notStrictEqual(node.content, canvas.nodes[0].content);
@@ -38,7 +38,8 @@ test("applyCanvasStoryboardValidation repairs long dialogue on canvas save", () 
   assert.strictEqual(node.meta.hardRuleValidation.checked, true);
   assert.strictEqual(node.meta.hardRuleValidation.repaired, true);
   assert.strictEqual(node.meta.hardRuleValidation.finalOk, true);
-  assert.deepStrictEqual(node.meta.currentRulesUsed, [dialogueRule]);
+  assert.strictEqual(node.meta.currentRulesUsed, undefined);
+  assert.ok(node.meta.skillRulesUsed.length > 0);
 });
 
 test("applyCanvasStoryboardValidation preserves user-resolved storyboard content", () => {

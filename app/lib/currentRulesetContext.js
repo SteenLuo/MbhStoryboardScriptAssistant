@@ -155,7 +155,7 @@ function buildPromptText(root, sourceFile, rules) {
   if (!rules.length) return "";
   const relative = relativePath(root, sourceFile);
   const lines = rules.map((rule) => `- [${rule.topicKey} / ${rule.conflictKey}] ${rule.content}`);
-  return `## 当前规则层：${relative}\n\n${lines.join("\n")}`;
+  return `## 沉淀规则（不直接影响生成）：${relative}\n\n${lines.join("\n")}`;
 }
 
 function traceRule(rule, context = {}) {

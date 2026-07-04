@@ -120,26 +120,19 @@ test("splitDialogueLine keeps short dialogue unchanged", () => {
 
   assert.deepStrictEqual(lines, [{ text: "赵小满：那就这么定了。" }]);
 });
-test("validateStoryboardHardRules flags long dialogue only when a dialogue length rule was used", () => {
+test("validateStoryboardHardRules flags long dialogue through stable storyboard skill rules", () => {
   const content = [
     "shot: 1",
     "dialogue: Lin: The system will become more complete and the team will keep improving together",
   ].join("\n");
-  const currentRulesUsed = [{
-    ruleId: "rule-dialogue-length",
-    topicKey: "storyboard.general",
-    conflictKey: "storyboard.dialogue.length.max-chars",
-    sourceEventIds: ["event-dialogue-length"],
-    status: "active",
-  }];
 
-  const result = validateStoryboardHardRules(content, { currentRulesUsed });
+  const result = validateStoryboardHardRules(content);
 
   assert.strictEqual(result.ok, false);
-  assert.strictEqual(result.appliedRules.length, 1);
-  assert.strictEqual(result.appliedRules[0].ruleId, "rule-dialogue-length");
   assert.strictEqual(result.issues[0].type, "dialogue-too-long");
   assert.strictEqual(result.issues[0].hardRuleId, "storyboard.dialogue.length");
+  assert.match(result.issues[0].skillRulesUsedRefs[0], /stable-skill/);
+  assert.deepStrictEqual(result.issues[0].currentRulesUsedRefs, []);
 });
 
 test("validateStoryboardHardRules flags multiple speakers in the same shot when a speaker-count rule was used", () => {
@@ -157,11 +150,10 @@ test("validateStoryboardHardRules flags multiple speakers in the same shot when 
     status: "active",
   }];
 
-  const result = validateStoryboardHardRules(content, { currentRulesUsed });
+  const result = validateStoryboardHardRules(content, { currentRulesUsed, includeCurrentRules: true });
 
   assert.strictEqual(result.ok, false);
-  assert.strictEqual(result.appliedRules.length, 1);
-  assert.strictEqual(result.appliedRules[0].ruleId, "rule-one-speaker");
+  assert.ok(result.appliedRules.some((rule) => rule.ruleId === "rule-one-speaker"));
   assert.strictEqual(result.issues[0].type, "dialogue-multiple-speakers");
   assert.strictEqual(result.issues[0].hardRuleId, "storyboard.dialogue.speaker-count");
   assert.deepStrictEqual(result.issues[0].speakers, ["王婶", "林秀娥"]);
@@ -223,13 +215,7 @@ test("applyStoryboardHardRuleValidation normalizes markdown field labels for fin
     "**台词：** 王婶：昨天赵媒婆又来了吧？",
     "**时长：** 3s",
   ].join("\n");
-  const result = applyStoryboardHardRuleValidation(content, {
-    currentRulesUsed: [{
-      ruleId: "rule-dialogue-length",
-      topicKey: "storyboard.dialogue.length",
-      conflictKey: "storyboard.dialogue.length.max-chars",
-    }],
-  });
+  const result = applyStoryboardHardRuleValidation(content);
 
   assert.strictEqual(result.content.includes("**"), false);
   assert.match(result.content, /^镜号：10/m);
@@ -258,13 +244,7 @@ test("applyStoryboardHardRuleValidation strips non-storyboard preamble and markd
     "---",
   ].join("\n");
 
-  const result = applyStoryboardHardRuleValidation(content, {
-    currentRulesUsed: [{
-      ruleId: "rule-dialogue-length",
-      topicKey: "storyboard.dialogue.length",
-      conflictKey: "storyboard.dialogue.length.max-chars",
-    }],
-  });
+  const result = applyStoryboardHardRuleValidation(content);
 
   assert.doesNotMatch(result.content, /好的|收到任务|分镜脚本|---/);
   assert.match(result.content, /^场次：2-1/);
