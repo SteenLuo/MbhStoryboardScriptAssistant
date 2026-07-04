@@ -8,6 +8,17 @@ const { appendSampleInsufficientLearningEvent, learnExplicitRule, updateCurrentR
 const { buildLearningLibrary } = require("./learningLibrary");
 const { writeLearningEvidence, writeLearningSample } = require("./learningEvidence");
 
+test("buildLearningLibrary returns the fixed D7 view contract", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-contract-"));
+  const library = await buildLearningLibrary(root);
+
+  for (const field of ["records", "impactItems", "sampleItems", "evalItems", "skillItems", "accessIssues"]) {
+    assert.ok(Array.isArray(library[field]), `${field} should be an array`);
+  }
+  assert.ok(Array.isArray(library.currentRules));
+  assert.ok(Array.isArray(library.skills));
+});
+
 test("buildLearningLibrary shows sample-insufficient next steps and trace fields", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-sample-insufficient-"));
   await appendSampleInsufficientLearningEvent(root, {
@@ -24,7 +35,7 @@ test("buildLearningLibrary shows sample-insufficient next steps and trace fields
   });
 
   const library = await buildLearningLibrary(root);
-  const record = library.records.find((item) => item.recordId === "event-need-samples");
+  const record = library.records.find((item) => item.recordId === "eval:event-need-samples");
 
   assert.ok(record);
   assert.strictEqual(record.displayStatus, "待确认");
@@ -63,7 +74,7 @@ test("writeLearningSample marks related sample-insufficient eval tasks traceable
     createdAt: "2026-07-04T08:10:00.000Z",
   });
   let library = await buildLearningLibrary(root);
-  let waiting = library.records.find((item) => item.recordId === "event-need-samples");
+  let waiting = library.records.find((item) => item.recordId === "eval:event-need-samples");
   assert.strictEqual(waiting.status, "待确认 / 待补样例");
 
   await writeLearningSample(root, {
@@ -76,7 +87,7 @@ test("writeLearningSample marks related sample-insufficient eval tasks traceable
     createdAt: "2026-07-04T08:20:00.000Z",
   });
   library = await buildLearningLibrary(root);
-  const updated = library.records.find((item) => item.recordId === "event-need-samples");
+  const updated = library.records.find((item) => item.recordId === "eval:reeval-event-need-samples");
 
   assert.strictEqual(updated.displayStatus, "已保存");
   assert.strictEqual(updated.affectsGeneration, false);
@@ -118,8 +129,8 @@ test("writeLearningSample only satisfies sample-insufficient tasks with matching
   });
 
   const library = await buildLearningLibrary(root);
-  const dialogue = library.records.find((item) => item.recordId === "event-dialogue-samples");
-  const tone = library.records.find((item) => item.recordId === "event-tone-samples");
+  const dialogue = library.records.find((item) => item.recordId === "eval:reeval-event-dialogue-samples");
+  const tone = library.records.find((item) => item.recordId === "eval:event-tone-samples");
 
   assert.strictEqual(dialogue.displayStatus, "已保存");
   assert.strictEqual(dialogue.advanced.landingType, "eval");
@@ -152,7 +163,7 @@ test("writeLearningSample does not satisfy a related task when sampleType differ
   });
 
   const library = await buildLearningLibrary(root);
-  const task = library.records.find((item) => item.recordId === "event-related-task");
+  const task = library.records.find((item) => item.recordId === "eval:event-related-task");
 
   assert.strictEqual(task.advanced.landingType, "sample-insufficient");
   assert.strictEqual(task.advanced.jobStatus, "waiting");
@@ -242,11 +253,16 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   const library = await buildLearningLibrary(root);
 
   assert.ok(Array.isArray(library.records));
+  assert.ok(Array.isArray(library.impactItems));
+  assert.ok(Array.isArray(library.sampleItems));
+  assert.ok(Array.isArray(library.evalItems));
+  assert.ok(Array.isArray(library.skillItems));
+  assert.ok(Array.isArray(library.accessIssues));
   assert.ok(Array.isArray(library.currentRules));
   assert.ok(Array.isArray(library.skills));
   assert.strictEqual(library.records.length, 1);
-  assert.ok(library.records.some((record) => record.recordId === "event-1"));
-  const eventRecord = library.records.find((record) => record.recordId === "event-1");
+  assert.ok(library.records.some((record) => record.recordId === "rule:rule-event-1"));
+  const eventRecord = library.records.find((record) => record.recordId === "rule:rule-event-1");
   assert.strictEqual(eventRecord.displayStatus, "已影响生成");
   assert.strictEqual(eventRecord.status, "已影响生成");
   assert.strictEqual(eventRecord.actionLabel, "不用管");
@@ -256,7 +272,7 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   assert.strictEqual(eventRecord.advanced.jobStatus, "completed");
   assert.strictEqual(eventRecord.advanced.learningMode, "overall");
   assert.strictEqual(eventRecord.advanced.landingType, "current-rule");
-  for (const internalField of ["topicKey", "tokenUsage", "sourceType", "ruleId", "coveredByEventId", "error"]) {
+  for (const internalField of ["topicKey", "conflictKey", "tokenUsage", "sourceType", "ruleId", "coveredByEventId", "error"]) {
     assert.equal(Object.hasOwn(eventRecord, internalField), false);
   }
   assert.strictEqual(eventRecord.advanced.topicKey, "storyboard.dialogue.length");
@@ -264,7 +280,7 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   assert.strictEqual(eventRecord.advanced.ruleId, "rule-event-1");
   assert.strictEqual(eventRecord.advanced.tokenUsage.total_tokens, 18);
   assert.strictEqual(eventRecord.correctionAction.enabled, true);
-  assert.strictEqual(eventRecord.correctionAction.payload.recordId, "event-1");
+  assert.strictEqual(eventRecord.correctionAction.payload.recordId, "rule:rule-event-1");
   assert.strictEqual(eventRecord.correctionAction.payload.eventId, "event-1");
   assert.deepStrictEqual(eventRecord.correctionAction.payload.landingIds, ["rule-event-1"]);
   assert.strictEqual(eventRecord.correctionAction.payload.projectId, "");
@@ -311,8 +327,8 @@ test("buildLearningLibrary maps normalized legacy events into D2 display statuse
   );
 
   const library = await buildLearningLibrary(root);
-  const waiting = library.records.find((record) => record.recordId === "event-waiting");
-  const validated = library.records.find((record) => record.recordId === "event-validated");
+  const waiting = library.records.find((record) => record.recordId === "event:event-waiting");
+  const validated = library.records.find((record) => record.recordId === "event:event-validated");
 
   assert.strictEqual(waiting.advanced.internalStatus, "received");
   assert.strictEqual(waiting.advanced.jobStatus, "waiting");
@@ -364,7 +380,7 @@ test("buildLearningLibrary keeps raw failure and coverage fields in advanced onl
   assert.strictEqual(record.displayStatus, "已被覆盖");
   assert.strictEqual(record.status, "已被覆盖");
   assert.strictEqual(record.updatedAt, "2026-07-04T00:01:00.000Z");
-  for (const internalField of ["topicKey", "tokenUsage", "sourceType", "ruleId", "coveredByEventId", "error"]) {
+  for (const internalField of ["topicKey", "conflictKey", "tokenUsage", "sourceType", "ruleId", "coveredByEventId", "error"]) {
     assert.equal(Object.hasOwn(record, internalField), false);
   }
   assert.strictEqual(record.advanced.topicKey, "storyboard.dialogue.length");
@@ -498,6 +514,133 @@ test("buildLearningLibrary skips malformed evidence and sample records without e
   assert.strictEqual(recordIds.filter((id) => id.startsWith("sample:")).length, 1);
 });
 
+test("buildLearningLibrary assigns stable prefixed record ids for every learning item kind", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-record-ids-"));
+  await fsp.mkdir(path.join(root, "learning", "evidence"), { recursive: true });
+  await fsp.mkdir(path.join(root, "learning", "samples"), { recursive: true });
+  await fsp.mkdir(path.join(root, "skills", "99-test", "skill-record"), { recursive: true });
+  await fsp.writeFile(path.join(root, "skills", "99-test", "skill-record", "SKILL.md"), "# Test skill\n", "utf8");
+  await fsp.writeFile(path.join(root, "learning", "evidence", "evidence-record.json"), JSON.stringify({
+    evidenceId: "evidence-record",
+    summary: "evidence",
+    createdAt: "2026-07-04T00:03:00.000Z",
+  }), "utf8");
+  await fsp.writeFile(path.join(root, "learning", "samples", "sample-record.json"), JSON.stringify({
+    sampleId: "sample-record",
+    summary: "sample",
+    createdAt: "2026-07-04T00:04:00.000Z",
+  }), "utf8");
+  await fsp.mkdir(path.join(root, "learning"), { recursive: true });
+  await fsp.writeFile(path.join(root, "learning", "current-ruleset.json"), JSON.stringify({
+    version: 1,
+    lastGoodVersion: 1,
+    updatedAt: "2026-07-04T00:00:00.000Z",
+    rules: [{
+      ruleId: "rule-record",
+      topicKey: "storyboard.general",
+      conflictKey: "storyboard.general",
+      capability: "storyboard",
+      content: "rule content",
+      priority: 50,
+      sourceEventIds: ["event-rule"],
+      status: "active",
+      createdAt: "2026-07-04T00:00:00.000Z",
+      updatedAt: "2026-07-04T00:00:00.000Z",
+    }],
+  }), "utf8");
+  await fsp.writeFile(path.join(root, "learning", "events.jsonl"), [
+    JSON.stringify({
+      eventId: "event-rule",
+      landingType: "current-rule",
+      ruleId: "rule-record",
+      internalStatus: "landed",
+      jobStatus: "completed",
+      summary: "rule event",
+      createdAt: "2026-07-04T00:00:00.000Z",
+      updatedAt: "2026-07-04T00:00:00.000Z",
+    }),
+    JSON.stringify({
+      eventId: "event-eval",
+      landingType: "eval",
+      evalTaskId: "eval-task-record",
+      internalStatus: "landed",
+      jobStatus: "completed",
+      summary: "eval task",
+      createdAt: "2026-07-04T00:01:00.000Z",
+      updatedAt: "2026-07-04T00:01:00.000Z",
+    }),
+    JSON.stringify({
+      eventId: "event-eval-result",
+      landingType: "eval-result",
+      evalResultId: "eval-result-record",
+      internalStatus: "landed",
+      jobStatus: "completed",
+      summary: "eval result",
+      createdAt: "2026-07-04T00:02:00.000Z",
+      updatedAt: "2026-07-04T00:02:00.000Z",
+    }),
+    JSON.stringify({
+      eventId: "event-record",
+      internalStatus: "received",
+      jobStatus: "waiting",
+      summary: "ordinary event",
+      createdAt: "2026-07-04T00:05:00.000Z",
+      updatedAt: "2026-07-04T00:05:00.000Z",
+    }),
+  ].join("\n"), "utf8");
+
+  const library = await buildLearningLibrary(root);
+  const ids = new Set([
+    ...library.records.map((item) => item.recordId),
+    ...library.impactItems.map((item) => item.recordId),
+    ...library.sampleItems.map((item) => item.recordId),
+    ...library.evalItems.map((item) => item.recordId),
+    ...library.skillItems.map((item) => item.recordId),
+  ]);
+
+  for (const expected of [
+    "rule:rule-record",
+    "sample:sample-record",
+    "evidence:evidence-record",
+    "eval:eval-task-record",
+    "eval-result:eval-result-record",
+    "skill:skill-record",
+    "event:event-record",
+  ]) {
+    assert.ok(ids.has(expected), `${expected} should exist`);
+  }
+  for (const prefix of ["rule:", "sample:", "evidence:", "eval:", "eval-result:", "skill:", "event:"]) {
+    assert.equal(Array.from(ids).includes(prefix), false, `${prefix} should not be emitted without an id`);
+  }
+});
+
+test("buildLearningLibrary returns available data and accessIssues when optional library areas fail", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-access-issues-"));
+  await fsp.mkdir(path.join(root, "learning"), { recursive: true });
+  await fsp.writeFile(path.join(root, "learning", "events.jsonl"), JSON.stringify({
+    eventId: "event-kept",
+    internalStatus: "received",
+    jobStatus: "waiting",
+    summary: "kept",
+    createdAt: "2026-07-04T00:00:00.000Z",
+    updatedAt: "2026-07-04T00:00:00.000Z",
+  }) + "\n", "utf8");
+  await fsp.writeFile(path.join(root, "learning", "samples"), "not a directory", "utf8");
+  await fsp.writeFile(path.join(root, "learning", "evidence"), "not a directory", "utf8");
+  await fsp.writeFile(path.join(root, "learning", "evals"), "not a directory", "utf8");
+  await fsp.writeFile(path.join(root, "skills"), "not a directory", "utf8");
+
+  const library = await buildLearningLibrary(root);
+
+  assert.ok(library.records.some((record) => record.recordId === "event:event-kept"));
+  assert.ok(library.accessIssues.length >= 4);
+  assert.ok(library.accessIssues.every((issue) => issue.area && issue.message));
+  assert.ok(library.accessIssues.some((issue) => issue.area === "samples"));
+  assert.ok(library.accessIssues.some((issue) => issue.area === "evidence"));
+  assert.ok(library.accessIssues.some((issue) => issue.area === "evals"));
+  assert.ok(library.accessIssues.some((issue) => issue.area === "skills"));
+});
+
 test("buildLearningLibrary keeps archive evidence failure visible without marking it saved", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-evidence-failure-"));
   await fsp.mkdir(path.join(root, "learning"), { recursive: true });
@@ -522,7 +665,7 @@ test("buildLearningLibrary keeps archive evidence failure visible without markin
   );
 
   const library = await buildLearningLibrary(root);
-  const record = library.records.find((item) => item.recordId === "archive-evidence-failed-canvas-1");
+  const record = library.records.find((item) => item.recordId === "event:archive-evidence-failed-canvas-1");
 
   assert.ok(record);
   assert.strictEqual(record.displayStatus, "失败");
@@ -558,7 +701,7 @@ test("buildLearningLibrary disables correction action when a record has no prima
 
   const { buildCorrectionAction } = require("./learningCorrection");
   const library = await buildLearningLibrary(root);
-  const record = library.records.find((item) => item.recordId === "event-context-only");
+  const record = library.records.find((item) => item.recordId === "event:event-context-only");
   const disabled = buildCorrectionAction({
     advanced: {
       projectId: record.advanced.projectId,

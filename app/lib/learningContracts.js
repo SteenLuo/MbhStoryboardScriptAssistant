@@ -84,6 +84,11 @@ function normalizeLearningEvent(input = {}) {
     sampleRecordIds: normalizeStringArray(input.sampleRecordIds),
     evidenceRecordIds: normalizeStringArray(input.evidenceRecordIds),
     reevaluationTaskId: normalizeString(input.reevaluationTaskId),
+    evalTaskId: normalizeString(input.evalTaskId),
+    evalResultId: normalizeString(input.evalResultId),
+    skillId: normalizeString(input.skillId),
+    sampleId: normalizeString(input.sampleId),
+    evidenceId: normalizeString(input.evidenceId),
     createdAt,
     updatedAt: normalizeString(input.updatedAt || input.createdAt || createdAt),
   };

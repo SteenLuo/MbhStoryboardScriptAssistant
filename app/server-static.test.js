@@ -4,6 +4,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
+const learningLibrarySource = fs.readFileSync(path.join(__dirname, "lib", "learningLibrary.js"), "utf8");
 
 function extractFunction(name) {
   const asyncMarker = `async function ${name}`;
@@ -172,7 +173,7 @@ test("notification API exposes unread queue and handling endpoint", () => {
   assert.match(apiSource, /handleNotification\(ROOT/);
 });
 
-test("learning library API exposes records rules and skills", () => {
+test("learning library API exposes fixed D7 contract fields", () => {
   const apiSource = extractFunction("handleApi");
 
   assert.match(serverSource, /require\("\.\/lib\/learningLibrary"\)/);
@@ -180,6 +181,9 @@ test("learning library API exposes records rules and skills", () => {
   assert.match(serverSource, /updateCurrentRuleStatus/);
   assert.match(apiSource, /\/api\/learning-library/);
   assert.match(apiSource, /buildLearningLibrary\(ROOT\)/);
+  for (const field of ["records", "impactItems", "sampleItems", "evalItems", "skillItems", "accessIssues"]) {
+    assert.match(learningLibrarySource, new RegExp(`${field}:`));
+  }
   assert.match(apiSource, /\/api\/learning-rules\/status/);
   assert.match(apiSource, /updateCurrentRuleStatus\(ROOT/);
 });
