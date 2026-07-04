@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>合并节点样式候选</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #191611;
+      --grid-a: rgba(215, 188, 136, 0.09);
+      --grid-b: rgba(0, 109, 102, 0.08);
+      --panel: #25211d;
+      --field: #2d2923;
+      --ink: #f8efe2;
+      --muted: #b7aa99;
+      --line: #4a4138;
+      --teal: #00a094;
+      --teal-dark: #007a70;
+      --gold: #d7bc88;
+      --red: #c06e65;
+      --blue: #1e88ff;
+      --shadow: rgba(0, 0, 0, 0.34);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(var(--grid-a) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-b) 1px, transparent 1px),
+        var(--bg);
+      background-size: 48px 48px;
+      font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    }
+
+    .page {
+      width: min(1380px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 28px 0 44px;
+    }
+
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 26px;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 780px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .source-note {
+      max-width: 410px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+      text-align: right;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px;
+    }
+
+    .option {
+      min-height: 330px;
+      padding: 18px;
+      border: 1px solid rgba(215, 188, 136, 0.2);
+      border-radius: 18px;
+      background: rgba(17, 15, 12, 0.58);
+      box-shadow: 0 22px 54px rgba(0, 0, 0, 0.2);
+    }
+
+    .option-head {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 26px;
+    }
+
+    .option h2 {
+      margin: 0 0 6px;
+      color: var(--ink);
+      font-size: 16px;
+    }
+
+    .option p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .tag {
+      min-width: 68px;
+      padding: 5px 9px;
+      border: 1px solid rgba(215, 188, 136, 0.36);
+      border-radius: 999px;
+      color: var(--gold);
+      font-size: 12px;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .stage {
+      position: relative;
+      min-height: 210px;
+      padding: 12px 86px 18px 34px;
+    }
+
+    .node-wrap {
+      position: relative;
+      width: min(100%, 620px);
+      min-width: 420px;
+      height: 168px;
+      margin: 0 auto;
+    }
+
+    .node {
+      position: absolute;
+      inset: 0;
+      border: 1.5px solid rgba(192, 110, 101, 0.72);
+      border-radius: 24px;
+      color: var(--ink);
+      background: rgba(45, 41, 35, 0.94);
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.22);
+      overflow: visible;
+    }
+
+    .node .body {
+      height: 100%;
+      padding: 34px 32px 24px;
+      border-radius: inherit;
+      overflow: hidden;
+      font-size: 13px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+
+    .headline {
+      position: absolute;
+      left: 16px;
+      top: -26px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .headline .icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      color: var(--red);
+      background: rgba(192, 110, 101, 0.14);
+      font-size: 11px;
+    }
+
+    .merge-badge {
+      position: absolute;
+      right: 14px;
+      top: -30px;
+      z-index: 5;
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(215, 188, 136, 0.55);
+      border-radius: 999px;
+      color: var(--gold);
+      background: rgba(31, 28, 23, 0.96);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .plus {
+      position: absolute;
+      top: 50%;
+      right: -52px;
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      color: var(--ink);
+      background: rgba(53, 49, 42, 0.98);
+      box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22);
+      font-size: 24px;
+      transform: translateY(-50%);
+    }
+
+    .clear-zone {
+      position: absolute;
+      top: 20px;
+      right: -66px;
+      bottom: 20px;
+      width: 48px;
+      border: 1px dashed rgba(215, 188, 136, 0.22);
+      border-radius: 999px;
+      opacity: 0.55;
+    }
+
+    .clear-zone::after {
+      content: "加号区";
+      position: absolute;
+      left: 50%;
+      bottom: -18px;
+      color: var(--muted);
+      font-size: 10px;
+      transform: translateX(-50%);
+      white-space: nowrap;
+    }
+
+    .content {
+      opacity: 0.92;
+    }
+
+    .sources {
+      margin-top: 26px;
+      padding: 16px 18px;
+      border: 1px solid rgba(215, 188, 136, 0.22);
+      border-radius: 16px;
+      color: var(--muted);
+      background: rgba(17, 15, 12, 0.54);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .sources a {
+      color: var(--gold);
+      text-decoration: none;
+    }
+
+    .sources a:hover {
+      text-decoration: underline;
+    }
+
+    /* 01: Inner frame */
+    .inner-frame .node {
+      border-color: rgba(0, 160, 148, 0.75);
+      box-shadow:
+        inset 0 0 0 5px rgba(215, 188, 136, 0.08),
+        inset 0 0 0 10px rgba(0, 160, 148, 0.08),
+        0 18px 40px rgba(0, 0, 0, 0.22);
+    }
+
+    .inner-frame .node::before,
+    .inner-frame .node::after {
+      content: "";
+      position: absolute;
+      inset: 11px;
+      border: 1px solid rgba(215, 188, 136, 0.3);
+      border-radius: 18px;
+      pointer-events: none;
+    }
+
+    .inner-frame .node::after {
+      inset: 20px;
+      border-color: rgba(0, 160, 148, 0.2);
+    }
+
+    /* 02: Left spines */
+    .spine-stack .node {
+      border-color: rgba(215, 188, 136, 0.58);
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
+    }
+
+    .spine-stack .node::before {
+      content: "";
+      position: absolute;
+      left: -18px;
+      top: 20px;
+      bottom: 20px;
+      width: 24px;
+      border-radius: 16px 0 0 16px;
+      background:
+        linear-gradient(180deg, rgba(0, 160, 148, 0.92), rgba(0, 122, 112, 0.92)) left/8px 100% no-repeat,
+        linear-gradient(180deg, rgba(215, 188, 136, 0.85), rgba(135, 102, 56, 0.85)) center/8px 100% no-repeat,
+        linear-gradient(180deg, rgba(192, 110, 101, 0.82), rgba(122, 58, 55, 0.82)) right/8px 100% no-repeat;
+      box-shadow: -8px 0 22px rgba(0, 0, 0, 0.18);
+    }
+
+    .spine-stack .node::after {
+      content: "3";
+      position: absolute;
+      left: -34px;
+      top: -8px;
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(215, 188, 136, 0.42);
+      border-radius: 999px;
+      color: var(--gold);
+      background: rgba(17, 15, 12, 0.96);
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    /* 03: Top tabs */
+    .top-tabs .node {
+      border-color: rgba(192, 110, 101, 0.74);
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.24);
+    }
+
+    .top-tabs .tabs {
+      position: absolute;
+      left: 34px;
+      top: -15px;
+      z-index: -1;
+      display: flex;
+      gap: 8px;
+    }
+
+    .top-tabs .tabs span {
+      width: 68px;
+      height: 22px;
+      border: 1px solid rgba(215, 188, 136, 0.34);
+      border-bottom: 0;
+      border-radius: 12px 12px 0 0;
+      background: rgba(215, 188, 136, 0.18);
+    }
+
+    .top-tabs .tabs span:nth-child(2) {
+      background: rgba(0, 160, 148, 0.14);
+    }
+
+    .top-tabs .tabs span:nth-child(3) {
+      background: rgba(192, 110, 101, 0.15);
+    }
+
+    /* 04: Bottom trays */
+    .bottom-tray .node {
+      border-color: rgba(0, 160, 148, 0.72);
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.22);
+    }
+
+    .bottom-tray .node::before,
+    .bottom-tray .node::after {
+      content: "";
+      position: absolute;
+      left: 22px;
+      right: 22px;
+      height: 14px;
+      border: 1px solid rgba(215, 188, 136, 0.34);
+      border-top: 0;
+      border-radius: 0 0 18px 18px;
+      background: rgba(215, 188, 136, 0.1);
+      pointer-events: none;
+    }
+
+    .bottom-tray .node::before {
+      bottom: -16px;
+    }
+
+    .bottom-tray .node::after {
+      bottom: -29px;
+      left: 44px;
+      right: 44px;
+      opacity: 0.75;
+    }
+
+    /* 05: Corner tickets */
+    .corner-ticket .node {
+      border-color: rgba(215, 188, 136, 0.62);
+      overflow: hidden;
+    }
+
+    .corner-ticket .node::before,
+    .corner-ticket .node::after {
+      content: "";
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      width: 74px;
+      height: 74px;
+      clip-path: polygon(100% 0, 0 100%, 100% 100%);
+      pointer-events: none;
+    }
+
+    .corner-ticket .node::before {
+      background: rgba(215, 188, 136, 0.26);
+    }
+
+    .corner-ticket .node::after {
+      right: 12px;
+      bottom: 12px;
+      width: 46px;
+      height: 46px;
+      background: rgba(0, 160, 148, 0.2);
+    }
+
+    /* 06: Bottom ledger lines */
+    .ledger-lines .node {
+      border-color: rgba(192, 110, 101, 0.72);
+    }
+
+    .ledger-lines .node::before {
+      content: "";
+      position: absolute;
+      left: 24px;
+      right: 58px;
+      bottom: 16px;
+      height: 14px;
+      border-top: 2px solid rgba(215, 188, 136, 0.44);
+      border-bottom: 2px solid rgba(0, 160, 148, 0.32);
+      pointer-events: none;
+    }
+
+    .ledger-lines .node::after {
+      content: "v1  v2  当前";
+      position: absolute;
+      right: 28px;
+      bottom: 11px;
+      color: rgba(215, 188, 136, 0.8);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    /* 07: Left-bottom ghost sheets */
+    .ghost-sheets .node {
+      border-color: rgba(0, 160, 148, 0.75);
+    }
+
+    .ghost-sheets .sheet {
+      position: absolute;
+      left: -14px;
+      bottom: -14px;
+      width: calc(100% - 8px);
+      height: calc(100% - 4px);
+      border: 1.5px solid rgba(215, 188, 136, 0.34);
+      border-radius: 24px;
+      background: rgba(45, 41, 35, 0.46);
+      z-index: -1;
+    }
+
+    .ghost-sheets .sheet.two {
+      left: -26px;
+      bottom: -26px;
+      border-color: rgba(192, 110, 101, 0.24);
+      opacity: 0.72;
+    }
+
+    /* 08: Version rail */
+    .version-rail .node {
+      border-color: rgba(215, 188, 136, 0.62);
+      box-shadow:
+        inset 0 1px 0 rgba(248, 235, 204, 0.16),
+        inset 0 0 0 1px rgba(215, 188, 136, 0.12),
+        0 18px 42px rgba(0, 0, 0, 0.22);
+    }
+
+    .version-rail .rail {
+      position: absolute;
+      left: 24px;
+      right: 76px;
+      top: 7px;
+      height: 4px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      opacity: 0.72;
+      pointer-events: none;
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    .version-rail .node:hover .rail {
+      opacity: 1;
+      transform: translateY(-1px);
+    }
+
+    .version-rail .rail span {
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(215, 188, 136, 0.18);
+      flex: 1;
+    }
+
+    .version-rail .rail span:nth-child(3) {
+      flex: 1.35;
+      background: rgba(0, 160, 148, 0.74);
+      box-shadow:
+        0 0 0 1px rgba(0, 160, 148, 0.18),
+        0 0 14px rgba(0, 160, 148, 0.18);
+    }
+
+    @media (max-width: 980px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      header {
+        align-items: start;
+        flex-direction: column;
+      }
+
+      .source-note {
+        text-align: left;
+      }
+
+      .node-wrap {
+        min-width: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div>
+        <h1>合并节点样式候选</h1>
+        <p class="lead">以下都是“节点仍像普通框一样展示正文，历史入口只保留右上角合图标”的方案。虚线胶囊是加号操作区，用来检查样式是否侵占右侧加号。</p>
+      </div>
+      <div class="source-note">参考方向：CSS stacked cards、overlapping cards、card stacking inspiration。这里做了适配画布的重新设计，不直接照搬。</div>
+    </header>
+
+    <section class="grid">
+      <article class="option inner-frame">
+        <div class="option-head">
+          <div>
+            <h2>方案 A：内嵌双层框</h2>
+            <p>不向外堆叠，完全不碰加号。用内部双线表达“多个版本叠在一个合并节点里”。</p>
+          </div>
+          <span class="tag">最稳</span>
+        </div>
+        <div class="stage">
+          <div class="node-wrap">
+            <div class="clear-zone"></div>
+            <div class="node">
+              <div class="headline"><span class="icon">▦</span>第1集 分镜 修改</div>
+              <div class="merge-badge">合</div>
+              <div class="plus">+</div>
+              <div class="body"><span class="content">场次：1-1
+地点：林秀娥房间
+人物：林秀娥
+
+镜号：1
+景别：特写
+运镜：固定 -> 缓慢拉开
+情绪/动作：全黑画面淡入，一小撮黄豆大的煤油灯火苗在画面中下方。</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option spine-stack">
+        <div class="option-head">
+          <div>
+            <h2>方案 B：左侧版本书脊</h2>
+            <p>把“多版本”转移到左侧书脊，不影响右侧加号。适合剧本、分镜这种文档类节点。</p>
+          </div>
+          <span class="tag">文档感</span>
+        </div>
+        <div class="stage">
+          <div class="node-wrap">
+            <div class="clear-zone"></div>
+            <div class="node">
+              <div class="headline"><span class="icon">▦</span>第1集 分镜 修改</div>
+              <div class="merge-badge">合</div>
+              <div class="plus">+</div>
+              <div class="body"><span class="content">场次：1-1
+地点：林秀娥房间
+人物：林秀娥
+
+镜号：1
+景别：特写
+运镜：固定 -> 缓慢拉开
+情绪/动作：全黑画面淡入，一小撮黄豆大的煤油灯火苗在画面中下方。</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option top-tabs">
+        <div class="option-head">
+          <div>
+            <h2>方案 C：顶部版本标签</h2>
+            <p>用顶部页签表达历史版本，卡片本体仍干净。右侧完全留白给加号。</p>
+          </div>
+          <span class="tag">清晰</span>
+        </div>
+        <div class="stage">
+          <div class="node-wrap">
+            <div class="clear-zone"></div>
+            <div class="node">
+              <div class="tabs"><span></span><span></span><span></span></div>
+              <div class="headline"><span class="icon">▦</span>第1集 分镜 修改</div>
+              <div class="merge-badge">合</div>
+              <div class="plus">+</div>
+              <div class="body"><span class="content">场次：1-1
+地点：林秀娥房间
+人物：林秀娥
+
+镜号：1
+景别：特写
+运镜：固定 -> 缓慢拉开
+情绪/动作：全黑画面淡入，一小撮黄豆大的煤油灯火苗在画面中下方。</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option bottom-tray">
+        <div class="option-head">
+          <div>
+            <h2>方案 D：底部托盘层</h2>
+            <p>层级只出现在底部，像文件托盘。比外扩卡片更紧凑，但节点高度视觉上会变厚。</p>
+          </div>
+          <span class="tag">厚重</span>
+        </div>
+        <div class="stage">
+          <div class="node-wrap">
+            <div class="clear-zone"></div>
+            <div class="node">
+              <div class="headline"><span class="icon">▦</span>第1集 分镜 修改</div>
+              <div class="merge-badge">合</div>
+              <div class="plus">+</div>
+              <div class="body"><span class="content">场次：1-1
+地点：林秀娥房间
+人物：林秀娥
+
+镜号：1
+景别：特写
+运镜：固定 -> 缓慢拉开
+情绪/动作：全黑画面淡入，一小撮黄豆大的煤油灯火苗在画面中下方。</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option corner-ticket">
+        <div class="option-head">
+          <div>
+            <h2>方案 E：右下角折页</h2>
+            <p>用角落折页表达“还有历史版本”。占用极小，不影响加号，但多版本感相对含蓄。</p>
+          </div>
+          <span class="tag">轻量</span>
+        </div>
+        <div class="stage">
+          <div class="node-wrap">
+            <div class="clear-zone"></div>
+            <div class="node">
+              <div class="headline"><span class="icon">▦</span>第1集 分镜 修改</div>
+              <div class="merge-badge">合</div>
+              <div class="plus">+</div>
+              <div class="body"><span class="content">场次：1-1
+地点：林秀娥房间
+人物：林秀娥
+
+镜号：1
+景别：特写
+运镜：固定 -> 缓慢拉开
+情绪/动作：全黑画面淡入，一小撮黄豆大的煤油灯火苗在画面中下方。</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option ledger-lines">
+        <div class="option-head">
+          <div>
+            <h2>方案 F：底部版本刻线</h2>
+            <p>像文档版本记录条，只在底部增加两根线。可读性强，装饰感弱。</p>
+          </div>
+          <span class="tag">克制</span>
+        </div>
+        <div class="stage">
+          <div class="node-wrap">
+            <div class="clear-zone"></div>
+            <div class="node">
+              <div class="headline"><span class="icon">▦</span>第1集 分镜 修改</div>
+              <div class="merge-badge">合</div>
+              <div class="plus">+</div>
+              <div class="body"><span class="content">场次：1-1
+地点：林秀娥房间
+人物：林秀娥
+
+镜号：1
+景别：特写
+运镜：固定 -> 缓慢拉开
+情绪/动作：全黑画面淡入，一小撮黄豆大的煤油灯火苗在画面中下方。</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option ghost-sheets">
+        <div class="option-head">
+          <div>
+            <h2>方案 G：左下影印层</h2>
+            <p>仍然保留“堆叠卡片”的直觉，但层级向左下退让，右侧加号区完全安全。</p>
+          </div>
+          <span class="tag">接近现版</span>
+        </div>
+        <div class="stage">
+          <div class="node-wrap">
+            <div class="clear-zone"></div>
+            <div class="node">
+              <div class="sheet one"></div>
+              <div class="sheet two"></div>
+              <div class="headline"><span class="icon">▦</span>第1集 分镜 修改</div>
+              <div class="merge-badge">合</div>
+              <div class="plus">+</div>
+              <div class="body"><span class="content">场次：1-1
+地点：林秀娥房间
+人物：林秀娥
+
+镜号：1
+景别：特写
+运镜：固定 -> 缓慢拉开
+情绪/动作：全黑画面淡入，一小撮黄豆大的煤油灯火苗在画面中下方。</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option version-rail">
+        <div class="option-head">
+          <div>
+            <h2>方案 H：顶部版本轨道</h2>
+            <p>把版本轨道贴到上边缘，当前版本高亮。它不额外占正文空间，也不会改变节点外轮廓。</p>
+          </div>
+          <span class="tag">产品感</span>
+        </div>
+        <div class="stage">
+          <div class="node-wrap">
+            <div class="clear-zone"></div>
+            <div class="node">
+              <div class="rail"><span></span><span></span><span></span><span></span></div>
+              <div class="headline"><span class="icon">▦</span>第1集 分镜 修改</div>
+              <div class="merge-badge">合</div>
+              <div class="plus">+</div>
+              <div class="body"><span class="content">场次：1-1
+地点：林秀娥房间
+人物：林秀娥
+
+镜号：1
+景别：特写
+运镜：固定 -> 缓慢拉开
+情绪/动作：全黑画面淡入，一小撮黄豆大的煤油灯火苗在画面中下方。</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="sources">
+      <strong>参考来源：</strong>
+      <a href="https://freefrontend.com/css-stacked-cards/">FreeFrontend - CSS Stacked Cards</a>、
+      <a href="https://ui-layouts.com/components/stacking-card">UI Layouts - Stacking Card</a>、
+      <a href="https://www.subframe.com/tips/css-stacked-card-examples">Subframe - CSS Stacked Card Examples</a>、
+      <a href="https://dribbble.com/search/stacked-cards-ui">Dribbble - Stacked Cards UI</a>。
+      我主要参考了“层叠、页签、视觉深度、压缩多版本信息”的方向，具体样式已按当前画布配色和加号交互重新设计。
+    </section>
+  </main>
+</body>
+</html>

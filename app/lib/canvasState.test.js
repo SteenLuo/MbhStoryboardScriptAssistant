@@ -64,6 +64,32 @@ test("normalizeCanvas preserves saved canvas shape and repairs invalid fields", 
   assert.strictEqual(canvas.edges[0].toSide, "right");
 });
 
+test("normalizeCanvas preserves archive metadata for frozen canvases", () => {
+  const canvas = normalizeCanvas({
+    id: "canvas-archived",
+    title: "Archived",
+    archivedAt: "2026-07-01T10:00:00.000Z",
+    archiveReadiness: { ok: true, issues: [] },
+    nodes: [{ id: "n1", type: "novel", title: "Novel" }],
+    edges: [],
+  });
+
+  assert.strictEqual(canvas.archivedAt, "2026-07-01T10:00:00.000Z");
+  assert.deepStrictEqual(canvas.archiveReadiness, { ok: true, issues: [] });
+});
+
+test("normalizeCanvas preserves deletedAt for trashed canvases", () => {
+  const canvas = normalizeCanvas({
+    id: "canvas-deleted",
+    title: "Deleted",
+    deletedAt: "2026-07-01T11:00:00.000Z",
+    nodes: [{ id: "n1", type: "novel", title: "Novel" }],
+    edges: [],
+  });
+
+  assert.strictEqual(canvas.deletedAt, "2026-07-01T11:00:00.000Z");
+});
+
 test("normalizeCanvas keeps only one novel node", () => {
   const canvas = normalizeCanvas({
     id: "canvas-novel-limit",

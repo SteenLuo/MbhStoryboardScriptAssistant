@@ -1,6 +1,7 @@
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
+const { readCurrentRuleset } = require("./autonomousLearning");
 
 const SKILL_ROUTES = [
   {
@@ -20,6 +21,18 @@ const SKILL_ROUTES = [
     name: "分镜生成",
     path: "skills/03-storyboard/storyboard-generate",
     keywords: ["分镜", "镜头", "拆镜", "镜号", "storyboard", "运镜", "景别", "构图", "画面", "视角", "正反打", "特写", "穿帮"],
+  },
+  {
+    id: "script-hard-issue-review",
+    name: "剧本评审",
+    path: "skills/02-script/script-hard-issue-review",
+    keywords: ["剧本评审", "硬伤", "硬伤评审", "逻辑漏洞", "问题清单", "返修意见", "全量硬伤", "语言表达质量", "画面可呈现性"],
+  },
+  {
+    id: "script-manju-adaptation-analysis",
+    name: "漫剧适配分析",
+    path: "skills/02-script/script-manju-adaptation-analysis",
+    keywords: ["漫剧适配", "适配分析", "立项分析", "是否适合做漫剧", "是否值得立项", "市场适配", "受众适配", "AIGC制作", "制作可控", "改编策略"],
   },
   {
     id: "script-review-rewrite",
@@ -58,6 +71,13 @@ function routeLocalSkill(text) {
   return { ...FALLBACK_ROUTE };
 }
 
+function findLocalSkillRoute(id) {
+  const value = String(id || "").trim();
+  if (!value) return null;
+  const route = SKILL_ROUTES.find((item) => item.id === value);
+  return route ? { ...route } : null;
+}
+
 async function loadLocalSkillContext(root, route, options = {}) {
   const selected = route || FALLBACK_ROUTE;
   const limitPerFile = Number(options.limitPerFile || 12000);
@@ -83,10 +103,7 @@ async function loadLocalSkillContext(root, route, options = {}) {
     }
   }
 
-  const confirmedPreferences = path.join(root, "learning", "accepted-rules", "web-confirmed-preferences.md");
-  if (fs.existsSync(confirmedPreferences)) {
-    await addFileSection(sections, files, root, confirmedPreferences, "用户确认偏好", limitPerFile);
-  }
+  await addCurrentRulesetSection(sections, files, root, selected);
 
   return {
     id: selected.id,
@@ -108,6 +125,30 @@ async function addFileSection(sections, files, root, file, title, limitPerFile) 
   sections.push(`## ${title}：${relative}\n\n${text.slice(0, limitPerFile)}`);
 }
 
+async function addCurrentRulesetSection(sections, files, root, route) {
+  const rulesetPath = path.join(root, "learning", "current-ruleset.json");
+  if (!fs.existsSync(rulesetPath)) return;
+  const ruleset = await readCurrentRuleset(root);
+  const capability = capabilityForRoute(route);
+  const activeRules = (ruleset.rules || []).filter((rule) =>
+    rule.status === "active" &&
+    (capability === "all" || rule.capability === capability || rule.capability === "general")
+  );
+  if (!activeRules.length) return;
+  const relative = path.relative(root, rulesetPath).replace(/\\/g, "/");
+  files.push(relative);
+  const lines = activeRules.map((rule) => `- [${rule.topicKey}] ${rule.content}`);
+  sections.push(`## 当前规则层：${relative}\n\n${lines.join("\n")}`);
+}
+
+function capabilityForRoute(route) {
+  const id = route?.id || "";
+  if (id.includes("storyboard")) return "storyboard";
+  if (id.includes("script")) return "script";
+  if (id.includes("novel")) return "novel";
+  return "all";
+}
+
 function safeResolve(root, relativePath) {
   const base = path.resolve(root);
   const target = path.resolve(base, relativePath);
@@ -120,6 +161,7 @@ function safeResolve(root, relativePath) {
 module.exports = {
   FALLBACK_ROUTE,
   SKILL_ROUTES,
+  findLocalSkillRoute,
   loadLocalSkillContext,
   routeLocalSkill,
 };

@@ -94,7 +94,8 @@ function publicModelSettings(settings, env = process.env) {
       defaultModel: MODEL_PROVIDERS[id].model,
     })),
     baseUrl: active.baseUrl,
-    model: env[providerMeta.modelEnv] || active.model,
+    model: active.model,
+    envModel: env[providerMeta.modelEnv] || "",
     hasStoredApiKey: Boolean(active.apiKey),
     hasEnvApiKey: Boolean(env[providerMeta.apiKeyEnv]),
   };

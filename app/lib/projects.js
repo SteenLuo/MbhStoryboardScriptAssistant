@@ -17,7 +17,7 @@ function normalizeProjects(projects = [], now = () => new Date().toISOString()) 
     seen.add(id);
     output.push({
       id,
-      title: cleanTitle(project.title, id === DEFAULT_PROJECT_ID ? DEFAULT_PROJECT_TITLE : "未命名项目"),
+      title: id === DEFAULT_PROJECT_ID ? DEFAULT_PROJECT_TITLE : cleanTitle(project.title, "未命名项目"),
       createdAt: project.createdAt || now(),
       updatedAt: project.updatedAt || project.createdAt || now(),
     });
@@ -54,6 +54,9 @@ function resolveProjectId(projectId, projects = []) {
 
 function renameProject(projects = [], id = "", title = "", now = () => new Date().toISOString()) {
   const projectId = resolveProjectId(id, projects);
+  if (projectId === DEFAULT_PROJECT_ID) {
+    throw new Error("无项目不允许重命名");
+  }
   const normalized = normalizeProjects(projects, now);
   const nextTitle = cleanTitle(title, normalized.find((project) => project.id === projectId)?.title || DEFAULT_PROJECT_TITLE);
   const nextProjects = normalized.map((project) => (

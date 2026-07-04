@@ -23,10 +23,11 @@ test("double-click launcher opens browser by default and accepts no-open option"
   assert.match(startBat, /Start-MbhAssistant\.ps1" %START_ARGS%/);
 });
 
-test("restart launcher can restart without opening a browser", () => {
+test("restart launcher defaults to no browser for development restarts", () => {
   assert.match(restartBat, /START_ARGS=/);
+  assert.match(restartBat, /START_ARGS=-NoOpenBrowser/);
+  assert.match(restartBat, /--open-browser/);
   assert.match(restartBat, /--no-open-browser/);
-  assert.match(restartBat, /-NoOpenBrowser/);
   assert.match(restartBat, /Start-MbhAssistant\.ps1" %START_ARGS%/);
 });
 

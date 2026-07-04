@@ -14,9 +14,6 @@ function buildAssistantMessage(result, now = () => new Date()) {
   if (result.chatIntent) {
     message.chatIntent = result.chatIntent;
   }
-  if (result.scriptGrade) {
-    message.scriptGrade = result.scriptGrade;
-  }
   return message;
 }
 

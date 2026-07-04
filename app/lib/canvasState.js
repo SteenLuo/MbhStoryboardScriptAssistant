@@ -147,6 +147,11 @@ function normalizeCanvas(canvas = {}, now = nowIso) {
       y: clampNumber(canvas.viewport?.y, 0, -20000, 20000),
       scale: clampNumber(canvas.viewport?.scale, 1, 0.25, 2),
     },
+    archivedAt: String(canvas.archivedAt || ""),
+    deletedAt: String(canvas.deletedAt || ""),
+    archiveReadiness: canvas.archiveReadiness && typeof canvas.archiveReadiness === "object"
+      ? canvas.archiveReadiness
+      : null,
     nodes,
     edges,
   };

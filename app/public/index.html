@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>猫主子漫剧剧本分镜小助手</title>
-    <link rel="stylesheet" href="/styles.css?v=20260701-canvas-merge-rail-v1" />
+    <link rel="stylesheet" href="/styles.css?v=0.5-learning-half" />
   </head>
   <body>
     <div class="app-shell">
@@ -55,10 +55,38 @@
             </div>
             <div class="cat-note">喵，随时待命</div>
             <div id="catReminder" class="cat-reminder" role="status" aria-live="polite"></div>
+            <div id="catNotification" class="cat-notification" role="dialog" aria-live="polite" hidden></div>
           </div>
-          <div class="sidebar-actions">
-            <button id="openTrash" class="settings-entry">回收站</button>
-            <button id="openSettings" class="settings-entry">设置</button>
+          <div class="sidebar-actions sidebar-icon-stack">
+            <button id="openTrash" class="settings-entry icon-entry" type="button" aria-label="回收站" title="回收站">
+              <svg class="sidebar-symbol-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M5 7h14"></path>
+                <path d="M10 11v6"></path>
+                <path d="M14 11v6"></path>
+                <path d="M8 7l1-3h6l1 3"></path>
+                <path d="M7 7l1 13h8l1-13"></path>
+              </svg>
+            </button>
+            <button id="openArchiveView" class="settings-entry icon-entry" type="button" aria-label="归档" title="归档">
+              <svg class="sidebar-symbol-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M4 6h16v14H4z"></path>
+                <path d="M4 10h16"></path>
+                <path d="M9 14h6"></path>
+              </svg>
+            </button>
+            <button id="openLearningLibrary" class="settings-entry icon-entry" type="button" aria-label="学习资料库" title="学习资料库">
+              <svg class="sidebar-symbol-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M6 5.5c1.8-.9 3.7-.9 5.5 0v13c-1.8-.9-3.7-.9-5.5 0z"></path>
+                <path d="M18 5.5c-1.8-.9-3.7-.9-5.5 0v13c1.8-.9 3.7-.9 5.5 0z"></path>
+                <path d="M12 5.5v13"></path>
+              </svg>
+            </button>
+            <button id="openSettings" class="settings-entry icon-entry" type="button" aria-label="设置" title="设置">
+              <svg class="sidebar-symbol-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z"></path>
+                <path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a7 7 0 0 0-1.8-1L14.4 3h-4.8l-.4 3.1a7 7 0 0 0-1.8 1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a7 7 0 0 0 1.8 1l.4 3.1h4.8l.4-3.1a7 7 0 0 0 1.8-1l2.4 1 2-3.4-2-1.5c.1-.3.1-.7.1-1z"></path>
+              </svg>
+            </button>
           </div>
         </div>
         <div id="sidebarResizeHandle" class="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="拖拽调整侧边栏宽度" title="拖拽调整侧边栏宽度"></div>
@@ -82,16 +110,13 @@
           <input id="fileInput" type="file" multiple hidden />
           <div class="composer-box">
             <div id="attachmentList" class="attachment-list" aria-live="polite"></div>
-            <textarea id="chatInput" placeholder="输入你的小说、剧本、分镜要求或反馈。Shift+Enter 换行，Enter 发送。"></textarea>
+            <textarea id="chatInput" placeholder="输入你的小说、剧本、分镜要求、反馈或学习材料。Shift+Enter 换行，Enter 发送。"></textarea>
             <div class="composer-toolbar">
               <div class="composer-tools">
                 <button id="attachBtn" class="attach-btn" type="button" title="上传文件或图片" aria-label="上传文件或图片">+</button>
-                <button class="mode-btn" type="button" data-compose-mode="script" aria-pressed="false">生成剧本</button>
-                <button class="mode-btn" type="button" data-compose-mode="storyboard" aria-pressed="false">生成分镜</button>
-                <div class="grade-toggle" role="group" aria-label="剧本等级">
-                  <button class="grade-btn active" type="button" data-script-grade="B" aria-pressed="true">B级本</button>
-                  <button class="grade-btn" type="button" data-script-grade="A" aria-pressed="false">A级本</button>
-                </div>
+                <button class="mode-btn" type="button" data-compose-mode="script-hard-issue-review" aria-pressed="false">剧本评审</button>
+                <button class="mode-btn" type="button" data-compose-mode="script-manju-adaptation-analysis" aria-pressed="false">漫剧适配</button>
+                <button class="mode-btn" type="button" data-compose-mode="learning" aria-pressed="false">技能学习</button>
               </div>
               <button id="sendBtn" class="send-btn" type="submit" aria-label="发送">↑</button>
             </div>
@@ -102,13 +127,15 @@
         <header class="canvas-top">
           <div>
             <h1 id="canvasTitle">自由画布</h1>
-            <p>小说 / 剧本 / 分镜脚本 / 标识节点，可手动连线，也可从节点触发生成。</p>
+            <p id="canvasSubtitle">小说 / 剧本 / 分镜脚本 / 标识节点，可手动连线，也可从节点触发生成。</p>
           </div>
           <div class="canvas-toolbar" role="toolbar" aria-label="画布工具">
             <button type="button" data-add-node="novel">小说</button>
             <button type="button" data-add-node="script">剧本</button>
             <button type="button" data-add-node="storyboard">分镜</button>
             <button type="button" data-add-node="label">标识</button>
+            <button id="archiveCurrentCanvas" type="button">归档</button>
+            <button id="deleteCurrentCanvas" type="button">删除</button>
           </div>
         </header>
         <section id="canvasStage" class="canvas-stage" aria-label="自由画布">
@@ -129,6 +156,9 @@
           <svg id="canvasMiniMapSvg" viewBox="0 0 180 116" aria-hidden="true"></svg>
         </div>
         <div class="canvas-view-tools" aria-label="画布视图工具">
+          <button id="undoCanvasEdit" type="button" aria-label="撤销画布编辑" title="撤销 Ctrl+Z" disabled>↶</button>
+          <button id="redoCanvasEdit" type="button" aria-label="重做画布编辑" title="重做 Ctrl+Y" disabled>↷</button>
+          <span class="canvas-view-tools-divider" aria-hidden="true"></span>
           <button id="toggleCanvasMiniMap" type="button" aria-label="显示缩略图" title="显示缩略图">▣</button>
           <button id="fitCanvasView" type="button" aria-label="适配全部元素" title="适配全部元素">⛶</button>
           <button id="centerSelectedCanvasNode" type="button" aria-label="定位选中节点" title="定位选中节点">◎</button>
@@ -146,16 +176,11 @@
     <aside id="settings" class="settings" aria-hidden="true">
       <div class="settings-panel">
         <div class="settings-head">
-          <h2>设置</h2>
+          <h2 id="settingsTitle">设置</h2>
           <button id="closeSettings" class="ghost">关闭</button>
         </div>
 
-        <div class="settings-tabs" role="tablist" aria-label="设置分类">
-          <button id="settingsTabDeepseek" class="settings-tab active" type="button" role="tab" aria-selected="true" aria-controls="settingsPanelDeepseek" data-settings-tab="deepseek">模型</button>
-          <button id="settingsTabLearning" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settingsPanelLearning" data-settings-tab="learning">学习状态</button>
-        </div>
-
-        <section id="settingsPanelDeepseek" class="settings-tab-panel active" role="tabpanel" aria-labelledby="settingsTabDeepseek" data-settings-panel="deepseek">
+        <section id="settingsPanelDeepseek" class="settings-tab-panel active" aria-labelledby="settingsTitle" data-settings-panel="deepseek">
           <label>软件名称</label>
           <input id="configAppName" placeholder="猫主子漫剧剧本分镜小助手" />
 
@@ -193,17 +218,110 @@
           <p id="configState">未读取配置</p>
         </section>
 
-        <section id="settingsPanelLearning" class="settings-tab-panel" role="tabpanel" aria-labelledby="settingsTabLearning" data-settings-panel="learning" hidden>
-        <div class="learning-panel">
-          <div class="learning-head">
-            <h3>M0-M6 完整性</h3>
-            <button id="refreshLearning" class="ghost" type="button">刷新学习闭环</button>
-          </div>
-          <div id="learningStatus" class="learning-status">未读取</div>
-          <div id="completenessList" class="completeness-list"></div>
-        </div>
-        </section>
+      </div>
+    </aside>
 
+    <aside id="learningPage" class="learning-page" aria-hidden="true">
+      <div class="learning-page-panel" role="dialog" aria-modal="true" aria-labelledby="learningPageTitle">
+        <div class="learning-page-head">
+          <div>
+            <h2 id="learningPageTitle">学习资料库</h2>
+            <p>系统从对话、样例和归档画布中沉淀出的学习结果。这里只读查看，不在这里编辑规则。</p>
+          </div>
+          <button id="closeLearningPage" class="ghost" type="button">关闭</button>
+        </div>
+        <div class="learning-page-body">
+          <div class="learning-panel">
+            <section class="learning-guide" aria-label="学习逻辑说明">
+              <div class="learning-guide-intro">
+                <strong>学习逻辑</strong>
+                <span>学习会先形成记录；识别为可执行规则后发布到当前规则层，并在命中对应技能时随技能说明一起进入模型上下文。</span>
+              </div>
+              <div class="learning-guide-grid">
+                <article>
+                  <strong>手动学习</strong>
+                  <p>在对话框选择“技能学习”后发送长期规则、格式要求或流程约束；完成流程后也可通过手动归档学习沉淀采纳版本。</p>
+                </article>
+                <article>
+                  <strong>自动学习</strong>
+                  <p>会触发：普通对话里出现可复用约束，或同一要求在同一对话里被再次强调。例如“以后分镜台词超过20字就拆镜”“默认剧本评审先看人物动机”“以后分镜不能连续三个同景别镜头”。</p>
+                  <p>重复强调也要带具体规则，例如再次说“同一镜号台词超过20字要拆镜头”会触发；只说“我说过很多次了”不会凭空猜。</p>
+                  <p>不触发：只要求本轮修改、闲聊、一次性反馈，或没有明确长期规则含义的内容。</p>
+                </article>
+                <article>
+                  <strong>落实到规则</strong>
+                  <p>“学习记录”保留证据和状态；“当前规则”代表已生效规则。同一主题的新规则会覆盖旧规则，失败记录会显示原因。</p>
+                </article>
+                <article>
+                  <strong>技能命中后叠加规则</strong>
+                  <p>系统不会单独调用“当前规则”。对话按钮、自然语言任务、画布生成或自动处理入口会先命中一个本地技能（SKILL.md）。</p>
+                  <p>技能命中后，再把同能力范围的当前规则追加到该技能上下文；未命中对应技能的规则不会独立生效。</p>
+                </article>
+              </div>
+            </section>
+            <div id="learningStatus" class="learning-status" hidden>正在读取学习资料...</div>
+            <div class="learning-library">
+              <div class="learning-library-tabs-row">
+                <div class="learning-library-tabs" role="tablist" aria-label="学习资料库">
+                  <button class="active" type="button" data-learning-library-tab="records">
+                    <span>学习记录</span>
+                    <span class="learning-help-wrap">
+                      <span id="learningRecordHelp" class="learning-help-button" aria-label="学习记录说明" aria-describedby="learningRecordHelpText">?</span>
+                      <span id="learningRecordHelpText" class="learning-help-popover" role="tooltip">
+                        <strong>学习记录说明</strong>
+                        <span>这里记录系统从对话、样例和归档画布里学到了什么，以及这些内容有没有真正生效。</span>
+                        <strong>学习记录状态</strong>
+                        <span><b>处理中</b>正在识别或发布规则</span>
+                        <span><b>已生效</b>已写入当前规则，命中技能后会读取</span>
+                        <span><b>已被覆盖</b>同主题新规则已替代</span>
+                        <span><b>失败</b>未写入当前规则，点失败数字查看原因</span>
+                      </span>
+                    </span>
+                    <strong id="learningRecordsTabCount" class="learning-tab-count">0</strong>
+                  </button>
+                  <button type="button" data-learning-library-tab="rules">
+                    <span>当前规则</span>
+                    <strong id="learningRulesTabCount" class="learning-tab-count">0</strong>
+                  </button>
+                  <button type="button" data-learning-library-tab="skills">
+                    <span>技能库</span>
+                    <span class="learning-help-wrap">
+                      <span id="learningSkillHelp" class="learning-help-button" aria-label="技能库说明" aria-describedby="learningSkillHelpText">?</span>
+                      <span id="learningSkillHelpText" class="learning-help-popover" role="tooltip">
+                        <strong>技能库说明</strong>
+                        <span>这里只说明技能库：展示系统正在使用的基础技能，以及后续可能沉淀出的小技能。对话可以先影响当前规则层；只有稳定方法论通过校验后，才可能调整或新增技能。这里不会直接编辑技能文件。</span>
+                      </span>
+                    </span>
+                    <strong id="learningSkillsTabCount" class="learning-tab-count">0</strong>
+                  </button>
+                </div>
+                <button id="learningFailureJump" class="learning-failure-jump" type="button" hidden aria-label="定位失败学习记录">
+                  <span>失败</span>
+                  <strong id="learningFailureTabCount">0</strong>
+                </button>
+              </div>
+              <div id="learningLibraryRecords" class="learning-library-list" data-learning-library-panel="records"></div>
+              <div id="learningLibraryRules" class="learning-library-list" data-learning-library-panel="rules" hidden></div>
+              <div id="learningLibrarySkills" class="learning-library-list" data-learning-library-panel="skills" hidden></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <aside id="canvasArchivePage" class="canvas-archive-page" aria-hidden="true">
+      <div class="canvas-archive-panel" role="dialog" aria-modal="true" aria-labelledby="canvasArchiveTitle">
+        <div class="canvas-archive-head">
+          <div>
+            <h2 id="canvasArchiveTitle">已归档画布</h2>
+            <p>归档库按画布保存。点击画布名称可进入完整只读画布查看。</p>
+          </div>
+          <button id="closeCanvasArchivePage" class="ghost" type="button">关闭</button>
+        </div>
+        <div class="canvas-archive-body">
+          <div id="canvasArchiveStatus" class="canvas-archive-status">未读取归档画布</div>
+          <div id="canvasArchiveList" class="canvas-archive-list" aria-live="polite"></div>
+        </div>
       </div>
     </aside>
 
@@ -293,11 +411,48 @@
           <div class="canvas-node-actions">
             <button id="generateScriptFromNode" type="button">生成剧本</button>
             <button id="generateStoryboardsFromNode" type="button">生成分镜</button>
-            <button id="saveCanvasNode" type="button">保存</button>
             <button id="closeCanvasNode" class="ghost" type="button">关闭</button>
           </div>
         </div>
-        <textarea id="canvasNodeContent" class="canvas-node-content" aria-label="节点内容"></textarea>
+        <div id="canvasNodeMarkdownToolbar" class="markdown-toolbar markdown-floating-toolbar canvas-node-modal-markdown-toolbar" role="toolbar" aria-label="Markdown 工具"></div>
+        <div id="canvasNodeContent" class="canvas-node-content markdown-editor markdown-body" role="textbox" aria-label="节点内容" contenteditable="true"></div>
+      </div>
+    </aside>
+
+    <aside id="canvasArchiveBlockedModal" class="canvas-archive-blocked-modal" aria-hidden="true">
+      <div class="canvas-archive-blocked-card" role="alertdialog" aria-modal="true" aria-labelledby="canvasArchiveBlockedTitle">
+        <div class="canvas-archive-blocked-mark" aria-hidden="true">!</div>
+        <div class="canvas-archive-blocked-content">
+          <h2 id="canvasArchiveBlockedTitle">暂不能归档</h2>
+          <p id="canvasArchiveBlockedIntro">请先处理以下内容，再重新归档。</p>
+          <ul id="canvasArchiveBlockedList" class="canvas-archive-blocked-list"></ul>
+          <div class="canvas-archive-blocked-actions">
+            <button id="closeCanvasArchiveBlocked" type="button">知道了</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <aside id="storyboardIssueModal" class="storyboard-issue-modal" aria-hidden="true">
+      <div class="storyboard-issue-panel" role="dialog" aria-modal="true" aria-labelledby="storyboardIssueTitle">
+        <div class="storyboard-issue-head">
+          <div>
+            <h2 id="storyboardIssueTitle">分镜问题</h2>
+            <p id="storyboardIssueIntro">点击右侧问题定位到对应行。</p>
+          </div>
+          <button id="closeStoryboardIssue" class="ghost" type="button">关闭</button>
+        </div>
+        <div class="storyboard-issue-body">
+          <div id="storyboardIssueText" class="storyboard-issue-text"></div>
+          <div class="storyboard-issue-side">
+            <div class="storyboard-issue-actions" aria-label="分镜问题处理">
+              <button id="autoFixStoryboardIssues" type="button">自动处理</button>
+              <button id="acknowledgeStoryboardIssues" type="button">我已知晓</button>
+              <button id="adoptStoryboardIssues" type="button">仍然采用</button>
+            </div>
+            <div id="storyboardIssueList" class="storyboard-issue-list"></div>
+          </div>
+        </div>
       </div>
     </aside>
 
@@ -350,9 +505,8 @@
 
     <script src="/usage-format.js?v=20260611-token-usage-v1"></script>
     <script src="/markdown-format.js?v=20260611-markdown-v1"></script>
-    <script src="/script-grade.js?v=20260611-script-grade-v1"></script>
     <script src="/compose-validation.js?v=20260611-compose-validation-v1"></script>
     <script src="/project-tree.js?v=20260627-canvas-icons-paws-v1"></script>
-    <script src="/app.js?v=20260701-canvas-merge-rail-v1"></script>
+    <script src="/app.js?v=0.5-learning-half"></script>
   </body>
 </html>

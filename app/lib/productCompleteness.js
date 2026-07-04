@@ -21,7 +21,7 @@ function buildCompletenessMatrix() {
     {
       milestone: "M2",
       name: "样例学习",
-      expected: "样例投放、分拣、候选规则和评测基准可持续沉淀。",
+      expected: "样例投放、分拣、学习记录和评测基准可持续沉淀。",
       webStatus: "部分接入：网页支持附件上传和 sample-ingest 路由，学习闭环可扫描样例投放区。",
       evidence: ["app/public/app.js", "tools/New-InboxScanReport.ps1", "skills/04-learning/sample-ingest/SKILL.md"],
       gaps: ["网页没有样例入库状态视图；复杂样例仍主要依赖 tools 脚本。"],
@@ -48,11 +48,11 @@ function buildCompletenessMatrix() {
     {
       milestone: "M5",
       name: "自主学习闭环",
-      expected: "对话、反馈、样例和降质记录能转成候选规则与快照。",
+      expected: "对话、反馈、样例和降质记录能转成学习记录、当前规则与快照。",
       webStatus: "已接入：网页对话会自动写入学习记录，设置面板可刷新学习闭环。",
       evidence: ["app/lib/conversationLearning.js", "tools/Invoke-AutoLearningCycle.ps1", "learning/conversation-records/"],
       gaps: ["自动学习记录仍是规则触发，后续可升级为更细的分类器。"],
-      next: "补学习记录列表和候选规则确认入口。",
+      next: "补学习记录列表和当前规则核对入口。",
     },
     {
       milestone: "M6",

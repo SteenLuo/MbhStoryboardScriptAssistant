@@ -11,6 +11,7 @@ const {
 
 test("normalizeProjects always keeps the no-project bucket first", () => {
   const projects = normalizeProjects([
+    { id: DEFAULT_PROJECT_ID, title: "临时收纳", createdAt: "2026-06-09T00:00:00.000Z" },
     { id: "custom", title: "猫剧项目", createdAt: "2026-06-10T00:00:00.000Z" },
   ]);
 
@@ -53,11 +54,9 @@ test("renameProject updates a custom project title", () => {
   assert.strictEqual(result.project.updatedAt, "2026-06-28T00:00:00.000Z");
 });
 
-test("renameProject can rename the no-project bucket while keeping it first", () => {
-  const result = renameProject([], DEFAULT_PROJECT_ID, "临时收纳", () => "2026-06-28T00:00:00.000Z");
-
-  assert.strictEqual(result.project.id, DEFAULT_PROJECT_ID);
-  assert.strictEqual(result.project.title, "临时收纳");
-  assert.strictEqual(result.projects[0].id, DEFAULT_PROJECT_ID);
-  assert.strictEqual(result.projects[0].title, "临时收纳");
+test("renameProject rejects the fixed no-project bucket", () => {
+  assert.throws(
+    () => renameProject([], DEFAULT_PROJECT_ID, "临时收纳", () => "2026-06-28T00:00:00.000Z"),
+    /无项目不允许重命名/,
+  );
 });

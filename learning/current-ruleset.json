@@ -1,0 +1,21 @@
+{
+  "version": 10,
+  "lastGoodVersion": 10,
+  "updatedAt": "2026-07-04T00:10:19.060Z",
+  "rules": [
+    {
+      "ruleId": "rule-learn-20260704-dialogue-length-20-shot-split",
+      "topicKey": "storyboard.dialogue.length",
+      "capability": "storyboard",
+      "content": "同一个镜号里边的台词不能超过20个字，超过要拆分镜头",
+      "priority": 50,
+      "sourceEventIds": [
+        "learn-20260704-dialogue-length-20-shot-split"
+      ],
+      "status": "disabled",
+      "coveredByRuleId": "",
+      "createdAt": "2026-07-03T22:05:19.214Z",
+      "updatedAt": "2026-07-04T00:10:19.060Z"
+    }
+  ]
+}

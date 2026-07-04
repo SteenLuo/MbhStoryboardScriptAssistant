@@ -12,7 +12,7 @@ const CHINESE_NUMBERS = {
 };
 
 function parseEpisodeNumber(value) {
-  const text = String(value || "").trim();
+  const text = String(value || "").replace(/\s+/g, "").trim();
   if (/^\d+$/.test(text)) return Number(text);
   if (text === "十") return 10;
   if (text.startsWith("十")) return 10 + (CHINESE_NUMBERS[text.slice(1)] || 0);
@@ -27,7 +27,7 @@ function parseEpisodeNumber(value) {
 function splitScriptIntoEpisodes(scriptText) {
   const source = String(scriptText || "").trim();
   if (!source) return [{ number: 1, title: "第1集", content: "" }];
-  const headingPattern = /(?:^|\n)\s{0,3}(?:#{1,6}\s*)?(第([0-9]+|[一二三四五六七八九十]{1,3})集(?=$|\s|[：:\-—])(?:[^\n]*)?)/g;
+  const headingPattern = /(?:^|\n)\s{0,3}(?:#{1,6}\s*)?(第\s*([0-9]+|[一二三四五六七八九十]{1,3})\s*集(?=$|\s|[：:\-—])(?:[^\n]*)?)/g;
   const matches = [];
   let match;
   while ((match = headingPattern.exec(source)) !== null) {

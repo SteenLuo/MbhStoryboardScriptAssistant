@@ -21,7 +21,6 @@ test("buildAssistantMessage stores model and token usage on assistant messages",
         intent: "storyboard",
         mode: "skill",
       },
-      scriptGrade: "A",
     },
     () => new Date("2026-06-11T03:54:53.198Z"),
   );
@@ -44,6 +43,5 @@ test("buildAssistantMessage stores model and token usage on assistant messages",
       intent: "storyboard",
       mode: "skill",
     },
-    scriptGrade: "A",
   });
 });

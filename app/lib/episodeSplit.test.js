@@ -23,6 +23,32 @@ test("splitScriptIntoEpisodes detects Arabic and Chinese episode headings", () =
   assert.match(episodes[1].content, /第二集内容/);
 });
 
+test("splitScriptIntoEpisodes supports partial ranges with spaced episode headings", () => {
+  const script = [
+    "第 7 集 中段开始",
+    "第七集内容",
+    "第 8 集 继续推进",
+    "第八集内容",
+    "第 9 集 暗线浮出",
+    "第九集内容",
+    "第 10 集 反转",
+    "第十集内容",
+    "第11集 追击",
+    "第十一集内容",
+    "第12集 真相",
+    "第十二集内容",
+    "第13集 收束",
+    "第十三集内容",
+  ].join("\n");
+
+  const episodes = splitScriptIntoEpisodes(script);
+
+  assert.deepStrictEqual(episodes.map((item) => item.number), [7, 8, 9, 10, 11, 12, 13]);
+  assert.strictEqual(episodes[0].title, "第 7 集 中段开始");
+  assert.match(episodes[3].content, /第十集内容/);
+  assert.match(episodes[6].content, /第十三集内容/);
+});
+
 test("splitScriptIntoEpisodes falls back to a single episode when no heading exists", () => {
   const episodes = splitScriptIntoEpisodes("这是一个未分集的短剧剧本。");
 

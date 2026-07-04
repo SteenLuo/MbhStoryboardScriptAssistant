@@ -192,7 +192,7 @@ function buildArchiveRecordMarkdown({ runName = "", selections = [], createdAt =
 
   lines.push("## 后续学习提示");
   lines.push("");
-  lines.push("正式规则仍需人工确认；本记录作为候选学习证据进入后续学习闭环。");
+  lines.push("正式规则仍需复核；本记录作为学习证据进入后续学习闭环。");
   lines.push("");
   return lines.join("\n");
 }

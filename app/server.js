@@ -7,17 +7,20 @@ const { execFile } = require("child_process");
 const { URL } = require("url");
 const { buildAssistantMessage } = require("./lib/chatUsage");
 const { DEFAULT_APP_NAME, normalizeAppSettings } = require("./lib/appSettings");
-const { loadLocalSkillContext, routeLocalSkill } = require("./lib/localSkills");
-const { writeConversationLearningRecord } = require("./lib/conversationLearning");
+const { findLocalSkillRoute, loadLocalSkillContext, routeLocalSkill } = require("./lib/localSkills");
+const { extractExplicitRuleLearningInput, writeConversationLearningRecord } = require("./lib/conversationLearning");
 const { buildCompletenessMatrix } = require("./lib/productCompleteness");
-const { applyLearningDecision } = require("./lib/learningConfirmations");
 const { classifyChatIntent, selectHistoryForIntent } = require("./lib/chatIntent");
 const { buildArchiveRecordMarkdown, buildWorkbenchState } = require("./lib/workbench");
 const { addCanvasNode, connectCanvasNodes, createCanvas, normalizeCanvas } = require("./lib/canvasState");
 const { buildStoryboardNodePlan, splitScriptIntoEpisodes } = require("./lib/episodeSplit");
 const { DEFAULT_PROJECT_ID, createProject, groupConversationsByProject, normalizeProjects, renameProject, resolveProjectId } = require("./lib/projects");
-const { buildScriptGradePrompt, normalizeScriptGrade, scriptGradeLabel } = require("./public/script-grade");
 const { normalizeModelSettings, publicModelSettings, resolveActiveModelSettings, updateModelSettings } = require("./lib/modelSettings");
+const { handleNotification, listNotifications } = require("./lib/notifications");
+const { buildLearningLibrary } = require("./lib/learningLibrary");
+const { learnExplicitRule, updateCurrentRuleStatus } = require("./lib/autonomousLearning");
+const { analyzeCanvasArchiveReadiness } = require("./lib/canvasArchive");
+const { isStoryboardValidationResolved, validateStoryboardContent } = require("./lib/storyboardValidation");
 
 const ROOT = path.resolve(__dirname, "..");
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -366,9 +369,15 @@ async function canvasFile(id) {
   return target;
 }
 
-async function saveCanvas(canvas) {
+async function saveCanvas(canvas, options = {}) {
   const normalized = normalizeCanvas(canvas);
-  await fsp.writeFile(await canvasFile(normalized.id), JSON.stringify(normalized, null, 2), "utf8");
+  const file = await canvasFile(normalized.id);
+  if (!options.allowArchived && fs.existsSync(file)) {
+    const existing = normalizeCanvas(await readJsonFile(file));
+    if (existing.archivedAt) throw new Error("画布已归档，不能继续编辑。");
+    if (existing.deletedAt) throw new Error("画布已在回收站，不能继续编辑。");
+  }
+  await fsp.writeFile(file, JSON.stringify(normalized, null, 2), "utf8");
   return normalized;
 }
 
@@ -379,7 +388,7 @@ async function getCanvas(id) {
   return normalizeCanvas(await readJsonFile(file));
 }
 
-async function listCanvases() {
+async function listCanvases(options = {}) {
   await ensureConversationDirs();
   const entries = await fsp.readdir(CANVASES_DIR, { withFileTypes: true });
   const canvases = [];
@@ -387,11 +396,15 @@ async function listCanvases() {
     if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
     try {
       const canvas = normalizeCanvas(await readJsonFile(path.join(CANVASES_DIR, entry.name)));
+      if (canvas.deletedAt && !options.includeDeleted) continue;
       canvases.push({
         id: canvas.id,
         title: canvas.title,
         updatedAt: canvas.updatedAt,
+        archivedAt: canvas.archivedAt || "",
+        deletedAt: canvas.deletedAt || "",
         nodeCount: canvas.nodes.length,
+        edgeCount: canvas.edges.length,
       });
     } catch {
       continue;
@@ -399,6 +412,67 @@ async function listCanvases() {
   }
   canvases.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   return canvases;
+}
+
+function buildCanvasArchiveCheck(canvas) {
+  const readiness = analyzeCanvasArchiveReadiness(canvas);
+  const storyboardIssues = [];
+  for (const node of canvas.nodes || []) {
+    if (node.type !== "storyboard") continue;
+    if (isStoryboardValidationResolved(node)) continue;
+    const validation = validateStoryboardContent(node.content);
+    if (!validation.ok) {
+      storyboardIssues.push({
+        nodeId: node.id,
+        nodeTitle: node.title,
+        issues: validation.issues,
+      });
+    }
+  }
+  return {
+    ok: readiness.ok && storyboardIssues.length === 0,
+    readiness,
+    storyboardIssues,
+  };
+}
+
+async function checkCanvasArchiveReadiness(body) {
+  const canvas = await getCanvas(body.canvasId || body.id);
+  return buildCanvasArchiveCheck(canvas);
+}
+
+async function archiveCanvasRecord(body) {
+  const canvas = await getCanvas(body.canvasId || body.id);
+  const archiveCheck = buildCanvasArchiveCheck(canvas);
+  if (!archiveCheck.ok) {
+    return { ok: false, canvas, archiveCheck };
+  }
+  const archivedAt = new Date().toISOString();
+  const archived = await saveCanvas({
+    ...canvas,
+    archivedAt,
+    archiveReadiness: archiveCheck,
+  }, { allowArchived: true });
+  return { ok: true, canvas: archived, archiveCheck };
+}
+
+async function deleteCanvasRecord(body) {
+  const canvas = await getCanvas(body.canvasId || body.id);
+  const deletedAt = new Date().toISOString();
+  const deleted = await saveCanvas({
+    ...canvas,
+    deletedAt,
+  }, { allowArchived: true });
+  return { ok: true, canvas: deleted };
+}
+
+async function restoreCanvasRecord(body) {
+  const canvas = await getCanvas(body.canvasId || body.id);
+  const restored = await saveCanvas({
+    ...canvas,
+    deletedAt: "",
+  }, { allowArchived: true });
+  return { ok: true, canvas: restored };
 }
 
 async function createCanvasRecord(title) {
@@ -728,7 +802,7 @@ async function moveConversation(id, projectId) {
   };
 }
 
-function buildChatSystemPrompt(appName = DEFAULT_APP_NAME, scriptGrade = "B") {
+function buildChatSystemPrompt(appName = DEFAULT_APP_NAME) {
   return [
     `你是本地项目《${appName}》的总控对话助手。`,
     `对用户介绍自己时，统一自称“${appName}”。`,
@@ -737,7 +811,6 @@ function buildChatSystemPrompt(appName = DEFAULT_APP_NAME, scriptGrade = "B") {
     "你必须保留 M5 学习原则：用户偏好、样例解释和质量反馈要可沉淀；质量下降时先止损，不把降质输出当正向样例；正式规则不能因为单次反馈静默修改。",
     "如果用户提供小说或剧本，可以直接产出对应阶段内容；如果信息不足，只问最必要的问题。",
     "输出中文。项目默认服务AI漫剧，不按传统影视拍摄逻辑输出。",
-    buildScriptGradePrompt(scriptGrade),
   ].join("\n");
 }
 
@@ -745,7 +818,7 @@ function buildLightChatSystemPrompt(appName = DEFAULT_APP_NAME) {
   return [
     `你是${appName}。`,
     "用户在闲聊、发散灵感或讨论想法时，用自然、简短、有帮助的中文回复。",
-    "不要主动输出完整剧本或分镜；如果用户需要正式产物，引导他点击生成剧本或生成分镜，或明确发送生成要求。",
+    "不要主动输出完整剧本或分镜；如果用户需要正式产物，引导他在对话里明确发送生成要求，或去画布节点触发生成。",
   ].join("\n");
 }
 
@@ -762,24 +835,55 @@ async function chatWithAssistant(body) {
   }
 
   const attachments = await saveMessageAttachments(conversation, body.attachments);
-  const chatIntent = classifyChatIntent({ message, attachments, intent: body.intent });
-  const scriptGrade = normalizeScriptGrade(body.scriptGrade);
-  const skillRoute = chatIntent.mode === "skill" ? routeLocalSkill(skillRoutingText(message, attachments)) : null;
+  const forcedSkillRoute = findLocalSkillRoute(body.skillRouteId);
+  const chatIntent = classifyChatIntent({
+    message,
+    attachments,
+    intent: body.intent || (forcedSkillRoute ? "script_analysis" : ""),
+  });
+  const explicitLearningMode = body.learningMode === true || String(body.intent || "").toLowerCase() === "learning";
+  const skillRoute = chatIntent.mode === "skill"
+    ? explicitLearningMode
+      ? routeLocalSkill("样例 学习 入库 技能学习")
+      : forcedSkillRoute || routeLocalSkill(skillRoutingText(message, attachments))
+    : null;
   const userMessage = {
     role: "user",
     content: message || (attachments.length ? "已上传附件。" : ""),
     time: new Date().toISOString(),
     attachments,
   };
+  if (explicitLearningMode) {
+    userMessage.learningMode = true;
+  }
   conversation.messages.push(userMessage);
 
   const workflowIntent = normalizeWorkflowIntent(body.workflowIntent);
+  if (explicitLearningMode) {
+    const learningResult = await handleLearningCompose({
+      conversation,
+      userMessage,
+      chatIntent,
+      skillRoute,
+    });
+    conversation.messages.push(learningResult.assistantMessage);
+    await saveConversation(conversation);
+
+    return {
+      id: conversation.id,
+      title: conversation.title,
+      runName: conversation.runName,
+      content: learningResult.assistantMessage.content,
+      messages: conversation.messages,
+      usage: null,
+    };
+  }
+
   if (workflowIntent) {
     const workflowResult = await runWorkflowChat({
       conversation,
       userMessage,
       workflowIntent,
-      scriptGrade,
       model: body.model,
       apiKey: body.apiKey,
     });
@@ -789,19 +893,14 @@ async function chatWithAssistant(body) {
       usage: workflowResult.usage,
       chatIntent: workflowResult.chatIntent,
       skillRoute: workflowResult.skillRoute,
-      scriptGrade: workflowResult.scriptGrade,
     });
     assistantMessage.workflow = workflowResult.workflow;
     try {
-      const learningRecord = await writeConversationLearningRecord(ROOT, {
+      await applyAutonomousConversationLearning({
         conversation,
         userMessage,
         assistantMessage,
       });
-      if (learningRecord) {
-        assistantMessage.learningRecord = learningRecord.relativePath;
-        assistantMessage.learningSuggestion = learningRecord.suggestion;
-      }
     } catch (error) {
       assistantMessage.learningError = error.message || String(error);
     }
@@ -826,7 +925,7 @@ async function chatWithAssistant(body) {
   );
   const modelMessages = chatIntent.mode === "skill"
     ? [
-        { role: "system", content: buildChatSystemPrompt(appSettings.appName, scriptGrade) },
+        { role: "system", content: buildChatSystemPrompt(appSettings.appName) },
         { role: "system", content: skillContext.prompt },
         ...historyMessages.map((item) => ({ role: item.role, content: messageContentForModel(item) })),
       ]
@@ -843,7 +942,6 @@ async function chatWithAssistant(body) {
   const assistantMessage = buildAssistantMessage({
     ...result,
     chatIntent,
-    scriptGrade: chatIntent.mode === "skill" ? scriptGrade : null,
     skillRoute: skillContext
       ? {
           id: skillContext.id,
@@ -854,15 +952,11 @@ async function chatWithAssistant(body) {
       : null,
   });
   try {
-    const learningRecord = await writeConversationLearningRecord(ROOT, {
+    await applyAutonomousConversationLearning({
       conversation,
       userMessage,
       assistantMessage,
     });
-    if (learningRecord) {
-      assistantMessage.learningRecord = learningRecord.relativePath;
-      assistantMessage.learningSuggestion = learningRecord.suggestion;
-    }
   } catch (error) {
     assistantMessage.learningError = error.message || String(error);
   }
@@ -877,6 +971,67 @@ async function chatWithAssistant(body) {
     messages: conversation.messages,
     usage: result.usage,
   };
+}
+
+async function handleLearningCompose({ conversation, userMessage, chatIntent, skillRoute }) {
+  const assistantMessage = buildAssistantMessage({
+    content: "正在写入本地学习资料库...",
+    model: "local-learning",
+    chatIntent,
+    skillRoute,
+  });
+  try {
+    const learningRecord = await writeConversationLearningRecord(ROOT, {
+      conversation,
+      userMessage,
+      assistantMessage,
+    });
+    if (learningRecord) {
+      assistantMessage.learningRecord = learningRecord.relativePath;
+    }
+  } catch (error) {
+    assistantMessage.learningError = error.message || String(error);
+  }
+  try {
+    await applyAutonomousConversationLearning({
+      conversation,
+      userMessage,
+      assistantMessage,
+    });
+  } catch (error) {
+    assistantMessage.learningError = error.message || String(error);
+  }
+
+  const lines = ["已记录为技能学习材料。"];
+  if (assistantMessage.learningRecord) {
+    lines.push(`本地记录：${assistantMessage.learningRecord}`);
+  }
+  if (assistantMessage.learningEventStatus === "已生效") {
+    lines.push("已同步到当前规则，后续技能调用会读取。");
+  } else {
+    lines.push("已记录到学习资料库。");
+  }
+  if (assistantMessage.learningError) {
+    lines.push(`学习记录异常：${assistantMessage.learningError}`);
+  }
+  assistantMessage.content = lines.join("\n");
+  return { assistantMessage };
+}
+
+async function applyAutonomousConversationLearning({ conversation, userMessage, assistantMessage }) {
+  const learningInput = extractExplicitRuleLearningInput({
+    conversation,
+    userMessage,
+    assistantMessage,
+  });
+  if (!learningInput) return null;
+  const result = await learnExplicitRule(ROOT, learningInput, {
+    notifyOnFailure: true,
+  });
+  assistantMessage.learningEvent = result.event?.eventId || "";
+  assistantMessage.learningEventStatus = result.event?.status || "";
+  if (result.event?.ruleId) assistantMessage.learningRuleId = result.event.ruleId;
+  return result;
 }
 
 function runReadme(title, route) {
@@ -1003,7 +1158,7 @@ async function ensureUserScriptArtifact(runDir, materialText) {
   return { file: "generated-script.md", reused: false, content: output };
 }
 
-async function runWorkflowTask({ runDir, task, model, apiKey, scriptGrade = "B", force = false }) {
+async function runWorkflowTask({ runDir, task, model, apiKey, force = false }) {
   const config = taskConfig(task);
   const target = artifactPath(runDir, config.file);
   if (!force && fs.existsSync(target)) {
@@ -1016,8 +1171,6 @@ async function runWorkflowTask({ runDir, task, model, apiKey, scriptGrade = "B",
     `任务：${config.title}`,
     "",
     config.instruction,
-    "",
-    buildScriptGradePrompt(scriptGrade),
     "",
     "当前运行材料：",
     artifacts || "暂无已有产物。",
@@ -1035,11 +1188,11 @@ async function runWorkflowTask({ runDir, task, model, apiKey, scriptGrade = "B",
   });
   const output = `# ${config.title}\n\n生成时间：${new Date().toISOString()}\n\n模型：${result.model}\n\n---\n\n${result.content}\n`;
   await fsp.writeFile(target, output, "utf8");
-  await appendManifest(runDir, { lastGenerated: config.file, lastModel: result.model, scriptGrade: normalizeScriptGrade(scriptGrade), updatedAt: new Date().toISOString() });
+  await appendManifest(runDir, { lastGenerated: config.file, lastModel: result.model, updatedAt: new Date().toISOString() });
   return { ...config, content: result.content, usage: result.usage, model: result.model, reused: false };
 }
 
-async function runCanvasTask({ task, input, model, apiKey, scriptGrade = "B", skillPrompt = "" }) {
+async function runCanvasTask({ task, input, model, apiKey, skillPrompt = "" }) {
   const config = taskConfig(task);
   const resolvedSkillPrompt = skillPrompt || await taskSkillPrompt(task);
   const systemMessages = [{ role: "system", content: config.system }];
@@ -1059,8 +1212,6 @@ async function runCanvasTask({ task, input, model, apiKey, scriptGrade = "B", sk
           `任务：${config.title}`,
           "",
           config.instruction,
-          "",
-          buildScriptGradePrompt(scriptGrade),
           "",
           "当前节点材料：",
           input || "暂无内容。",
@@ -1084,30 +1235,14 @@ async function taskSkillPrompt(task) {
 }
 
 async function canvasStoryboardSkillPrompt() {
-  const files = [
-    "skills/03-storyboard/storyboard-generate/SKILL.md",
-    "skills/03-storyboard/storyboard-generate/references/分镜生成规则.md",
-    "docs/分镜标准格式.md",
-  ];
-  const optionalFiles = [
-    "learning/accepted-rules/web-confirmed-preferences.md",
-  ];
-  const sections = [];
-  for (const relativePath of files) {
-    const text = await fsp.readFile(path.join(ROOT, relativePath), "utf8");
-    sections.push(`## ${relativePath}\n\n${text}`);
-  }
-  for (const relativePath of optionalFiles) {
-    const filePath = path.join(ROOT, relativePath);
-    if (!fs.existsSync(filePath)) continue;
-    const text = await fsp.readFile(filePath, "utf8");
-    sections.push(`## ${relativePath}\n\n${text}`);
-  }
+  const skillContext = await loadLocalSkillContext(ROOT, findLocalSkillRoute("storyboard-generate") || routeLocalSkill("分镜"));
+  const standardPath = "docs/分镜标准格式.md";
+  const standardText = await fsp.readFile(path.join(ROOT, standardPath), "utf8");
   return [
-    "【本轮本地技能】分镜生成（storyboard-generate）",
-    "以下内容来自本项目本地 skills 和分镜标准文档。画布一键生成分镜时必须优先遵守这些规则；如果与普通任务说明冲突，以本地分镜规则为准。",
+    skillContext.prompt,
+    "【画布分镜生成补充要求】",
     "每次调用只生成当前分集的分镜脚本，不要合并其他集数，不要输出表格。",
-    sections.join("\n\n"),
+    `## 分镜标准文档：${standardPath}\n\n${standardText}`,
   ].join("\n\n");
 }
 
@@ -1142,7 +1277,6 @@ async function generateCanvasScript(body) {
     input: sourceNode.content,
     model: body.model,
     apiKey: body.apiKey,
-    scriptGrade: normalizeScriptGrade(body.scriptGrade),
   });
   const scriptNode = {
     id: `script-${conversationId()}`,
@@ -1206,12 +1340,12 @@ async function generateCanvasStoryboards(body) {
       ].join("\n"),
       model: body.model,
       apiKey: body.apiKey,
-      scriptGrade: normalizeScriptGrade(body.scriptGrade),
       skillPrompt: storyboardSkillPrompt,
     });
     usages.push(result.usage);
     lastModel = result.model || lastModel;
     const titleScope = { nodes: [...(canvas.nodes || []), ...generatedNodes] };
+    const validation = validateStoryboardContent(result.content);
     generatedNodes.push({
       ...plannedNode,
       title: uniqueCanvasNodeTitle(titleScope, plannedNode.title),
@@ -1221,6 +1355,7 @@ async function generateCanvasStoryboards(body) {
         model: result.model,
         usage: result.usage,
         generatedAt: new Date().toISOString(),
+        validation,
       },
     });
   }
@@ -1233,6 +1368,36 @@ async function generateCanvasStoryboards(body) {
   }
   canvas = await saveCanvas(canvas);
   return { canvas, nodes: generatedNodes, model: lastModel, usage: aggregateUsage(usages) };
+}
+
+function storyboardRevisionIssuesForPrompt(parentNode) {
+  if (parentNode?.type !== "storyboard") return [];
+  const savedValidation = parentNode.meta?.validation;
+  if (savedValidation && !savedValidation.ok && Array.isArray(savedValidation.issues)) {
+    return savedValidation.issues;
+  }
+  return validateStoryboardContent(parentNode.content).issues;
+}
+
+function formatStoryboardRevisionIssues(issues = []) {
+  const validIssues = Array.isArray(issues) ? issues.filter(Boolean) : [];
+  if (!validIssues.length) return "";
+  const lines = [
+    "已识别的分镜问题清单（必须逐条处理，不要忽略）：",
+    "处理要求：不能只做换行、排版或解释；必须根据问题含义修改对应镜头结构、字段、镜号或台词，并输出完整修改后的分镜全文。",
+  ];
+  validIssues.forEach((issue, index) => {
+    const parts = [];
+    parts.push(`${index + 1}. ${String(issue.message || issue.type || "分镜问题")}`);
+    if (issue.lineNumber) parts.push(`行号：${issue.lineNumber}`);
+    if (issue.lineText) parts.push(`原文：${issue.lineText}`);
+    if (issue.dialogue) parts.push(`需处理台词：${issue.dialogue}`);
+    if (Array.isArray(issue.suggestedLines) && issue.suggestedLines.length) {
+      parts.push(`建议拆分：${issue.suggestedLines.map((line) => line.text || line).join(" / ")}`);
+    }
+    lines.push(parts.join("\n"));
+  });
+  return lines.join("\n");
 }
 
 async function reviseCanvasNode(body) {
@@ -1252,6 +1417,7 @@ async function reviseCanvasNode(body) {
   }
 
   const skillPrompt = node.type === "storyboard" ? await canvasStoryboardSkillPrompt() : "";
+  const storyboardIssueContext = formatStoryboardRevisionIssues(storyboardRevisionIssuesForPrompt(parentNode));
   const messages = [
     {
       role: "system",
@@ -1273,6 +1439,7 @@ async function reviseCanvasNode(body) {
       "",
       "父级节点内容：",
       parentNode.content || "",
+      storyboardIssueContext ? `\n${storyboardIssueContext}` : "",
       "",
       "用户修改要求：",
       prompt,
@@ -1286,10 +1453,18 @@ async function reviseCanvasNode(body) {
     temperature: 0.55,
     messages,
   });
+  const revisedValidation = node.type === "storyboard" ? validateStoryboardContent(result.content) : null;
   const revisedAt = new Date().toISOString();
-  canvas = {
-    ...canvas,
-    nodes: (canvas.nodes || []).map((item) => item.id === node.id
+  const latestCanvas = await getCanvas(body.canvasId);
+  const latestNode = findCanvasNode(latestCanvas, node.id);
+  if (!isRevisionCanvasNode(latestNode) || latestNode.meta?.variantKind !== "revision") {
+    throw new Error("修改节点已不存在或类型已变化，无法回填结果");
+  }
+  if (latestNode.meta?.chatLocked) {
+    throw new Error("该修改节点已经完成一次对话，不能再次修改");
+  }
+  const latestParentNode = findCanvasNode(latestCanvas, parentNodeId);
+  latestCanvas.nodes = (latestCanvas.nodes || []).map((item) => item.id === node.id
       ? {
           ...item,
           content: result.content,
@@ -1297,18 +1472,18 @@ async function reviseCanvasNode(body) {
             ...(item.meta || {}),
             variantKind: "revision",
             parentNodeId,
-            parentTitleSnapshot: parentNode.title || item.meta?.parentTitleSnapshot || "",
+            parentTitleSnapshot: latestParentNode.title || parentNode.title || item.meta?.parentTitleSnapshot || "",
             chatPrompt: prompt,
             chatResponse: result.content,
             chatLocked: true,
             revisedAt,
             model: result.model,
             usage: result.usage,
+            ...(revisedValidation ? { validation: revisedValidation } : {}),
           },
         }
-      : item),
-  };
-  canvas = await saveCanvas(canvas);
+      : item);
+  canvas = await saveCanvas(latestCanvas);
   return {
     canvas,
     node: findCanvasNode(canvas, node.id),
@@ -1343,10 +1518,10 @@ function workflowSkillRoute(workflowIntent) {
   };
 }
 
-function formatWorkflowReply({ workflowIntent, scriptGrade = "B", steps, finalContent, stoppedReason }) {
+function formatWorkflowReply({ workflowIntent, steps, finalContent, stoppedReason }) {
   const title = workflowIntent === "storyboard"
-    ? `已按${scriptGradeLabel(scriptGrade)}标准流程处理分镜请求`
-    : `已按${scriptGradeLabel(scriptGrade)}标准流程处理剧本请求`;
+    ? "已按标准流程处理分镜请求"
+    : "已按标准流程处理剧本请求";
   const lines = [`# ${title}`, ""];
   lines.push("## 本次实际执行");
   lines.push("");
@@ -1368,27 +1543,26 @@ function formatWorkflowReply({ workflowIntent, scriptGrade = "B", steps, finalCo
   return lines.join("\n");
 }
 
-async function runWorkflowChat({ conversation, userMessage, workflowIntent, scriptGrade = "B", model, apiKey }) {
-  const normalizedGrade = normalizeScriptGrade(scriptGrade);
+async function runWorkflowChat({ conversation, userMessage, workflowIntent, model, apiKey }) {
   const runDir = conversation.runName ? path.join(RUNS_DIR, conversation.runName) : null;
   if (!runDir) throw new Error("当前会话缺少运行目录");
   await fsp.mkdir(runDir, { recursive: true });
   const materialText = await writeWorkflowInput(runDir, userMessage);
-  const steps = [`本次等级：${scriptGradeLabel(normalizedGrade)}`, "已写入 input.md（输入材料）"];
+  const steps = ["已写入 input.md（输入材料）"];
   const usages = [];
   let lastModel = "";
   let finalContent = "";
   let stoppedReason = "";
 
   const runAndRemember = async (task, label, options = {}) => {
-    const result = await runWorkflowTask({ runDir, task, model, apiKey, scriptGrade: normalizedGrade, ...options });
+    const result = await runWorkflowTask({ runDir, task, model, apiKey, ...options });
     steps.push(result.reused ? `已存在 ${result.file}（${label}），本次复用` : `已生成 ${result.file}（${label}）`);
     if (result.usage) usages.push(result.usage);
     if (result.model) lastModel = result.model;
     return result;
   };
 
-  await appendManifest(runDir, { scriptGrade: normalizedGrade, updatedAt: new Date().toISOString() });
+  await appendManifest(runDir, { updatedAt: new Date().toISOString() });
   await runAndRemember("input-analysis", "小说输入整理、正向爽点分析和负面逻辑检查");
 
   if (workflowIntent === "script") {
@@ -1404,12 +1578,11 @@ async function runWorkflowChat({ conversation, userMessage, workflowIntent, scri
       review.content,
     ].join("\n");
     return {
-      content: formatWorkflowReply({ workflowIntent, scriptGrade: normalizedGrade, steps, finalContent }),
+      content: formatWorkflowReply({ workflowIntent, steps, finalContent }),
       model: lastModel,
       usage: aggregateUsage(usages),
       chatIntent: { intent: "script", mode: "skill", reason: "workflow-script" },
       skillRoute: workflowSkillRoute(workflowIntent),
-      scriptGrade: normalizedGrade,
       workflow: { intent: workflowIntent, steps },
     };
   }
@@ -1431,12 +1604,11 @@ async function runWorkflowChat({ conversation, userMessage, workflowIntent, scri
     stoppedReason = "剧本评审未明确通过，已停止在剧本评审节点；请先按评审意见修改剧本，暂不生成分镜。";
     finalContent = review.content;
     return {
-      content: formatWorkflowReply({ workflowIntent, scriptGrade: normalizedGrade, steps, finalContent, stoppedReason }),
+      content: formatWorkflowReply({ workflowIntent, steps, finalContent, stoppedReason }),
       model: lastModel,
       usage: aggregateUsage(usages),
       chatIntent: { intent: "script_analysis", mode: "skill", reason: "workflow-script-review-gate" },
       skillRoute: workflowSkillRoute(workflowIntent),
-      scriptGrade: normalizedGrade,
       workflow: { intent: workflowIntent, steps, stoppedReason },
     };
   }
@@ -1453,12 +1625,11 @@ async function runWorkflowChat({ conversation, userMessage, workflowIntent, scri
     storyboardReview.content,
   ].join("\n");
   return {
-    content: formatWorkflowReply({ workflowIntent, scriptGrade: normalizedGrade, steps, finalContent }),
+    content: formatWorkflowReply({ workflowIntent, steps, finalContent }),
     model: lastModel,
     usage: aggregateUsage(usages),
     chatIntent: { intent: "storyboard", mode: "skill", reason: "workflow-storyboard" },
     skillRoute: workflowSkillRoute(workflowIntent),
-    scriptGrade: normalizedGrade,
     workflow: { intent: workflowIntent, steps },
   };
 }
@@ -1519,14 +1690,11 @@ async function generateWithDeepSeek(body) {
   const config = taskConfig(body.task);
   const artifacts = await collectRunContext(runDir);
   const input = String(body.input || "").trim();
-  const scriptGrade = normalizeScriptGrade(body.scriptGrade);
   const skillPrompt = await taskSkillPrompt(body.task);
   const userContent = [
     `任务：${config.title}`,
     "",
     config.instruction,
-    "",
-    buildScriptGradePrompt(scriptGrade),
     "",
     "当前运行材料：",
     artifacts || "暂无已有产物。",
@@ -1547,8 +1715,8 @@ async function generateWithDeepSeek(body) {
   const target = path.join(runDir, config.file);
   const output = `# ${config.title}\n\n生成时间：${new Date().toISOString()}\n\n模型：${result.model}\n\n---\n\n${result.content}\n`;
   await fsp.writeFile(target, output, "utf8");
-  await appendManifest(runDir, { lastGenerated: config.file, lastModel: result.model, scriptGrade, updatedAt: new Date().toISOString() });
-  return { file: config.file, content: result.content, usage: result.usage, scriptGrade };
+  await appendManifest(runDir, { lastGenerated: config.file, lastModel: result.model, updatedAt: new Date().toISOString() });
+  return { file: config.file, content: result.content, usage: result.usage };
 }
 
 async function collectRunContext(runDir) {
@@ -1681,21 +1849,6 @@ async function runLearningCycle() {
   return { output: result.stdout.trim(), error: result.stderr.trim() };
 }
 
-async function confirmLearning(body) {
-  const conversation = await getConversation(body.conversationId);
-  const result = await applyLearningDecision(ROOT, {
-    conversation,
-    messageIndex: body.messageIndex,
-    action: body.action,
-  });
-  await saveConversation(conversation);
-  return {
-    ...result,
-    id: conversation.id,
-    messages: conversation.messages,
-  };
-}
-
 async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/status") {
     const config = await readDeepSeekConfig();
@@ -1736,7 +1889,7 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { projects: await readProjects() });
   }
   if (req.method === "GET" && url.pathname === "/api/canvases") {
-    return sendJson(res, 200, { canvases: await listCanvases() });
+    return sendJson(res, 200, { canvases: await listCanvases({ includeDeleted: url.searchParams.get("includeDeleted") === "1" }) });
   }
   if (req.method === "GET" && url.pathname === "/api/canvas") {
     return sendJson(res, 200, await getCanvas(url.searchParams.get("id")));
@@ -1760,6 +1913,12 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/learning-status") {
     return sendJson(res, 200, await learningStatus());
   }
+  if (req.method === "GET" && url.pathname === "/api/learning-library") {
+    return sendJson(res, 200, await buildLearningLibrary(ROOT));
+  }
+  if (req.method === "GET" && url.pathname === "/api/notifications") {
+    return sendJson(res, 200, { notifications: await listNotifications(ROOT) });
+  }
   if (req.method === "GET" && url.pathname === "/api/product-completeness") {
     return sendJson(res, 200, { milestones: buildCompletenessMatrix() });
   }
@@ -1778,6 +1937,10 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/runs") {
     return sendJson(res, 200, await createRun(body));
+  }
+  if (req.method === "POST" && url.pathname === "/api/learning-rules/status") {
+    const result = await updateCurrentRuleStatus(ROOT, body);
+    return sendJson(res, 200, { ...result, library: await buildLearningLibrary(ROOT) });
   }
   if (req.method === "POST" && url.pathname === "/api/conversations") {
     let projectId = body.projectId;
@@ -1798,6 +1961,18 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/canvas/save") {
     return sendJson(res, 200, await saveCanvas(body.canvas || body));
+  }
+  if (req.method === "POST" && url.pathname === "/api/canvas/archive-check") {
+    return sendJson(res, 200, await checkCanvasArchiveReadiness(body));
+  }
+  if (req.method === "POST" && url.pathname === "/api/canvas/archive") {
+    return sendJson(res, 200, await archiveCanvasRecord(body));
+  }
+  if (req.method === "POST" && url.pathname === "/api/canvas/delete") {
+    return sendJson(res, 200, await deleteCanvasRecord(body));
+  }
+  if (req.method === "POST" && url.pathname === "/api/canvas/restore") {
+    return sendJson(res, 200, await restoreCanvasRecord(body));
   }
   if (req.method === "POST" && url.pathname === "/api/canvas/generate-script") {
     return sendJson(res, 200, await generateCanvasScript(body));
@@ -1850,8 +2025,9 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/learning-cycle") {
     return sendJson(res, 200, await runLearningCycle());
   }
-  if (req.method === "POST" && url.pathname === "/api/learning-confirm") {
-    return sendJson(res, 200, await confirmLearning(body));
+  if (req.method === "POST" && url.pathname === "/api/notifications/handle") {
+    const notification = await handleNotification(ROOT, body.id);
+    return sendJson(res, 200, { notification, notifications: await listNotifications(ROOT) });
   }
   sendJson(res, 404, { error: "接口不存在" });
 }

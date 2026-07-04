@@ -1,0 +1,4 @@
+interface:
+  display_name: "漫剧适配分析"
+  short_description: "评估剧本漫剧立项、市场适配与AIGC制作风险，并给出改编策略"
+  default_prompt: "Use $script-manju-adaptation-analysis to assess this script for AI漫剧立项、市场适配、制作风险和改编策略。"

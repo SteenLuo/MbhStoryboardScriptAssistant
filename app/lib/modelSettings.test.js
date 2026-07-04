@@ -43,3 +43,23 @@ test("publicModelSettings exposes active provider without API key text", () => {
   assert.strictEqual(data.hasStoredApiKey, true);
   assert.strictEqual(JSON.stringify(data).includes("secret"), false);
 });
+
+test("publicModelSettings shows saved model instead of environment model override", () => {
+  const settings = normalizeModelSettings({
+    provider: "deepseek",
+    providers: {
+      deepseek: {
+        apiKey: "secret",
+        model: "deepseek-v4-pro",
+        baseUrl: "https://api.deepseek.com",
+      },
+    },
+  });
+  const data = publicModelSettings(settings, {
+    DEEPSEEK_MODEL: "deepseek-v4-flash",
+    DEEPSEEK_API_KEY: "from-env",
+  });
+
+  assert.strictEqual(data.model, "deepseek-v4-pro");
+  assert.strictEqual(data.envModel, "deepseek-v4-flash");
+});

@@ -1,7 +1,9 @@
 @echo off
 setlocal
 set "ROOT=%~dp0"
-set "START_ARGS="
+set "START_ARGS=-NoOpenBrowser"
+if /I "%~1"=="--open-browser" set "START_ARGS="
+if /I "%~1"=="/open-browser" set "START_ARGS="
 if /I "%~1"=="--no-open-browser" set "START_ARGS=-NoOpenBrowser"
 if /I "%~1"=="/no-open-browser" set "START_ARGS=-NoOpenBrowser"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%tools\Stop-MbhAssistant.ps1"

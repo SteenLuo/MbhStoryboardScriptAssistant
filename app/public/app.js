@@ -8,7 +8,6 @@ const state = {
   conversationCreatedAt: "",
   pendingAttachments: [],
   composeMode: "",
-  scriptGrade: "B",
   currentRunName: "",
   appName: "猫主子漫剧剧本分镜小助手",
   workbenchRunName: "",
@@ -20,6 +19,7 @@ const state = {
   searchTimer: null,
   testedModelConfigSignature: "",
   appMode: "chat",
+  trashMode: "chat",
   projects: [],
   projectGroups: [],
   currentProjectId: "no-project",
@@ -29,6 +29,7 @@ const state = {
   sidebarWidth: 260,
   sidebarResize: null,
   canvases: [],
+  canvasArchiveItems: [],
   currentCanvasId: "",
   currentCanvas: null,
   activeCanvasNodeId: "",
@@ -38,16 +39,30 @@ const state = {
   canvasGroupPrimaryNodeId: "",
   canvasZoom: 1,
   canvasViewportAnimation: null,
+  canvasStatusLockUntil: 0,
   canvasMiniMapDrag: null,
   editingCanvasNodeId: "",
+  editingCanvasBodyNodeId: "",
+  canvasNodeAutosaveTimer: null,
   canvasDrag: null,
   suppressCanvasPlusClick: false,
   suppressCanvasStageClick: false,
   suppressCanvasTitleClick: false,
   pendingEpisodes: null,
-  canvasBusy: null,
+  canvasBusy: {},
   canvasDeleteConfirm: null,
   canvasMergeHistoryNodeId: "",
+  canvasUndoStack: [],
+  canvasRedoStack: [],
+  canvasHistoryBaseSnapshot: "",
+  canvasHistoryApplying: false,
+  notifications: [],
+  activeNotificationIndex: 0,
+  learningLibrary: null,
+  learningLibraryTab: "records",
+  viewedLearningFailureIds: new Set(),
+  learningFailureCursor: 0,
+  storyboardIssueNodeId: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -56,6 +71,12 @@ const hiddenConversationsStorageKey = "mbh-hidden-conversations";
 const collapsedProjectsStorageKey = "mbh-collapsed-projects";
 const sidebarCollapsedStorageKey = "mbh-sidebar-collapsed";
 const sidebarWidthStorageKey = "mbh-sidebar-width";
+const chatSkillComposeModes = new Set(["script-hard-issue-review", "script-manju-adaptation-analysis"]);
+const composeModeLabels = Object.freeze({
+  learning: "技能学习",
+  "script-hard-issue-review": "剧本评审",
+  "script-manju-adaptation-analysis": "漫剧适配分析",
+});
 const sidebarMinWidth = 252;
 const sidebarMaxWidth = 460;
 const newProjectSelectValue = "__new_project__";
@@ -64,18 +85,36 @@ const canvasConnectMovePx = 6;
 const canvasNodeHoldMs = 260;
 const canvasNodeMovePx = 5;
 const canvasPanHoldMs = 220;
+const canvasNodeAutosaveDelayMs = 360;
 const canvasSurfaceMinWidth = 100000;
 const canvasSurfaceMinHeight = 100000;
 const canvasSurfacePadding = 1600;
 const canvasOriginX = 50000;
 const canvasOriginY = 50000;
 const canvasZoomMin = 0.35;
-const canvasZoomMax = 1.8;
+const canvasZoomMax = 8;
 const canvasZoomStep = 0.1;
 const canvasFitAnimationMs = 280;
 const canvasFocusReadableZoom = 1;
 const canvasFocusMinReadableZoom = 0.72;
 const canvasFocusPadding = 96;
+const canvasNodeFocusPadding = 88;
+const canvasNodeFocusMaxZoom = 2;
+const canvasNodeFocusWidthRatio = 0.48;
+const canvasNodeFocusHeightRatio = 0.42;
+const canvasHistoryLimit = 80;
+const markdownBackgroundSwatches = [
+  { color: "", title: "默认背景" },
+  { color: "#ff6b6b", title: "红色背景" },
+  { color: "#ff9f22", title: "橙色背景" },
+  { color: "#ffcf24", title: "黄色背景" },
+  { color: "#2bd36a", title: "绿色背景" },
+  { color: "#18d0d0", title: "青色背景" },
+  { color: "#1aa7e8", title: "蓝色背景" },
+  { color: "#c5a3ff", title: "紫色背景" },
+  { color: "#ff7cff", title: "洋红背景" },
+  { color: "#8a8a8a", title: "灰色背景" },
+];
 const canvasTypeLabels = {
   novel: "小说",
   script: "剧本",
@@ -84,6 +123,11 @@ const canvasTypeLabels = {
 };
 const canvasRevisionNodeTypes = new Set(["novel", "script", "storyboard"]);
 const canvasMergeNodeTypes = new Set(["novel", "script", "storyboard"]);
+const storyboardIssueAutoFixPrompt = [
+  "请逐条处理问题清单中已经识别出的全部分镜问题。",
+  "每个问题都必须被实际修复，不能只做换行、排版或解释。",
+  "请根据问题类型修改对应镜头结构、字段、镜号或台词，并输出完整修改后的分镜全文。",
+].join("\n");
 const canvasTypeIconPaths = {
   novel: '<path d="M6 5.5c1.7-.9 3.6-.9 5.5 0v12c-1.9-.9-3.8-.9-5.5 0z"/><path d="M18 5.5c-1.7-.9-3.6-.9-5.5 0v12c1.9-.9 3.8-.9 5.5 0z"/><path d="M12 5.5v12"/>',
   script: '<path d="M7 4h9l3 3v13H7z"/><path d="M16 4v4h4"/><path d="M10 11h6"/><path d="M10 14h6"/><path d="M10 17h4"/>',
@@ -188,22 +232,20 @@ function renderMessages() {
     return;
   }
   state.messages.forEach((message, index) => {
-    appendMessage(message.role, message.content, false, index, message.time, message.attachments, message.usage, message.skillRoute, message.learningSuggestion, message.chatIntent, message.scriptGrade);
+    appendMessage(message.role, message.content, false, index, message.time, message.attachments, message.usage, message.skillRoute, message.chatIntent);
   });
   renderConversationOverview();
   syncOverviewPosition();
   box.scrollTop = box.scrollHeight;
 }
 
-function appendMessage(role, content, keep = true, messageIndex = null, time = null, attachments = [], usage = null, skillRoute = null, learningSuggestion = null, chatIntent = null, scriptGrade = null) {
+function appendMessage(role, content, keep = true, messageIndex = null, time = null, attachments = [], usage = null, skillRoute = null, chatIntent = null) {
   const messageTime = normalizeMessageTime(time);
   if (keep) {
     const nextMessage = { role, content, time: messageTime, attachments };
     if (usage) nextMessage.usage = usage;
     if (skillRoute) nextMessage.skillRoute = skillRoute;
-    if (learningSuggestion) nextMessage.learningSuggestion = learningSuggestion;
     if (chatIntent) nextMessage.chatIntent = chatIntent;
-    if (scriptGrade) nextMessage.scriptGrade = scriptGrade;
     state.messages.push(nextMessage);
     messageIndex = state.messages.length - 1;
   }
@@ -244,14 +286,6 @@ function appendMessage(role, content, keep = true, messageIndex = null, time = n
     intentNode.title = formatChatIntentTitle(chatIntent);
     meta.appendChild(intentNode);
   }
-  const gradeText = formatScriptGrade(scriptGrade);
-  if (gradeText) {
-    const gradeNode = document.createElement("span");
-    gradeNode.className = "message-grade";
-    gradeNode.textContent = gradeText;
-    gradeNode.title = scriptGrade === "A" ? "A级本：更高质量，更慢，token 更多" : "B级本：快速可用，token 更省";
-    meta.appendChild(gradeNode);
-  }
   const skillText = formatSkillRoute(skillRoute);
   if (skillText) {
     const skillNode = document.createElement("span");
@@ -274,9 +308,6 @@ function appendMessage(role, content, keep = true, messageIndex = null, time = n
   });
   meta.appendChild(copy);
   body.appendChild(meta);
-  if (role === "assistant" && learningSuggestion) {
-    renderLearningSuggestion(body, messageIndex, learningSuggestion);
-  }
   node.appendChild(body);
   $("messages").appendChild(node);
   $("messages").scrollTop = $("messages").scrollHeight;
@@ -390,71 +421,6 @@ function formatChatIntentTitle(chatIntent) {
   if (!chatIntent) return "";
   const mode = chatIntent.mode === "skill" ? "专业模式" : "轻量模式";
   return `${mode}${chatIntent.reason ? `｜${chatIntent.reason}` : ""}`;
-}
-
-function normalizeScriptGrade(value) {
-  if (window.MbhScriptGrade && typeof window.MbhScriptGrade.normalizeScriptGrade === "function") {
-    return window.MbhScriptGrade.normalizeScriptGrade(value);
-  }
-  return String(value || "").toUpperCase() === "A" ? "A" : "B";
-}
-
-function formatScriptGrade(value) {
-  if (!value) return "";
-  if (window.MbhScriptGrade && typeof window.MbhScriptGrade.formatScriptGrade === "function") {
-    return window.MbhScriptGrade.formatScriptGrade(value);
-  }
-  return `grade ${normalizeScriptGrade(value)}`;
-}
-
-function renderLearningSuggestion(container, messageIndex, suggestion) {
-  const card = document.createElement("div");
-  card.className = `learning-suggestion ${suggestion.status || "pending"}`;
-  const text = document.createElement("div");
-  text.className = "learning-suggestion-text";
-  text.textContent = suggestion.status === "remembered"
-    ? `已记住：${suggestion.summary || "这条偏好"}`
-    : suggestion.status === "skipped"
-      ? `未记住：${suggestion.summary || "这条偏好"}`
-      : `已识别为可长期记住的偏好：${suggestion.summary || "这条偏好"}`;
-  card.appendChild(text);
-
-  if (!suggestion.status || suggestion.status === "pending") {
-    const actions = document.createElement("div");
-    actions.className = "learning-suggestion-actions";
-    const remember = document.createElement("button");
-    remember.type = "button";
-    remember.textContent = "记住";
-    remember.addEventListener("click", () => confirmLearningSuggestion(messageIndex, "remember"));
-    const skip = document.createElement("button");
-    skip.type = "button";
-    skip.textContent = "不记";
-    skip.className = "secondary";
-    skip.addEventListener("click", () => confirmLearningSuggestion(messageIndex, "skip"));
-    actions.append(remember, skip);
-    card.appendChild(actions);
-  }
-
-  container.appendChild(card);
-}
-
-async function confirmLearningSuggestion(messageIndex, action) {
-  if (messageIndex === null || messageIndex === undefined || messageIndex === "intro") return;
-  try {
-    const data = await api("/api/learning-confirm", {
-      method: "POST",
-      body: JSON.stringify({
-        conversationId: state.currentId,
-        messageIndex: Number(messageIndex),
-        action,
-      }),
-    });
-    state.messages = data.messages || state.messages;
-    renderMessages();
-    await loadLearningPanel();
-  } catch (error) {
-    appendMessage("assistant", error.message, false);
-  }
 }
 
 function formatFileSize(size) {
@@ -608,26 +574,29 @@ function setComposeMode(mode) {
   state.composeMode = state.composeMode === mode ? "" : mode;
   document.querySelectorAll("[data-compose-mode]").forEach((button) => {
     const active = button.dataset.composeMode === state.composeMode;
-    const label = button.textContent.trim();
+    const modeLabel = composeModeLabel(button.dataset.composeMode);
+    const label = button.textContent.trim() || modeLabel;
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
     button.setAttribute("aria-label", active ? `${label}，已选中，再次点击取消` : `${label}，点击选中`);
-    button.title = active ? "已选中，再次点击可取消" : "点击选中";
+    const learningTitle = active
+      ? "已启用技能学习，本条消息会保存到本地学习资料库"
+      : "启用后，本条消息用于技能学习并沉淀到本地";
+    button.title = button.dataset.composeMode === "learning"
+      ? learningTitle
+      : active
+        ? `${modeLabel}已选中，再次点击取消`
+        : `调用${modeLabel}技能`;
   });
   updateSendState();
 }
 
-function setScriptGrade(grade) {
-  state.scriptGrade = normalizeScriptGrade(grade);
-  document.querySelectorAll("[data-script-grade]").forEach((button) => {
-    const buttonGrade = normalizeScriptGrade(button.dataset.scriptGrade);
-    const active = buttonGrade === state.scriptGrade;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", String(active));
-    button.title = buttonGrade === "A"
-      ? "A级本：更高质量，更慢，token 更多"
-      : "B级本：快速可用，token 更省";
-  });
+function composeModeLabel(mode) {
+  return composeModeLabels[mode] || "技能";
+}
+
+function selectedChatSkillRouteId() {
+  return chatSkillComposeModes.has(state.composeMode) ? state.composeMode : "";
 }
 
 function buildOutgoingText(text) {
@@ -932,10 +901,13 @@ function initSidebarCat() {
   scheduleDailyReminders();
   const cat = $("sidebarCat");
   if (cat) cat.addEventListener("click", () => playSidebarCatAnimation());
+  loadNotifications();
 
   window.__mbhCatTest = {
     playSidebarCatAnimation,
     showCatReminder,
+    loadNotifications,
+    renderCatNotification,
     isSingleRestWorkday,
     scheduleDailyReminders,
   };
@@ -1029,6 +1001,86 @@ function showCatReminder(text) {
     reminder.classList.remove("show");
     if (note) note.textContent = "喵，随时待命";
   }, 12000);
+}
+
+async function loadNotifications() {
+  try {
+    const data = await api("/api/notifications");
+    state.notifications = Array.isArray(data.notifications) ? data.notifications : [];
+    if (state.activeNotificationIndex >= state.notifications.length) {
+      state.activeNotificationIndex = 0;
+    }
+    renderCatNotification();
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function renderCatNotification() {
+  const panel = $("catNotification");
+  if (!panel) return;
+  panel.innerHTML = "";
+  const notifications = Array.isArray(state.notifications) ? state.notifications : [];
+  if (!notifications.length) {
+    panel.hidden = true;
+    panel.classList.remove("show");
+    return;
+  }
+
+  const index = clamp(state.activeNotificationIndex, 0, notifications.length - 1);
+  state.activeNotificationIndex = index;
+  const notification = notifications[index];
+  panel.hidden = false;
+  panel.classList.add("show");
+  panel.dataset.notificationId = notification.id || "";
+
+  const count = document.createElement("div");
+  count.className = "cat-notification-count";
+  count.textContent = `${index + 1}/${notifications.length}`;
+
+  const title = document.createElement("strong");
+  title.textContent = notification.title || "通知";
+
+  const summary = document.createElement("p");
+  summary.textContent = notification.summary || "有一条需要查看的提醒。";
+
+  const actions = document.createElement("div");
+  actions.className = "cat-notification-actions";
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.textContent = "确定";
+  confirm.addEventListener("click", () => handleCatNotification(notification.id, "confirm"));
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "secondary";
+  cancel.textContent = "取消";
+  cancel.addEventListener("click", () => handleCatNotification(notification.id, "cancel"));
+  actions.append(confirm, cancel);
+
+  panel.append(count, title, summary, actions);
+}
+
+async function handleCatNotification(id, action = "confirm") {
+  if (!id) return;
+  const current = (state.notifications || []).find((item) => item.id === id);
+  try {
+    const data = await api("/api/notifications/handle", {
+      method: "POST",
+      body: JSON.stringify({ id, action }),
+    });
+    state.notifications = Array.isArray(data.notifications) ? data.notifications : [];
+    state.activeNotificationIndex = Math.min(state.activeNotificationIndex, Math.max(0, state.notifications.length - 1));
+    renderCatNotification();
+    if (action === "confirm") openNotificationTarget(current?.target || data.notification?.target);
+  } catch (error) {
+    showCatReminder(error.message || "通知处理失败");
+  }
+}
+
+function openNotificationTarget(target = {}) {
+  if (target.page === "learning") {
+    openLearningPage();
+  }
 }
 
 async function loadConversations() {
@@ -1175,8 +1227,9 @@ function renderConversationList() {
 
     const expanded = window.MbhProjectTree.isProjectExpanded(group.id, state.collapsedProjectIds);
     const title = document.createElement("div");
+    const canRenameProject = group.id !== "no-project";
     title.className = `project-title${group.id === state.currentProjectId ? " active" : ""}`;
-    if (state.editingProjectId === group.id) {
+    if (state.editingProjectId === group.id && canRenameProject) {
       title.classList.add("editing");
       const input = document.createElement("input");
       input.className = "project-rename-input";
@@ -1226,17 +1279,19 @@ function renderConversationList() {
       toggle.addEventListener("click", () => toggleProject(group.id));
       title.appendChild(toggle);
 
-      const rename = document.createElement("button");
-      rename.type = "button";
-      rename.className = "project-rename";
-      rename.textContent = "✎";
-      rename.title = "重命名项目";
-      rename.setAttribute("aria-label", `重命名项目 ${group.title || "无项目"}`);
-      rename.addEventListener("click", (event) => {
-        event.stopPropagation();
-        startProjectRename(group.id);
-      });
-      title.appendChild(rename);
+      if (canRenameProject) {
+        const rename = document.createElement("button");
+        rename.type = "button";
+        rename.className = "project-rename";
+        rename.textContent = "✎";
+        rename.title = "重命名项目";
+        rename.setAttribute("aria-label", `重命名项目 ${group.title || "无项目"}`);
+        rename.addEventListener("click", (event) => {
+          event.stopPropagation();
+          startProjectRename(group.id);
+        });
+        title.appendChild(rename);
+      }
     }
     groupNode.appendChild(title);
 
@@ -1313,19 +1368,35 @@ async function hideConversationFromList(item) {
   }
 }
 
-function renderTrashPanel() {
-  const list = $("trashList");
-  if (!list) return;
-  const items = hiddenConversationItems();
-  list.innerHTML = "";
-  if (!items.length) {
-    const empty = document.createElement("div");
-    empty.className = "trash-empty";
-    empty.textContent = "暂无可恢复窗口";
-    list.appendChild(empty);
-    return;
-  }
+function currentTrashMode() {
+  return state.appMode === "canvas" ? "canvas" : "chat";
+}
 
+function trashModeTitle(mode) {
+  return mode === "canvas" ? "画布回收站" : "对话回收站";
+}
+
+function trashEmptyText(mode) {
+  return mode === "canvas" ? "暂无可恢复画布" : "暂无可恢复对话";
+}
+
+function renderTrashEmpty(list, mode) {
+  const empty = document.createElement("div");
+  empty.className = "trash-empty";
+  empty.textContent = trashEmptyText(mode);
+  list.appendChild(empty);
+}
+
+async function deletedCanvasTrashItems() {
+  try {
+    const data = await api("/api/canvases?includeDeleted=1");
+    return (data.canvases || []).filter((canvas) => canvas.deletedAt);
+  } catch {
+    return [];
+  }
+}
+
+function renderConversationTrashItems(list, items) {
   for (const item of items) {
     const row = document.createElement("div");
     row.className = "trash-item";
@@ -1342,11 +1413,64 @@ function renderTrashPanel() {
   }
 }
 
+function renderCanvasTrashItems(list, items) {
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "trash-item";
+    const title = document.createElement("div");
+    title.className = "trash-title";
+    title.textContent = item.title || "未命名画布";
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.className = "trash-restore";
+    restore.textContent = "恢复";
+    restore.addEventListener("click", () => restoreCanvasFromTrash(item.id));
+    row.append(title, restore);
+    list.appendChild(row);
+  }
+}
+
+async function renderTrashPanel() {
+  const list = $("trashList");
+  if (!list) return;
+  const mode = state.trashMode || currentTrashMode();
+  const title = $("trashTitle");
+  if (title) title.textContent = trashModeTitle(mode);
+  list.innerHTML = "";
+
+  if (mode === "canvas") {
+    const deletedCanvases = await deletedCanvasTrashItems();
+    if ((state.trashMode || currentTrashMode()) !== mode) return;
+    if (!deletedCanvases.length) {
+      renderTrashEmpty(list, mode);
+      return;
+    }
+    renderCanvasTrashItems(list, deletedCanvases);
+    return;
+  }
+
+  const items = hiddenConversationItems();
+  if (!items.length) {
+    renderTrashEmpty(list, mode);
+    return;
+  }
+  renderConversationTrashItems(list, items);
+}
+
 function restoreConversationToList(id) {
   const hidden = hiddenConversationIds();
   hidden.delete(id);
   saveHiddenConversationIds(hidden);
   renderConversationList();
+  renderTrashPanel();
+}
+
+async function restoreCanvasFromTrash(id) {
+  await api("/api/canvas/restore", {
+    method: "POST",
+    body: JSON.stringify({ canvasId: id }),
+  });
+  await loadCanvases();
   renderTrashPanel();
 }
 
@@ -1668,6 +1792,7 @@ async function loadConversation(id) {
 }
 
 function startProjectRename(projectId) {
+  if (projectId === "no-project") return;
   state.editingProjectId = projectId;
   renderConversationList();
 }
@@ -1678,6 +1803,7 @@ function cancelProjectRename() {
 }
 
 async function commitProjectRename(group, title) {
+  if (group?.id === "no-project") return;
   const currentTitle = group?.title || "无项目";
   const nextTitle = String(title || "").trim();
   if (!nextTitle || nextTitle === currentTitle) {
@@ -1799,11 +1925,12 @@ async function sendMessage(event) {
   renderConversationOverview();
   syncOverviewPosition();
   const waiting = appendMessage("assistant", "正在思考...", false);
-  if (state.composeMode) {
-    const gradeLabel = state.scriptGrade === "A" ? "A级本" : "B级本";
-    waiting.textContent = state.composeMode === "storyboard"
-      ? `正在按${gradeLabel}标准流程生成分镜...`
-      : `正在按${gradeLabel}标准流程生成剧本...`;
+  const learningMode = state.composeMode === "learning";
+  const forcedSkillRouteId = selectedChatSkillRouteId();
+  if (learningMode) {
+    waiting.textContent = "正在保存到本地学习资料库...";
+  } else if (forcedSkillRouteId) {
+    waiting.textContent = `正在调用${composeModeLabel(state.composeMode)}技能...`;
   }
   try {
     const data = await api("/api/chat", {
@@ -1812,8 +1939,10 @@ async function sendMessage(event) {
         conversationId: state.currentId,
         message: outgoingText,
         attachments,
-        workflowIntent: state.composeMode || "",
-        scriptGrade: state.scriptGrade,
+        intent: learningMode ? "learning" : forcedSkillRouteId ? "script_analysis" : "",
+        learningMode,
+        skillRouteId: forcedSkillRouteId,
+        workflowIntent: learningMode || forcedSkillRouteId ? "" : state.composeMode || "",
       }),
     });
     state.currentId = data.id;
@@ -1885,7 +2014,8 @@ function renderCanvasList() {
   list.innerHTML = "";
   for (const item of state.canvases) {
     const row = document.createElement("div");
-    row.className = "session-row";
+    row.className = `session-row${item.archivedAt ? " archived" : ""}`;
+    row.dataset.canvasId = item.id;
     const button = document.createElement("button");
     button.className = `session-item${item.id === state.currentCanvasId ? " active" : ""}`;
     button.textContent = item.title || "新画布";
@@ -1904,6 +2034,7 @@ function renderCanvasList() {
       startRenameCanvas(item, row);
     });
     row.appendChild(button);
+    row.addEventListener("contextmenu", (event) => openCanvasItemContextMenu(event, item));
     list.appendChild(row);
   }
 }
@@ -1984,19 +2115,386 @@ async function loadCanvas(id) {
   state.selectedCanvasEdgeId = "";
   state.canvasGroupPrimaryNodeId = "";
   state.canvasMergeHistoryNodeId = "";
-  $("canvasTitle").textContent = canvas.title || "自由画布";
+  state.editingCanvasBodyNodeId = "";
+  resetCanvasHistory(canvas);
+  renderCanvasHeaderState();
   renderCanvasList();
   renderCanvas();
 }
 
-async function saveCurrentCanvas() {
+function renderCanvasHeaderState() {
+  const canvas = state.currentCanvas;
+  const title = $("canvasTitle");
+  const subtitle = $("canvasSubtitle");
+  if (title) title.textContent = canvas?.title || "自由画布";
+  if (subtitle) {
+    subtitle.textContent = canvasIsArchived(canvas)
+      ? "只读归档画布。可查看完整节点和连线，如需修改请复制为新画布。"
+      : "小说 / 剧本 / 分镜脚本 / 标识节点，可手动连线，也可从节点触发生成。";
+  }
+  document.querySelectorAll(".canvas-toolbar [data-add-node]").forEach((button) => {
+    button.hidden = canvasIsArchived(canvas);
+    button.disabled = canvasIsArchived(canvas);
+  });
+  const archiveButton = $("archiveCurrentCanvas");
+  if (archiveButton) {
+    archiveButton.hidden = canvasIsArchived(canvas);
+    archiveButton.disabled = canvasIsArchived(canvas);
+  }
+}
+
+function canvasHistorySnapshot(canvas = state.currentCanvas) {
+  return canvas ? JSON.stringify(canvas) : "";
+}
+
+function cloneCanvasSnapshot(snapshot) {
+  if (!snapshot) return null;
+  try {
+    return JSON.parse(snapshot);
+  } catch {
+    return null;
+  }
+}
+
+function resetCanvasHistory(canvas = state.currentCanvas) {
+  state.canvasUndoStack = [];
+  state.canvasRedoStack = [];
+  state.canvasHistoryBaseSnapshot = canvasHistorySnapshot(canvas);
+  state.canvasHistoryApplying = false;
+  updateCanvasHistoryControls();
+}
+
+function rememberCanvasHistoryBeforeSave() {
+  if (state.canvasHistoryApplying || !state.currentCanvas) return;
+  const previous = state.canvasHistoryBaseSnapshot;
+  const current = canvasHistorySnapshot();
+  if (!previous || previous === current) return;
+  state.canvasUndoStack.push(previous);
+  if (state.canvasUndoStack.length > canvasHistoryLimit) state.canvasUndoStack.shift();
+  state.canvasRedoStack = [];
+}
+
+function updateCanvasHistoryControls() {
+  const canEditHistory = state.appMode === "canvas" && Boolean(state.currentCanvas) && !canvasIsArchived();
+  const undo = $("undoCanvasEdit");
+  const redo = $("redoCanvasEdit");
+  if (undo) undo.disabled = !canEditHistory || state.canvasUndoStack.length === 0;
+  if (redo) redo.disabled = !canEditHistory || state.canvasRedoStack.length === 0;
+}
+
+async function applyCanvasHistorySnapshot(snapshot, label) {
+  const canvas = cloneCanvasSnapshot(snapshot);
+  if (!canvas || !state.currentCanvasId || canvas.id !== state.currentCanvasId) return;
+  state.canvasHistoryApplying = true;
+  try {
+    state.currentCanvas = canvas;
+    state.selectedCanvasNodeId = "";
+    state.selectedCanvasNodeIds = new Set();
+    state.selectedCanvasEdgeId = "";
+    state.canvasGroupPrimaryNodeId = "";
+    closeCanvasMenus();
+    closeCanvasNodeModal();
+    await saveCurrentCanvas({ skipHistory: true });
+    renderCanvas();
+    canvasStatus(label);
+  } finally {
+    state.canvasHistoryApplying = false;
+    updateCanvasHistoryControls();
+  }
+}
+
+async function undoCanvasEdit() {
+  if (!state.currentCanvas || canvasIsArchived() || state.canvasUndoStack.length === 0) return;
+  const previous = state.canvasUndoStack.pop();
+  state.canvasRedoStack.push(canvasHistorySnapshot());
+  await applyCanvasHistorySnapshot(previous, "已撤销上一步画布编辑");
+}
+
+async function redoCanvasEdit() {
+  if (!state.currentCanvas || canvasIsArchived() || state.canvasRedoStack.length === 0) return;
+  const next = state.canvasRedoStack.pop();
+  state.canvasUndoStack.push(canvasHistorySnapshot());
+  await applyCanvasHistorySnapshot(next, "已恢复下一步画布编辑");
+}
+
+function isCanvasHistoryShortcutTarget(target) {
+  if (!target) return false;
+  const tag = String(target.tagName || "").toLowerCase();
+  return target.isContentEditable || ["input", "textarea", "select"].includes(tag);
+}
+
+async function saveCurrentCanvas(options = {}) {
   if (!state.currentCanvas) return null;
+  if (!options.skipHistory) rememberCanvasHistoryBeforeSave();
   const canvas = await api("/api/canvas/save", {
     method: "POST",
     body: JSON.stringify({ canvas: state.currentCanvas }),
   });
   state.currentCanvas = canvas;
+  state.canvasHistoryBaseSnapshot = canvasHistorySnapshot(canvas);
+  updateCanvasHistoryControls();
   return canvas;
+}
+
+async function runCanvasArchiveCheck(canvasId = state.currentCanvasId) {
+  if (!canvasId) return null;
+  return api("/api/canvas/archive-check", {
+    method: "POST",
+    body: JSON.stringify({ canvasId }),
+  });
+}
+
+function formatCanvasArchiveIssueSummary(archiveCheck = {}) {
+  const messages = canvasArchiveIssueMessages(archiveCheck);
+  if (!messages.length) return "暂不能归档：请检查画布内容。";
+  const shown = messages.slice(0, 3).join("；");
+  const extra = messages.length > 3 ? `；另有 ${messages.length - 3} 个问题` : "";
+  return `暂不能归档：${shown}${extra}`;
+}
+
+function canvasArchiveIssueMessages(archiveCheck = {}) {
+  const readinessIssues = Array.isArray(archiveCheck.readiness?.issues) ? archiveCheck.readiness.issues : [];
+  const storyboardIssues = Array.isArray(archiveCheck.storyboardIssues) ? archiveCheck.storyboardIssues : [];
+  return [...readinessIssues, ...storyboardIssues]
+    .map((issue) => String(issue?.message || "").trim())
+    .filter(Boolean);
+}
+
+function openCanvasArchiveBlockedModal(archiveCheck = {}, options = {}) {
+  const modal = $("canvasArchiveBlockedModal");
+  const list = $("canvasArchiveBlockedList");
+  const intro = $("canvasArchiveBlockedIntro");
+  if (!modal || !list || !intro) return;
+  const messages = canvasArchiveIssueMessages(archiveCheck);
+  const fallback = String(options.message || "").trim() || "请检查画布内容。";
+  const shownMessages = messages.length ? messages : [fallback];
+  intro.textContent = options.intro || "请先处理以下内容，再重新归档。";
+  list.innerHTML = "";
+  shownMessages.forEach((message) => {
+    const item = document.createElement("li");
+    item.textContent = message;
+    list.appendChild(item);
+  });
+  modal.classList.remove("pulse");
+  modal.classList.add("open");
+  modal.setAttribute("aria-hidden", "false");
+  requestAnimationFrame(() => modal.classList.add("pulse"));
+  $("closeCanvasArchiveBlocked")?.focus();
+}
+
+function closeCanvasArchiveBlockedModal() {
+  const modal = $("canvasArchiveBlockedModal");
+  if (!modal) return;
+  modal.classList.remove("open", "pulse");
+  modal.setAttribute("aria-hidden", "true");
+}
+
+async function archiveCurrentCanvas(canvasId = state.currentCanvasId) {
+  if (!canvasId) return;
+  canvasStatus("正在检查归档条件...");
+  setCanvasActionBusy("archiveCurrentCanvas", "归档检查中");
+  try {
+    const data = await api("/api/canvas/archive", {
+      method: "POST",
+      body: JSON.stringify({ canvasId }),
+    });
+    if (!data.ok) {
+      applyCanvasArchiveValidation(data.archiveCheck);
+      markCanvasArchiveIssues(data.archiveCheck);
+      const summary = formatCanvasArchiveIssueSummary(data.archiveCheck);
+      canvasStatus(summary, { lockMs: 6000 });
+      openCanvasArchiveBlockedModal(data.archiveCheck, { message: summary.replace(/^暂不能归档：/, "") });
+      return data;
+    }
+    state.currentCanvas = data.canvas;
+    await loadCanvases();
+    renderCanvas();
+    canvasStatus("画布已归档，仅保留查看。");
+    return data;
+  } catch (error) {
+    const message = error.message || "归档失败，请稍后重试。";
+    canvasStatus(message, { lockMs: 6000 });
+    openCanvasArchiveBlockedModal({}, { message, intro: "归档请求没有完成，请确认问题后再重试。" });
+    return { ok: false, error };
+  } finally {
+    clearCanvasActionBusy("archiveCurrentCanvas");
+  }
+}
+
+async function deleteCurrentCanvas() {
+  if (!state.currentCanvasId) return;
+  const confirmed = await requestCanvasDeleteConfirm({
+    title: "删除画布？",
+    message: "画布会移入回收站，可在左下角回收站恢复。",
+    detail: state.currentCanvas?.title || "当前画布",
+    confirmText: "移入回收站",
+  });
+  if (!confirmed) return;
+  await api("/api/canvas/delete", {
+    method: "POST",
+    body: JSON.stringify({ canvasId: state.currentCanvasId }),
+  });
+  state.currentCanvasId = "";
+  state.currentCanvas = null;
+  await loadCanvases();
+  renderCanvasList();
+  renderCanvas();
+  canvasStatus("画布已移入回收站。");
+}
+
+async function loadCanvasArchiveItems() {
+  const status = $("canvasArchiveStatus");
+  if (status) status.textContent = "正在读取已归档画布...";
+  try {
+    const data = await api("/api/canvases");
+    state.canvasArchiveItems = (data.canvases || []).filter((item) => item.archivedAt && !item.deletedAt);
+    renderCanvasArchivePage();
+  } catch (error) {
+    state.canvasArchiveItems = [];
+    if (status) status.textContent = error.message || "读取归档画布失败。";
+    const list = $("canvasArchiveList");
+    if (list) list.innerHTML = `<div class="canvas-archive-empty">${escapeHtml(error.message || "读取失败")}</div>`;
+  }
+}
+
+function renderCanvasArchivePage() {
+  const status = $("canvasArchiveStatus");
+  const list = $("canvasArchiveList");
+  if (!status || !list) return;
+  const items = state.canvasArchiveItems || [];
+  status.textContent = items.length ? `共 ${items.length} 个已归档画布` : "暂无已归档画布";
+  list.innerHTML = "";
+  if (!items.length) {
+    list.innerHTML = `<div class="canvas-archive-empty">暂无已归档画布。归档后的画布会在这里只读展示。</div>`;
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement("article");
+    row.className = "canvas-archive-item";
+    const main = document.createElement("div");
+    main.className = "canvas-archive-item-main";
+    const title = document.createElement("button");
+    title.type = "button";
+    title.className = "canvas-archive-title-button";
+    title.textContent = item.title || "未命名画布";
+    title.addEventListener("click", () => viewArchivedCanvas(item.id));
+    const meta = document.createElement("span");
+    meta.textContent = `${item.nodeCount || 0} 个节点｜${item.edgeCount || 0} 条连线｜归档于 ${formatDateTime(item.archivedAt)}`;
+    main.append(title, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "canvas-archive-item-actions";
+    const duplicate = document.createElement("button");
+    duplicate.type = "button";
+    duplicate.textContent = "复制为新画布";
+    duplicate.addEventListener("click", () => duplicateArchivedCanvas(item.id));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "danger";
+    remove.textContent = "移入回收站";
+    remove.addEventListener("click", () => deleteArchivedCanvas(item.id));
+    actions.append(duplicate, remove);
+    row.append(main, actions);
+    list.appendChild(row);
+  }
+}
+
+function formatDateTime(value) {
+  if (!value) return "未知时间";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+async function viewArchivedCanvas(id) {
+  closeCanvasArchivePage();
+  setAppMode("canvas");
+  await loadCanvas(id);
+  canvasStatus("正在查看已归档画布，仅可查看、复制或移入回收站。");
+}
+
+function cloneCanvasAsEditable(source) {
+  const now = new Date().toISOString();
+  return {
+    ...source,
+    id: `canvas-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    title: nextCanvasTitle(`${source.title || "归档画布"} 副本`),
+    createdAt: now,
+    updatedAt: now,
+    archivedAt: "",
+    deletedAt: "",
+    archiveReadiness: null,
+  };
+}
+
+async function duplicateArchivedCanvas(id) {
+  await loadCanvases();
+  const source = await api(`/api/canvas?id=${encodeURIComponent(id)}`);
+  const cloned = await api("/api/canvas/save", {
+    method: "POST",
+    body: JSON.stringify({ canvas: cloneCanvasAsEditable(source) }),
+  });
+  closeCanvasArchivePage();
+  setAppMode("canvas");
+  await loadCanvases();
+  await loadCanvas(cloned.id);
+  canvasStatus("已复制为新画布，原归档画布保持只读存档。");
+}
+
+async function deleteArchivedCanvas(id) {
+  const item = (state.canvasArchiveItems || []).find((canvas) => canvas.id === id);
+  const confirmed = await requestCanvasDeleteConfirm({
+    title: "移入回收站？",
+    message: "归档画布会移入回收站，可在左下角回收站恢复。",
+    detail: item?.title || "已归档画布",
+    confirmText: "移入回收站",
+  });
+  if (!confirmed) return;
+  await api("/api/canvas/delete", {
+    method: "POST",
+    body: JSON.stringify({ canvasId: id }),
+  });
+  if (state.currentCanvasId === id) {
+    state.currentCanvasId = "";
+    state.currentCanvas = null;
+  }
+  await loadCanvasArchiveItems();
+  await loadCanvases();
+  canvasStatus("归档画布已移入回收站。");
+}
+
+function markCanvasArchiveIssues(archiveCheck = {}) {
+  const firstStoryboardIssue = archiveCheck.storyboardIssues?.[0];
+  if (firstStoryboardIssue?.nodeId) {
+    state.selectedCanvasNodeId = firstStoryboardIssue.nodeId;
+    renderCanvas();
+    centerCanvasOnNode(firstStoryboardIssue.nodeId);
+  }
+}
+
+function applyCanvasArchiveValidation(archiveCheck = {}) {
+  if (!state.currentCanvas || !Array.isArray(state.currentCanvas.nodes)) return;
+  const issuesByNodeId = new Map();
+  for (const item of archiveCheck.storyboardIssues || []) {
+    if (!item?.nodeId) continue;
+    issuesByNodeId.set(String(item.nodeId), Array.isArray(item.issues) ? item.issues : []);
+  }
+  state.currentCanvas.nodes = state.currentCanvas.nodes.map((node) => {
+    if (node.type !== "storyboard") return node;
+    const issues = issuesByNodeId.get(String(node.id || "")) || [];
+    const meta = {
+      ...(node.meta || {}),
+      validation: {
+        ok: issues.length === 0,
+        issues,
+      },
+    };
+    if (issues.length) delete meta.validationResolution;
+    return {
+      ...node,
+      meta,
+    };
+  });
 }
 
 function currentCanvasNode(nodeId) {
@@ -2005,6 +2503,305 @@ function currentCanvasNode(nodeId) {
 
 function currentCanvasEdge(edgeId) {
   return state.currentCanvas?.edges?.find((edge) => edge.id === edgeId) || null;
+}
+
+function canvasIsArchived(canvas = state.currentCanvas) {
+  return Boolean(canvas?.archivedAt);
+}
+
+function isCanvasNodeContentEditable(node) {
+  return Boolean(node) && !isCanvasMergedNode(node) && !canvasIsArchived();
+}
+
+function canvasNodeBodySelector(nodeId) {
+  return `.canvas-node[data-node-id="${CSS.escape(nodeId)}"] .canvas-node-body`;
+}
+
+function focusCanvasNodeBody(nodeId) {
+  const body = document.querySelector(canvasNodeBodySelector(nodeId));
+  if (!body || body.getAttribute("contenteditable") !== "true") return;
+  focusMarkdownEditorEnd(body);
+}
+
+function startCanvasNodeBodyEdit(nodeId) {
+  const node = currentCanvasNode(nodeId);
+  if (!isCanvasNodeContentEditable(node)) return;
+  state.editingCanvasBodyNodeId = nodeId;
+  state.activeCanvasNodeId = nodeId;
+  state.selectedCanvasNodeId = nodeId;
+  state.selectedCanvasNodeIds = new Set();
+  state.selectedCanvasEdgeId = "";
+  renderCanvas();
+  window.setTimeout(() => focusCanvasNodeBody(nodeId), 0);
+}
+
+async function stopCanvasNodeBodyEdit(options = {}) {
+  const nodeId = state.editingCanvasBodyNodeId;
+  if (!nodeId) return;
+  const body = document.querySelector(canvasNodeBodySelector(nodeId));
+  if (body) {
+    const nextContent = markdownEditorValue(body);
+    if (body.dataset.savedContent !== nextContent) {
+      await saveCanvasNodeDraft(nodeId, nextContent);
+      body.dataset.savedContent = nextContent;
+    }
+  }
+  state.editingCanvasBodyNodeId = "";
+  if (options.render) renderCanvas();
+}
+
+function maybeStopCanvasBodyEditFromEvent(event) {
+  const nodeId = state.editingCanvasBodyNodeId;
+  if (!nodeId) return;
+  const node = event.target?.closest?.(".canvas-node");
+  if (node?.dataset.nodeId === nodeId) return;
+  stopCanvasNodeBodyEdit({ render: true });
+}
+
+function markdownToolbarButton(label, options = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `markdown-toolbar-button${options.icon ? " icon-only" : ""}${options.className ? ` ${options.className}` : ""}`;
+  button.title = options.title || label;
+  button.setAttribute("aria-label", options.title || label);
+  if (options.icon) {
+    button.innerHTML = markdownToolbarIcon(options.icon, label);
+  } else {
+    button.textContent = label;
+  }
+  if (options.prefix) button.dataset.markdownPrefix = options.prefix;
+  if (options.wrap) button.dataset.markdownWrap = options.wrap;
+  if (options.action) button.setAttribute("data-markdown-action", options.action);
+  return button;
+}
+
+function markdownToolbarIcon(name, fallback = "") {
+  const icons = {
+    paragraph: '<span class="toolbar-pilcrow" aria-hidden="true">¶</span>',
+    unorderedList: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12"/><path d="M8 12h12"/><path d="M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>',
+    orderedList: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6h10"/><path d="M10 12h10"/><path d="M10 18h10"/><path d="M4 5h1v4"/><path d="M3.8 9h2.4"/><path d="M3.7 11.5h2.2c.8 0 1.1.9.5 1.4L4 15h2.5"/><path d="M4 17h1.6c.9 0 1.2 1.2.3 1.5.9.3.6 1.5-.3 1.5H4"/></svg>',
+    horizontalRule: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>',
+    copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="1.8"/><path d="M5 15V6.8C5 5.8 5.8 5 6.8 5H15"/></svg>',
+    fullscreen: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4H4v4"/><path d="M16 4h4v4"/><path d="M20 16v4h-4"/><path d="M4 16v4h4"/></svg>',
+    background: '<svg class="toolbar-bg-icon" viewBox="0 0 24 24" aria-hidden="true"><circle class="toolbar-bg-icon-ring" cx="12" cy="12" r="7.5"/><path class="toolbar-bg-icon-slash" d="M7 17 17 7"/></svg>',
+  };
+  return icons[name] || escapeHtml(fallback);
+}
+
+function markdownToolbarSeparator() {
+  const separator = document.createElement("span");
+  separator.className = "markdown-toolbar-separator";
+  separator.setAttribute("aria-hidden", "true");
+  return separator;
+}
+
+function setMarkdownEditorValue(editor, markdown = "") {
+  if (!editor) return;
+  const value = String(markdown || "");
+  editor.dataset.markdownValue = value;
+  editor.dataset.savedContent = value;
+  if (!value.trim()) {
+    editor.innerHTML = "";
+    return;
+  }
+  if (window.MbhMarkdown && typeof window.MbhMarkdown.renderMarkdown === "function") {
+    editor.innerHTML = window.MbhMarkdown.renderMarkdown(value);
+  } else {
+    editor.textContent = value;
+  }
+}
+
+function markdownEditorValue(editor) {
+  if (!editor) return "";
+  if (window.MbhMarkdown && typeof window.MbhMarkdown.markdownFromHtml === "function") {
+    return window.MbhMarkdown.markdownFromHtml(editor.innerHTML);
+  }
+  return editor.textContent || "";
+}
+
+function focusMarkdownEditorEnd(editor) {
+  if (!editor) return;
+  editor.focus();
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  range.collapse(false);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function applyMarkdownEditorFormat(editor, options = {}) {
+  if (!editor || editor.getAttribute("contenteditable") !== "true") return;
+  editor.focus();
+  const prefix = options.prefix || "";
+  const wrap = options.wrap || "";
+  const action = options.action || "";
+  if (action === "paragraph") {
+    document.execCommand("formatBlock", false, "p");
+  } else if (action === "ordered-list") {
+    document.execCommand("insertOrderedList", false);
+  } else if (action === "horizontal-rule") {
+    document.execCommand("insertHorizontalRule", false);
+  } else if (wrap === "**") {
+    document.execCommand("bold", false);
+  } else if (wrap === "*") {
+    document.execCommand("italic", false);
+  } else if (prefix === "# ") {
+    document.execCommand("formatBlock", false, "h1");
+  } else if (prefix === "## ") {
+    document.execCommand("formatBlock", false, "h2");
+  } else if (prefix === "### ") {
+    document.execCommand("formatBlock", false, "h3");
+  } else if (prefix === "- ") {
+    document.execCommand("insertUnorderedList", false);
+  }
+  editor.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function markdownToolbarBackgroundButton(color, title) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `markdown-bg-swatch${color ? "" : " clear"}`;
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  button.setAttribute("data-node-background-color", color);
+  if (color) button.style.setProperty("--node-bg-swatch", color);
+  return button;
+}
+
+function canvasNodeBackgroundColor(nodeId = state.activeCanvasNodeId) {
+  return sanitizeMarkdownColor(currentCanvasNode(nodeId)?.meta?.backgroundColor || "");
+}
+
+function renderMarkdownBackgroundGroup(nodeId = state.activeCanvasNodeId) {
+  const group = document.createElement("div");
+  const currentBackground = canvasNodeBackgroundColor(nodeId);
+  group.className = `markdown-toolbar-bg-group${currentBackground ? " has-color" : ""}`;
+  group.setAttribute("aria-label", "节点背景色");
+  const menuButton = markdownToolbarButton("", { action: "background-menu", icon: "background", title: currentBackground ? `节点背景色：${currentBackground}` : "节点背景色：默认" });
+  if (currentBackground) menuButton.style.setProperty("--toolbar-bg-current", currentBackground);
+  group.appendChild(menuButton);
+  const palette = document.createElement("div");
+  palette.className = "markdown-bg-palette";
+  for (const item of markdownBackgroundSwatches) {
+    palette.appendChild(markdownToolbarBackgroundButton(item.color, item.title));
+  }
+  group.appendChild(palette);
+  return group;
+}
+
+async function applyCanvasNodeBackground(nodeId, color) {
+  if (!state.currentCanvas) return;
+  const safeColor = sanitizeMarkdownColor(color);
+  state.currentCanvas.nodes = (state.currentCanvas.nodes || []).map((node) => {
+    if (node.id !== nodeId) return node;
+    const meta = { ...(node.meta || {}) };
+    if (safeColor) meta.backgroundColor = safeColor;
+    else delete meta.backgroundColor;
+    return { ...node, meta };
+  });
+  await saveCurrentCanvas();
+  renderCanvas();
+}
+
+function renderCanvasInlineMarkdownToolbar(nodeId) {
+  const toolbar = document.createElement("div");
+  toolbar.className = "canvas-node-inline-markdown-toolbar markdown-toolbar markdown-floating-toolbar";
+  toolbar.setAttribute("role", "toolbar");
+  toolbar.setAttribute("aria-label", "Markdown 工具");
+  toolbar.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  toolbar.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const button = event.target.closest("button");
+    if (!button) return;
+    const body = document.querySelector(canvasNodeBodySelector(nodeId));
+    if (!body) return;
+    const action = button.dataset.markdownAction || "";
+    await handleMarkdownToolbarButton(button, body, nodeId);
+  });
+  renderMarkdownToolbarContent(toolbar, nodeId);
+  return toolbar;
+}
+
+function renderMarkdownToolbarContent(toolbar, nodeId = state.activeCanvasNodeId) {
+  toolbar.replaceChildren(
+    renderMarkdownBackgroundGroup(nodeId),
+    markdownToolbarSeparator(),
+    markdownToolbarButton("H1", { prefix: "# ", title: "一级标题", className: "heading" }),
+    markdownToolbarButton("H2", { prefix: "## ", title: "二级标题", className: "heading" }),
+    markdownToolbarButton("H3", { prefix: "### ", title: "三级标题", className: "heading strong" }),
+    markdownToolbarButton("", { action: "paragraph", icon: "paragraph", title: "正文格式" }),
+    markdownToolbarSeparator(),
+    markdownToolbarButton("B", { wrap: "**", title: "加粗", className: "bold" }),
+    markdownToolbarButton("I", { wrap: "*", title: "斜体", className: "italic" }),
+    markdownToolbarSeparator(),
+    markdownToolbarButton("", { prefix: "- ", icon: "unorderedList", title: "无序列表" }),
+    markdownToolbarButton("", { action: "ordered-list", icon: "orderedList", title: "有序列表" }),
+    markdownToolbarSeparator(),
+    markdownToolbarButton("", { action: "horizontal-rule", icon: "horizontalRule", title: "分割线" }),
+    markdownToolbarSeparator(),
+    markdownToolbarButton("", { action: "copy", icon: "copy", title: "复制 Markdown 文本" }),
+    markdownToolbarButton("", { action: "fullscreen", icon: "fullscreen", title: "全屏编辑" }),
+  );
+}
+
+async function handleMarkdownToolbarButton(button, editor, nodeId = "") {
+  if (!button || !editor) return;
+  const action = button.dataset.markdownAction || "";
+  if (button.dataset.nodeBackgroundColor !== undefined) {
+    await applyCanvasNodeBackground(nodeId || state.activeCanvasNodeId, button.dataset.nodeBackgroundColor || "");
+    button.closest(".markdown-toolbar-bg-group")?.classList.remove("open");
+    return;
+  }
+  if (action === "background-menu") {
+    const group = button.closest(".markdown-toolbar-bg-group");
+    const shouldOpen = !group?.classList.contains("open");
+    document.querySelectorAll(".markdown-toolbar-bg-group.open").forEach((item) => {
+      if (item !== group) item.classList.remove("open");
+    });
+    group?.classList.toggle("open", shouldOpen);
+    return;
+  }
+  if (action === "fullscreen") {
+    if (nodeId) await openCanvasNodeFullscreenEditor(nodeId, editor);
+    return;
+  }
+  if (action === "copy") {
+    const ok = await copyText(markdownEditorValue(editor));
+    canvasStatus(ok ? "节点内容已复制" : "复制失败");
+    return;
+  }
+  applyMarkdownEditorFormat(editor, {
+    action,
+    prefix: button.dataset.markdownPrefix,
+    wrap: button.dataset.markdownWrap,
+  });
+  const nextContent = markdownEditorValue(editor);
+  if (editor.dataset.savedContent !== nextContent) {
+    if (nodeId) {
+      await saveCanvasNodeDraft(nodeId, nextContent);
+      editor.dataset.savedContent = nextContent;
+    } else {
+      scheduleActiveCanvasNodeAutosave();
+    }
+  }
+}
+
+async function openCanvasNodeFullscreenEditor(nodeId, editor = null) {
+  if (editor) {
+    const nextContent = markdownEditorValue(editor);
+    if (editor.dataset.savedContent !== nextContent) {
+      await saveCanvasNodeDraft(nodeId, nextContent);
+      editor.dataset.savedContent = nextContent;
+    }
+  }
+  state.editingCanvasBodyNodeId = "";
+  renderCanvas();
+  openCanvasNodeModal(nodeId, { focusContent: true });
 }
 
 function isCanvasRevisionNode(node) {
@@ -2130,9 +2927,44 @@ function canConnectCanvasNodes(fromNodeId, toNodeId) {
   return !(state.currentCanvas.edges || []).some((edge) => edge.to === toNodeId);
 }
 
-function canvasStatus(text) {
+function canvasStatus(text, options = {}) {
   const node = $("canvasStatus");
-  if (node) node.textContent = text;
+  if (!node) return;
+  const now = Date.now();
+  const lockMs = Number(options.lockMs || 0);
+  const shouldLock = lockMs > 0;
+  if (!options.force && !shouldLock && state.canvasStatusLockUntil && now < state.canvasStatusLockUntil) return;
+  if (shouldLock) {
+    state.canvasStatusLockUntil = now + lockMs;
+  } else if (options.force || !text) {
+    state.canvasStatusLockUntil = 0;
+  }
+  node.textContent = text;
+  node.classList.toggle("show", Boolean(text));
+}
+
+function setCanvasActionBusy(elementId, label = "处理中") {
+  const button = $(elementId);
+  if (!button) return;
+  if (!button.dataset.busyOriginalHtml) {
+    button.dataset.busyOriginalHtml = button.innerHTML;
+  }
+  button.disabled = true;
+  button.classList.add("is-action-busy");
+  button.setAttribute("aria-busy", "true");
+  button.innerHTML = `<span class="action-busy-spinner" aria-hidden="true"></span><span>${escapeHtml(label)}</span>`;
+}
+
+function clearCanvasActionBusy(elementId) {
+  const button = $(elementId);
+  if (!button) return;
+  button.disabled = false;
+  button.classList.remove("is-action-busy");
+  button.removeAttribute("aria-busy");
+  if (button.dataset.busyOriginalHtml) {
+    button.innerHTML = button.dataset.busyOriginalHtml;
+    delete button.dataset.busyOriginalHtml;
+  }
 }
 
 function canvasZoom() {
@@ -2308,6 +3140,15 @@ function canvasReadableZoomForBounds(bounds) {
   return clamp(targetZoom, canvasFocusMinReadableZoom, canvasZoomMax);
 }
 
+function canvasExpandedZoomForBounds(bounds) {
+  const stage = $("canvasStage");
+  if (!stage || !bounds) return canvasZoom();
+  const targetWidth = Math.max(240, stage.clientWidth * canvasNodeFocusWidthRatio - canvasNodeFocusPadding);
+  const targetHeight = Math.max(180, stage.clientHeight * canvasNodeFocusHeightRatio - canvasNodeFocusPadding);
+  const proportionalZoom = Math.min(targetWidth / Math.max(1, bounds.width), targetHeight / Math.max(1, bounds.height));
+  return clamp(proportionalZoom, canvasZoomMin, Math.min(canvasNodeFocusMaxZoom, canvasZoomMax));
+}
+
 function centerCanvasOnNode(nodeId = state.selectedCanvasNodeId) {
   const node = currentCanvasNode(nodeId);
   const stage = $("canvasStage");
@@ -2321,6 +3162,21 @@ function centerCanvasOnNode(nodeId = state.selectedCanvasNodeId) {
     top: targetScroll.top,
   });
   canvasStatus(`已定位到「${node.title || "选中节点"}」，缩放至 ${Math.round(zoom * 100)}%`);
+}
+
+function focusCanvasNodeToViewport(nodeId) {
+  const node = currentCanvasNode(nodeId);
+  const stage = $("canvasStage");
+  if (!node || !stage) return;
+  const bounds = canvasNodeBounds(node);
+  const zoom = canvasExpandedZoomForBounds(bounds);
+  const targetScroll = canvasCenteredScrollForBounds(bounds, zoom);
+  animateCanvasViewportTo({
+    zoom,
+    left: targetScroll.left,
+    top: targetScroll.top,
+  });
+  canvasStatus(`已放大「${node.title || "节点"}」至 ${Math.round(zoom * 100)}%`);
 }
 
 function fitCanvasToContent() {
@@ -2445,11 +3301,16 @@ function updateCanvasViewportTools() {
   const zoomIn = $("canvasZoomIn");
   if (zoomOut) zoomOut.disabled = zoom <= canvasZoomMin + 0.001;
   if (zoomIn) zoomIn.disabled = zoom >= canvasZoomMax - 0.001;
+  updateCanvasHistoryControls();
   updateCanvasMiniMap();
 }
 
 async function addNodeToCanvas(type, position = null) {
   if (!state.currentCanvas) await newCanvas("新画布");
+  if (canvasIsArchived()) {
+    canvasStatus("画布已归档，仅可查看。");
+    return;
+  }
   const cleanType = canvasTypeLabels[type] ? type : "label";
   const nodes = state.currentCanvas.nodes || [];
   if (cleanType === "novel" && nodes.some((node) => node.type === "novel" && !isCanvasRevisionNode(node))) {
@@ -2488,14 +3349,18 @@ function renderCanvas() {
     canvasStatus("还没有画布");
     return;
   }
+  renderCanvasHeaderState();
   applyCanvasSurfaceSize(canvas);
   for (const node of canvas.nodes || []) {
     layer.appendChild(renderCanvasNode(node));
   }
   renderCanvasEdges();
   renderCanvasGroupBar();
+  updateCanvasSelectionModeClass();
   updateCanvasViewportTools();
-  canvasStatus(`节点 ${canvas.nodes.length} 个｜连线 ${(canvas.edges || []).length} 条${state.canvasDrag?.type === "connect" ? "｜拖到目标节点松开" : ""}`);
+  if (state.canvasDrag?.type === "connect") {
+    canvasStatus("拖到目标节点松开");
+  }
 }
 
 function applyCanvasSurfaceSize(canvas) {
@@ -2536,8 +3401,10 @@ function ensureCanvasViewportOrigin(canvas) {
 }
 
 function renderCanvasNode(node) {
+  const editableBody = isCanvasNodeContentEditable(node);
+  const editingBody = editableBody && state.editingCanvasBodyNodeId === node.id;
   const item = document.createElement("article");
-  item.className = `canvas-node ${node.type || "label"}${isCanvasRevisionNode(node) ? " revision" : ""}${isCanvasMergedNode(node) ? " merged" : ""}${isCanvasNodeSelected(node.id) ? " selected" : ""}`;
+  item.className = `canvas-node ${node.type || "label"}${isCanvasRevisionNode(node) ? " revision" : ""}${isCanvasMergedNode(node) ? " merged" : ""}${isCanvasNodeSelected(node.id) ? " selected" : ""}${editingBody ? " editing-body" : ""}`;
   item.dataset.nodeId = node.id;
   item.tabIndex = 0;
   item.style.left = `${canvasScreenX(node.x)}px`;
@@ -2546,6 +3413,11 @@ function renderCanvasNode(node) {
   item.style.height = `${Number(node.height || 220)}px`;
   item.style.transform = `scale(${canvasZoom()})`;
   item.style.transformOrigin = "top left";
+  const nodeBackgroundColor = sanitizeMarkdownColor(node.meta?.backgroundColor || "");
+  if (nodeBackgroundColor) {
+    item.style.setProperty("--canvas-node-custom-bg", nodeBackgroundColor);
+    item.style.setProperty("--canvas-node-readable-ink", readableTextColorForBackground(nodeBackgroundColor));
+  }
   item.addEventListener("contextmenu", (event) => openCanvasContextMenu(event, node.id));
   item.addEventListener("pointerenter", () => {
     window.clearTimeout(item.canvasHoverTimer);
@@ -2565,6 +3437,10 @@ function renderCanvasNode(node) {
   head.innerHTML = `<span class="canvas-node-type-icon ${escapeHtml(node.type || "label")}" title="${escapeHtml(canvasTypeLabels[node.type] || "标识")}" aria-hidden="true">${canvasTypeIcon(node.type)}</span><span class="canvas-node-title-text">${escapeHtml(node.title || "未命名节点")}</span>`;
   let titleClickTimer = null;
   head.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) {
+      event.stopPropagation();
+      return;
+    }
     if (event.button === 0 && event.detail >= 2) {
       event.preventDefault();
       event.stopPropagation();
@@ -2637,32 +3513,93 @@ function renderCanvasNode(node) {
     }, 0);
   }
 
-  const body = document.createElement("textarea");
-  body.className = "canvas-node-body";
-  body.value = node.content || "";
-  body.dataset.savedContent = node.content || "";
-  body.placeholder = "点击编辑节点内容。";
+  const body = document.createElement("div");
+  body.className = "canvas-node-body markdown-editor markdown-body";
+  setMarkdownEditorValue(body, node.content || "");
+  body.dataset.placeholder = "点击编辑节点内容。";
   body.setAttribute("aria-label", `${node.title || "节点"}内容`);
-  body.readOnly = isCanvasMergedNode(node);
+  body.setAttribute("role", "textbox");
+  body.contentEditable = editingBody ? "true" : "false";
+  body.dataset.editable = String(editableBody);
+  body.dataset.editing = String(editingBody);
+  body.title = editableBody
+    ? editingBody
+      ? "正在编辑，Markdown 工具条在节点上方。"
+      : "单击选中，双击在节点内编辑 Markdown"
+    : "只读节点";
   body.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
+    if (event.button !== 0) return;
     selectCanvasNode(node.id);
+    if (canvasIsArchived()) return;
+    if (editingBody) return;
+    if (event.button === 0 && event.detail >= 2) {
+      event.preventDefault();
+      return;
+    }
     startCanvasNodeDrag(event, node.id, { pending: true, textarea: body });
   });
   body.addEventListener("click", (event) => {
     event.stopPropagation();
     selectCanvasNode(node.id);
   });
+  body.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    focusCanvasNodeToViewport(node.id);
+    startCanvasNodeBodyEdit(node.id);
+  });
   body.addEventListener("wheel", (event) => {
     if (body.scrollHeight > body.clientHeight) event.stopPropagation();
   }, { passive: true });
-  body.addEventListener("input", () => updateCanvasNodeDraft(node.id, body.value));
+  body.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && editingBody) {
+      event.preventDefault();
+      stopCanvasNodeBodyEdit({ render: true });
+    }
+  });
+  body.addEventListener("input", () => {
+    const nextContent = markdownEditorValue(body);
+    updateCanvasNodeDraft(node.id, nextContent);
+    if (body.canvasNodeAutosaveTimer) window.clearTimeout(body.canvasNodeAutosaveTimer);
+    body.canvasNodeAutosaveTimer = window.setTimeout(async () => {
+      body.canvasNodeAutosaveTimer = null;
+      try {
+        const latestContent = markdownEditorValue(body);
+        await saveCanvasNodeDraft(node.id, latestContent);
+        body.dataset.savedContent = latestContent;
+      } catch (error) {
+        canvasStatus(error.message);
+      }
+    }, canvasNodeAutosaveDelayMs);
+  });
   body.addEventListener("blur", async () => {
-    if (body.dataset.savedContent === body.value) return;
-    await saveCanvasNodeDraft(node.id, body.value);
-    body.dataset.savedContent = body.value;
+    if (body.canvasNodeAutosaveTimer) {
+      window.clearTimeout(body.canvasNodeAutosaveTimer);
+      body.canvasNodeAutosaveTimer = null;
+    }
+    const nextContent = markdownEditorValue(body);
+    if (body.dataset.savedContent === nextContent) return;
+    await saveCanvasNodeDraft(node.id, nextContent);
+    body.dataset.savedContent = nextContent;
   });
   item.appendChild(body);
+  if (editingBody) item.appendChild(renderCanvasInlineMarkdownToolbar(node.id));
+  const validationIssues = storyboardValidationIssues(node);
+  if (validationIssues.length) {
+    const issueButton = document.createElement("button");
+    issueButton.type = "button";
+    issueButton.className = "canvas-node-issue-badge";
+    issueButton.textContent = String(validationIssues.length);
+    issueButton.title = "查看分镜问题";
+    issueButton.addEventListener("pointerdown", (event) => event.stopPropagation());
+    issueButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openStoryboardIssueDetail(node.id);
+    });
+    item.appendChild(issueButton);
+  }
   if (isCanvasMergedNode(node)) {
     const badge = document.createElement("button");
     badge.type = "button";
@@ -2698,6 +3635,153 @@ function renderCanvasNode(node) {
   resize.addEventListener("pointerdown", (event) => startCanvasNodeResize(event, node.id));
   item.appendChild(resize);
   return item;
+}
+
+function storyboardValidationIssues(node) {
+  const validation = node?.meta?.validation;
+  if (!validation || validation.ok) return [];
+  return Array.isArray(validation.issues) ? validation.issues : [];
+}
+
+function storyboardContentFingerprint(content) {
+  const text = String(content || "");
+  let hash = 2166136261;
+  for (const char of text) {
+    hash ^= char.codePointAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${text.length}:${(hash >>> 0).toString(16)}`;
+}
+
+function openStoryboardIssueDetail(nodeId) {
+  const node = currentCanvasNode(nodeId);
+  if (!node) return;
+  state.storyboardIssueNodeId = nodeId;
+  $("storyboardIssueTitle").textContent = `${node.title || "分镜问题"}`;
+  const list = $("storyboardIssueList");
+  list.innerHTML = "";
+  const issues = storyboardValidationIssues(node);
+  const hasIssues = issues.length > 0;
+  $("autoFixStoryboardIssues").disabled = !hasIssues;
+  $("acknowledgeStoryboardIssues").disabled = !hasIssues;
+  $("adoptStoryboardIssues").disabled = !hasIssues;
+  renderStoryboardIssueText(node.content || "", issues);
+  if (!issues.length) {
+    list.innerHTML = `<div class="storyboard-issue-empty">暂无问题。</div>`;
+  }
+  for (const issue of issues) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.lineNumber = String(issue.lineNumber || "");
+    button.innerHTML = `<strong>第 ${escapeHtml(issue.lineNumber || "")} 行</strong><span>${escapeHtml(issue.message || issue.type || "分镜问题")}</span>`;
+    button.addEventListener("click", () => highlightStoryboardIssueLine(issue.lineNumber));
+    list.appendChild(button);
+  }
+  $("storyboardIssueModal").classList.add("open");
+  $("storyboardIssueModal").setAttribute("aria-hidden", "false");
+}
+
+async function autoFixStoryboardIssues() {
+  const sourceNodeId = state.storyboardIssueNodeId;
+  const node = currentCanvasNode(sourceNodeId);
+  if (!node) return;
+  const issues = storyboardValidationIssues(node);
+  if (!issues.length) {
+    closeStoryboardIssueDetail();
+    return;
+  }
+  closeStoryboardIssueDetail();
+  const revisionNode = await createRevisionCanvasNode(sourceNodeId, {
+    initialPrompt: storyboardIssueAutoFixPrompt,
+    silentStatus: true,
+  });
+  if (!revisionNode) return;
+  canvasStatus("正在根据识别到的分镜问题自动调整...");
+  await submitCanvasRevisionChat(revisionNode.id, storyboardIssueAutoFixPrompt);
+}
+
+async function resolveStoryboardIssues(action) {
+  const node = currentCanvasNode(state.storyboardIssueNodeId);
+  if (!node) return;
+  const issues = storyboardValidationIssues(node);
+  if (!issues.length) {
+    closeStoryboardIssueDetail();
+    return;
+  }
+  const normalizedAction = action === "adopt" ? "adopted" : "acknowledged";
+  const label = normalizedAction === "adopted" ? "仍然采用" : "我已知晓";
+  state.currentCanvas.nodes = (state.currentCanvas.nodes || []).map((item) => {
+    if (item.id !== node.id) return item;
+    return {
+      ...item,
+      meta: {
+        ...(item.meta || {}),
+        validation: {
+          ok: true,
+          issues: [],
+          resolvedIssues: issues,
+        },
+        validationResolution: {
+          action: normalizedAction,
+          label,
+          issueCount: issues.length,
+          resolvedAt: new Date().toISOString(),
+          contentFingerprint: storyboardContentFingerprint(item.content),
+        },
+      },
+    };
+  });
+  await saveCurrentCanvas();
+  closeStoryboardIssueDetail();
+  renderCanvas();
+  canvasStatus(`${label}：当前分镜已标记为可用。`);
+}
+
+function renderStoryboardIssueText(content, issues = []) {
+  const container = $("storyboardIssueText");
+  if (!container) return;
+  const issueLines = new Set(
+    (Array.isArray(issues) ? issues : [])
+      .map((issue) => Number(issue.lineNumber || 0))
+      .filter((lineNumber) => Number.isFinite(lineNumber) && lineNumber > 0),
+  );
+  const lines = String(content || "").split(/\r?\n/);
+  container.innerHTML = "";
+  lines.forEach((line, index) => {
+    const lineNumber = index + 1;
+    const row = document.createElement("div");
+    row.className = `storyboard-issue-line${issueLines.has(lineNumber) ? " has-issue" : ""}`;
+    row.dataset.lineNumber = String(lineNumber);
+
+    const marker = document.createElement("span");
+    marker.className = "storyboard-issue-line-number";
+    marker.textContent = String(lineNumber);
+
+    const text = document.createElement("code");
+    text.className = "storyboard-issue-line-text";
+    text.textContent = line || " ";
+
+    row.append(marker, text);
+    container.appendChild(row);
+  });
+}
+
+function highlightStoryboardIssueLine(lineNumber) {
+  const container = $("storyboardIssueText");
+  if (!container || !lineNumber) return;
+  container.querySelectorAll(".storyboard-issue-line-highlight").forEach((item) => {
+    item.classList.remove("storyboard-issue-line-highlight");
+  });
+  const line = container.querySelector(`[data-line-number="${CSS.escape(String(lineNumber))}"]`);
+  if (!line) return;
+  line.classList.add("storyboard-issue-line-highlight");
+  line.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function closeStoryboardIssueDetail() {
+  state.storyboardIssueNodeId = "";
+  $("storyboardIssueModal").classList.remove("open");
+  $("storyboardIssueModal").setAttribute("aria-hidden", "true");
 }
 
 function openCanvasMergeHistory(nodeId) {
@@ -2871,6 +3955,7 @@ function selectCanvasNode(nodeId) {
     edge.classList.remove("selected");
   });
   renderCanvasGroupBar();
+  updateCanvasSelectionModeClass();
   updateCanvasViewportTools();
 }
 
@@ -2886,12 +3971,36 @@ function selectCanvasEdge(edgeId) {
     edge.classList.toggle("selected", edge.dataset.edgeId === edgeId);
   });
   renderCanvasGroupBar();
+  updateCanvasSelectionModeClass();
   updateCanvasViewportTools();
 }
 
 function setCanvasBusy(nodeId, label = "生成中") {
-  state.canvasBusy = nodeId ? { nodeId, label } : null;
+  if (!nodeId) {
+    state.canvasBusy = {};
+    renderCanvasBusyIndicators();
+    return;
+  }
+  const busy = canvasBusyState();
+  busy[nodeId] = { nodeId, label };
   renderCanvasBusyIndicators();
+}
+
+function clearCanvasBusy(nodeId) {
+  if (!nodeId) {
+    setCanvasBusy(null);
+    return;
+  }
+  const busy = canvasBusyState();
+  delete busy[nodeId];
+  renderCanvasBusyIndicators();
+}
+
+function canvasBusyState() {
+  if (!state.canvasBusy || typeof state.canvasBusy !== "object" || Array.isArray(state.canvasBusy)) {
+    state.canvasBusy = {};
+  }
+  return state.canvasBusy;
 }
 
 function renderCanvasBusyIndicators() {
@@ -2901,14 +4010,15 @@ function renderCanvasBusyIndicators() {
 }
 
 function applyCanvasNodeBusy(item, nodeId) {
-  const isBusy = Boolean(state.canvasBusy?.nodeId && state.canvasBusy.nodeId === nodeId);
+  const busyState = canvasBusyState()[nodeId];
+  const isBusy = Boolean(busyState);
   const existing = Array.from(item.children).find((child) => child.classList?.contains("canvas-node-busy"));
   item.classList.toggle("is-generating", isBusy);
   if (!isBusy) {
     existing?.remove();
     return;
   }
-  const label = state.canvasBusy?.label || "生成中";
+  const label = busyState?.label || "生成中";
   const busy = existing || document.createElement("div");
   busy.className = "canvas-node-busy";
   busy.setAttribute("role", "status");
@@ -2919,9 +4029,17 @@ function applyCanvasNodeBusy(item, nodeId) {
 
 function updateCanvasNodeDraft(nodeId, content) {
   if (!state.currentCanvas) return;
-  state.currentCanvas.nodes = (state.currentCanvas.nodes || []).map((node) => node.id === nodeId
-    ? { ...node, content }
-    : node);
+  state.currentCanvas.nodes = (state.currentCanvas.nodes || []).map((node) => {
+    if (node.id !== nodeId) return node;
+    const contentChanged = String(node.content || "") !== String(content || "");
+    if (!contentChanged) return { ...node, content };
+    const meta = { ...(node.meta || {}) };
+    if (node.type === "storyboard") {
+      delete meta.validation;
+      delete meta.validationResolution;
+    }
+    return { ...node, content, meta };
+  });
 }
 
 async function saveCanvasNodeDraft(nodeId, content) {
@@ -2945,7 +4063,12 @@ function clearCanvasSelection() {
   });
   hideCanvasSelectionBox();
   renderCanvasGroupBar();
+  updateCanvasSelectionModeClass();
   updateCanvasViewportTools();
+}
+
+function updateCanvasSelectionModeClass() {
+  $("canvasShell")?.classList.toggle("canvas-multi-selecting", selectedCanvasNodeCount() > 1);
 }
 
 function renderCanvasGroupBar() {
@@ -2986,6 +4109,7 @@ function setCanvasMultiSelection(nodeIds = [], primaryNodeId = "") {
   });
   document.querySelectorAll(".canvas-edge.selected").forEach((edge) => edge.classList.remove("selected"));
   renderCanvasGroupBar();
+  updateCanvasSelectionModeClass();
   updateCanvasViewportTools();
 }
 
@@ -3134,6 +4258,7 @@ function openCanvasActionMenu(event, nodeId, side = "right") {
   closeCanvasContextMenu();
   menu.dataset.nodeId = nodeId;
   menu.dataset.edgeId = "";
+  menu.dataset.selectedNodeIds = "";
   menu.dataset.side = side;
   menu.innerHTML = "";
 
@@ -3148,22 +4273,62 @@ function openCanvasActionMenu(event, nodeId, side = "right") {
   positionFloatingMenu(menu, event.clientX + (side === "left" ? -12 : 12), event.clientY);
 }
 
+function openCanvasItemContextMenu(event, item) {
+  event.preventDefault();
+  event.stopPropagation();
+  const menu = $("canvasContextMenu");
+  if (!item || !menu) return;
+  closeCanvasActionMenu();
+  menu.dataset.nodeId = "";
+  menu.dataset.edgeId = "";
+  menu.dataset.selectedNodeIds = "";
+  menu.dataset.canvasItemId = item.id;
+  menu.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "canvas-menu-title";
+  title.textContent = item.title || "画布";
+  menu.appendChild(title);
+  if (!item.archivedAt) {
+    menu.appendChild(canvasMenuButton("重命名", "rename-canvas"));
+    menu.appendChild(canvasMenuButton("归档", "archive-canvas"));
+  }
+  menu.appendChild(canvasMenuButton("删除", "delete-canvas"));
+  positionFloatingMenu(menu, event.clientX, event.clientY);
+}
+
 function openCanvasContextMenu(event, nodeId) {
   event.preventDefault();
   event.stopPropagation();
   const node = currentCanvasNode(nodeId);
   const menu = $("canvasContextMenu");
   if (!node || !menu) return;
+  const selectedIds = state.selectedCanvasNodeIds || new Set();
+  const isMultiSelectionMenu = selectedIds.size > 1 && selectedIds.has(nodeId);
   closeCanvasActionMenu();
-  menu.dataset.nodeId = nodeId;
+  menu.dataset.nodeId = isMultiSelectionMenu ? "" : nodeId;
   menu.dataset.edgeId = "";
+  menu.dataset.selectedNodeIds = isMultiSelectionMenu ? [...selectedIds].join(",") : "";
   menu.innerHTML = "";
+  if (isMultiSelectionMenu) {
+    const title = document.createElement("div");
+    title.className = "canvas-menu-title";
+    title.textContent = `已选 ${selectedIds.size} 个节点`;
+    menu.appendChild(title);
+    if (!canvasIsArchived()) {
+      menu.appendChild(canvasMenuButton("删除选中节点", "delete-selected", "Delete"));
+    }
+    positionFloatingMenu(menu, event.clientX, event.clientY);
+    return;
+  }
+  selectCanvasNode(nodeId);
   menu.appendChild(canvasMenuButton("复制节点", "copy-node", "Ctrl+C"));
   menu.appendChild(canvasMenuButton("复制文本", "copy-text"));
-  if (node.type === "novel") menu.appendChild(canvasMenuButton("创建剧本", "generate-script"));
-  if (node.type === "script") menu.appendChild(canvasMenuButton("创建分镜脚本", "generate-storyboard-all", "全部集数"));
-  menu.appendChild(canvasMenuButton("编辑", "edit"));
-  menu.appendChild(canvasMenuButton("删除", "delete", "Delete"));
+  if (!canvasIsArchived()) {
+    if (node.type === "novel") menu.appendChild(canvasMenuButton("创建剧本", "generate-script"));
+    if (node.type === "script") menu.appendChild(canvasMenuButton("创建分镜脚本", "generate-storyboard-all", "全部集数"));
+    menu.appendChild(canvasMenuButton("编辑", "edit"));
+    menu.appendChild(canvasMenuButton("删除", "delete", "Delete"));
+  }
   positionFloatingMenu(menu, event.clientX, event.clientY);
 }
 
@@ -3171,12 +4336,17 @@ function openCanvasBoardContextMenu(event) {
   if (!state.currentCanvas) return;
   if (event.target.closest?.(".canvas-node, .canvas-edge")) return;
   event.preventDefault();
+  if (canvasIsArchived()) {
+    canvasStatus("归档画布为只读，不能新增节点。");
+    return;
+  }
   closeCanvasActionMenu();
   const menu = $("canvasContextMenu");
   if (!menu) return;
   const point = canvasStagePoint(event.clientX, event.clientY);
   menu.dataset.nodeId = "";
   menu.dataset.edgeId = "";
+  menu.dataset.selectedNodeIds = "";
   menu.dataset.canvasX = String(point.x);
   menu.dataset.canvasY = String(point.y);
   menu.innerHTML = "";
@@ -3211,6 +4381,7 @@ function openCanvasEdgeMenu(event, edgeId) {
   closeCanvasActionMenu();
   menu.dataset.nodeId = "";
   menu.dataset.edgeId = edgeId;
+  menu.dataset.selectedNodeIds = "";
   menu.innerHTML = "";
   const title = document.createElement("div");
   title.className = "canvas-menu-title";
@@ -3248,6 +4419,8 @@ function closeCanvasContextMenu() {
   menu.setAttribute("aria-hidden", "true");
   menu.dataset.edgeId = "";
   menu.dataset.nodeId = "";
+  menu.dataset.selectedNodeIds = "";
+  menu.dataset.canvasItemId = "";
   menu.dataset.canvasX = "";
   menu.dataset.canvasY = "";
   menu.innerHTML = "";
@@ -3266,6 +4439,8 @@ async function handleCanvasMenuAction(event) {
   const menu = event.currentTarget;
   const nodeId = menu.dataset.nodeId;
   const edgeId = menu.dataset.edgeId;
+  const selectedNodeIds = (menu.dataset.selectedNodeIds || "").split(",").filter(Boolean);
+  const canvasItemId = menu.dataset.canvasItemId;
   const action = button.dataset.canvasAction;
   const point = {
     x: Number(menu.dataset.canvasX || 0),
@@ -3276,15 +4451,49 @@ async function handleCanvasMenuAction(event) {
     return;
   }
   closeCanvasMenus();
-  if (edgeId) {
-    await runCanvasEdgeAction(edgeId, action);
+  try {
+    if (canvasItemId) {
+      await runCanvasItemAction(canvasItemId, action);
+      return;
+    }
+    if (edgeId) {
+      await runCanvasEdgeAction(edgeId, action);
+      return;
+    }
+    if (selectedNodeIds.length && action === "delete-selected") {
+      await deleteSelectedCanvasNodes(selectedNodeIds);
+      return;
+    }
+    if (!nodeId && action.startsWith("canvas-add-")) {
+      await addNodeToCanvas(action.replace("canvas-add-", ""), point);
+      return;
+    }
+    await runCanvasNodeAction(nodeId, action);
+  } catch (error) {
+    canvasStatus(error.message || "操作失败，请稍后重试。");
+  }
+}
+
+async function runCanvasItemAction(canvasId, action) {
+  if (action === "rename-canvas") {
+    const item = state.canvases.find((canvas) => canvas.id === canvasId);
+    if (!item) {
+      canvasStatus("画布不存在或已被移动。");
+      return;
+    }
+    const row = document.querySelector(`.session-row[data-canvas-id="${CSS.escape(canvasId)}"]`);
+    if (row) startRenameCanvas(item, row);
     return;
   }
-  if (!nodeId && action.startsWith("canvas-add-")) {
-    await addNodeToCanvas(action.replace("canvas-add-", ""), point);
+  if (action === "archive-canvas") {
+    if (state.currentCanvasId !== canvasId) await loadCanvas(canvasId);
+    await archiveCurrentCanvas(canvasId);
     return;
   }
-  await runCanvasNodeAction(nodeId, action);
+  if (action === "delete-canvas") {
+    if (state.currentCanvasId !== canvasId) await loadCanvas(canvasId);
+    await deleteCurrentCanvas();
+  }
 }
 
 async function runCanvasNodeAction(nodeId, action) {
@@ -3503,7 +4712,7 @@ async function createMergedCanvasNode(nodeIds = [], primaryNodeId = "") {
   canvasStatus("已合并为唯一版本节点");
 }
 
-async function createRevisionCanvasNode(sourceNodeId) {
+async function createRevisionCanvasNode(sourceNodeId, options = {}) {
   if (!state.currentCanvas) return;
   const source = currentCanvasNode(sourceNodeId);
   if (!source || !canvasRevisionNodeTypes.has(source.type)) {
@@ -3527,6 +4736,7 @@ async function createRevisionCanvasNode(sourceNodeId) {
       variantKind: "revision",
       parentNodeId: source.id,
       parentTitleSnapshot: source.title || "",
+      chatPrompt: String(options.initialPrompt || ""),
       chatLocked: false,
       createdAt: new Date().toISOString(),
     },
@@ -3547,7 +4757,10 @@ async function createRevisionCanvasNode(sourceNodeId) {
   state.selectedCanvasNodeId = node.id;
   state.selectedCanvasEdgeId = "";
   renderCanvas();
-  canvasStatus("已创建修改节点，请在下方输入修改要求");
+  if (!options.silentStatus) {
+    canvasStatus("已创建修改节点，请在下方输入修改要求");
+  }
+  return node;
 }
 
 async function submitCanvasRevisionChat(nodeId, prompt) {
@@ -3572,7 +4785,6 @@ async function submitCanvasRevisionChat(nodeId, prompt) {
         canvasId: state.currentCanvasId,
         nodeId,
         prompt: cleanPrompt,
-        scriptGrade: state.scriptGrade,
       }),
     });
     state.currentCanvas = data.canvas;
@@ -3583,7 +4795,7 @@ async function submitCanvasRevisionChat(nodeId, prompt) {
   } catch (error) {
     canvasStatus(error.message);
   } finally {
-    setCanvasBusy(null);
+    clearCanvasBusy(nodeId);
   }
 }
 
@@ -4104,7 +5316,11 @@ async function endCanvasPointer(event) {
     if (ids.length) {
       setCanvasMultiSelection(ids, ids[0]);
       const canGroup = canGroupCanvasNodes(selectedCanvasNodes());
-      canvasStatus(canGroup.ok ? `已框选 ${ids.length} 个节点，可指定唯一版本后合并` : canGroup.reason);
+      if (canGroup.ok) {
+        canvasStatus("", { force: true });
+      } else {
+        canvasStatus(canGroup.reason);
+      }
     } else {
       clearCanvasSelection();
     }
@@ -4126,36 +5342,147 @@ async function endCanvasPointer(event) {
   renderCanvas();
 }
 
-function openCanvasNodeModal(nodeId) {
+function openCanvasNodeModal(nodeId, options = {}) {
   const node = currentCanvasNode(nodeId);
   if (!node) return;
+  const editable = isCanvasNodeContentEditable(node);
   state.activeCanvasNodeId = nodeId;
-  $("canvasNodeTitle").value = node.title || "";
-  $("canvasNodeContent").value = node.content || "";
-  $("generateScriptFromNode").hidden = node.type !== "novel";
-  $("generateStoryboardsFromNode").hidden = node.type !== "script";
+  const titleInput = $("canvasNodeTitle");
+  const contentInput = $("canvasNodeContent");
+  titleInput.value = node.title || "";
+  titleInput.readOnly = !editable;
+  setMarkdownEditorValue(contentInput, node.content || "");
+  contentInput.contentEditable = editable ? "true" : "false";
+  contentInput.dataset.editable = String(editable);
+  renderMarkdownToolbarContent($("canvasNodeMarkdownToolbar"), nodeId);
+  $("canvasNodeMarkdownToolbar").hidden = !editable;
+  $("generateScriptFromNode").hidden = !editable || node.type !== "novel";
+  $("generateStoryboardsFromNode").hidden = !editable || node.type !== "script";
   $("canvasNodeModal").classList.add("open");
   $("canvasNodeModal").setAttribute("aria-hidden", "false");
+  if (options.focusContent && editable) {
+    window.setTimeout(() => {
+      focusMarkdownEditorEnd(contentInput);
+    }, 0);
+  }
 }
 
-function closeCanvasNodeModal() {
+async function closeCanvasNodeModal() {
+  await flushActiveCanvasNodeAutosave({ render: true });
   $("canvasNodeModal").classList.remove("open");
   $("canvasNodeModal").setAttribute("aria-hidden", "true");
 }
 
-async function saveActiveCanvasNode() {
+function applyMarkdownFormat(textarea, options = {}) {
+  if (!textarea || textarea.getAttribute("contenteditable") !== "true") return;
+  applyMarkdownEditorFormat(textarea, options);
+}
+
+function sanitizeMarkdownColor(color) {
+  const value = String(color || "").trim().toLowerCase();
+  if (!/^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/.test(value)) return "";
+  return value;
+}
+
+function expandHexColor(color) {
+  const safeColor = sanitizeMarkdownColor(color);
+  if (!safeColor) return "";
+  if (safeColor.length === 7) return safeColor;
+  return `#${safeColor.slice(1).split("").map((part) => `${part}${part}`).join("")}`;
+}
+
+function hexToRgb(color) {
+  const expanded = expandHexColor(color);
+  if (!expanded) return null;
+  return {
+    r: Number.parseInt(expanded.slice(1, 3), 16),
+    g: Number.parseInt(expanded.slice(3, 5), 16),
+    b: Number.parseInt(expanded.slice(5, 7), 16),
+  };
+}
+
+function relativeLuminance(rgb) {
+  if (!rgb) return 0;
+  const channel = (value) => {
+    const normalized = value / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+}
+
+function colorContrastRatio(colorA, colorB) {
+  const luminanceA = relativeLuminance(hexToRgb(colorA));
+  const luminanceB = relativeLuminance(hexToRgb(colorB));
+  const lighter = Math.max(luminanceA, luminanceB);
+  const darker = Math.min(luminanceA, luminanceB);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function readableTextColorForBackground(backgroundColor) {
+  const safeColor = sanitizeMarkdownColor(backgroundColor);
+  if (!safeColor) return "";
+  const darkText = "#171615";
+  const lightText = "#fffaf2";
+  return colorContrastRatio(safeColor, lightText) >= colorContrastRatio(safeColor, darkText)
+    ? lightText
+    : darkText;
+}
+
+function applyActiveCanvasNodeEditorDraft() {
   const nodeId = state.activeCanvasNodeId;
-  if (!nodeId || !state.currentCanvas) return;
+  if (!nodeId || !state.currentCanvas) return false;
+  const activeNode = currentCanvasNode(nodeId);
+  if (!isCanvasNodeContentEditable(activeNode)) {
+    return false;
+  }
   const nextTitle = $("canvasNodeTitle").value.trim();
-  if (nextTitle && hasCanvasNodeTitleConflict(nextTitle, nodeId)) {
+  const hasTitleConflict = nextTitle && hasCanvasNodeTitleConflict(nextTitle, nodeId);
+  if (hasTitleConflict) {
     canvasStatus("节点名称已存在，请换一个名称");
-    return;
   }
   state.currentCanvas.nodes = state.currentCanvas.nodes.map((node) => node.id === nodeId
-    ? { ...node, title: nextTitle || node.title, content: $("canvasNodeContent").value }
+    ? {
+        ...node,
+        title: nextTitle && !hasTitleConflict ? nextTitle : node.title,
+        content: markdownEditorValue($("canvasNodeContent")),
+      }
     : node);
-  await saveCurrentCanvas();
-  renderCanvas();
+  return true;
+}
+
+function scheduleActiveCanvasNodeAutosave() {
+  if (!applyActiveCanvasNodeEditorDraft()) return;
+  if (state.canvasNodeAutosaveTimer) {
+    window.clearTimeout(state.canvasNodeAutosaveTimer);
+  }
+  state.canvasNodeAutosaveTimer = window.setTimeout(async () => {
+    state.canvasNodeAutosaveTimer = null;
+    try {
+      await saveCurrentCanvas();
+    } catch (error) {
+      canvasStatus(error.message);
+    }
+  }, canvasNodeAutosaveDelayMs);
+}
+
+async function flushActiveCanvasNodeAutosave(options = {}) {
+  if (state.canvasNodeAutosaveTimer) {
+    window.clearTimeout(state.canvasNodeAutosaveTimer);
+    state.canvasNodeAutosaveTimer = null;
+  }
+  if (!applyActiveCanvasNodeEditorDraft()) return;
+  try {
+    await saveCurrentCanvas();
+    if (options.render) renderCanvas();
+  } catch (error) {
+    canvasStatus(error.message);
+  }
+}
+
+async function saveActiveCanvasNode() {
+  await flushActiveCanvasNodeAutosave({ render: true });
 }
 
 async function deleteCanvasNode(nodeId) {
@@ -4178,13 +5505,39 @@ async function deleteCanvasNode(nodeId) {
   renderCanvas();
 }
 
+async function deleteSelectedCanvasNodes(nodeIds = []) {
+  if (!state.currentCanvas || canvasIsArchived()) return;
+  const ids = new Set(nodeIds.filter((id) => currentCanvasNode(id)));
+  if (!ids.size) return;
+  const connectedCount = (state.currentCanvas.edges || []).filter((edge) => ids.has(edge.from) || ids.has(edge.to)).length;
+  const confirmed = await requestCanvasDeleteConfirm({
+    title: "删除选中节点？",
+    message: connectedCount > 0
+      ? `删除后，${ids.size} 个节点和 ${connectedCount} 条关联连线会一起移除。`
+      : `删除后，${ids.size} 个节点会从画布中移除。`,
+    detail: "已框选的节点",
+    confirmText: "删除选中节点",
+  });
+  if (!confirmed) return;
+  state.currentCanvas.nodes = (state.currentCanvas.nodes || []).filter((node) => !ids.has(node.id));
+  state.currentCanvas.edges = (state.currentCanvas.edges || []).filter((edge) => !ids.has(edge.from) && !ids.has(edge.to));
+  state.selectedCanvasNodeId = "";
+  state.selectedCanvasNodeIds = new Set();
+  state.selectedCanvasEdgeId = "";
+  state.canvasGroupPrimaryNodeId = "";
+  await saveCurrentCanvas();
+  renderCanvas();
+  canvasStatus(`已删除 ${ids.size} 个选中节点`);
+}
+
 async function generateScriptFromNode(nodeId = state.activeCanvasNodeId) {
-  if (nodeId === state.activeCanvasNodeId) await saveActiveCanvasNode();
+  if (nodeId === state.activeCanvasNodeId) await flushActiveCanvasNodeAutosave();
   canvasStatus("正在从小说节点生成剧本...");
+  setCanvasBusy(nodeId, "剧本生成中");
   try {
     const data = await api("/api/canvas/generate-script", {
       method: "POST",
-      body: JSON.stringify({ canvasId: state.currentCanvasId, nodeId, scriptGrade: state.scriptGrade }),
+      body: JSON.stringify({ canvasId: state.currentCanvasId, nodeId }),
     });
     state.currentCanvas = data.canvas;
     closeCanvasNodeModal();
@@ -4192,12 +5545,15 @@ async function generateScriptFromNode(nodeId = state.activeCanvasNodeId) {
     canvasStatus("剧本节点已生成");
   } catch (error) {
     canvasStatus(error.message);
+  } finally {
+    clearCanvasBusy(nodeId);
   }
 }
 
 async function planStoryboardsFromNode(nodeId = state.activeCanvasNodeId) {
-  if (nodeId === state.activeCanvasNodeId) await saveActiveCanvasNode();
+  if (nodeId === state.activeCanvasNodeId) await flushActiveCanvasNodeAutosave();
   canvasStatus("正在识别剧本分集...");
+  setCanvasBusy(nodeId, "分集识别中");
   try {
     const data = await api("/api/canvas/plan-storyboards", {
       method: "POST",
@@ -4207,6 +5563,8 @@ async function planStoryboardsFromNode(nodeId = state.activeCanvasNodeId) {
     renderEpisodeConfirm(data.episodes || []);
   } catch (error) {
     canvasStatus(error.message);
+  } finally {
+    clearCanvasBusy(nodeId);
   }
 }
 
@@ -4230,7 +5588,6 @@ async function generateAllStoryboardsFromNode(nodeId) {
         canvasId: state.currentCanvasId,
         nodeId: plan.scriptNodeId || nodeId,
         episodes,
-        scriptGrade: state.scriptGrade,
       }),
     });
     state.currentCanvas = data.canvas;
@@ -4292,7 +5649,6 @@ async function generateConfirmedStoryboards() {
         canvasId: state.currentCanvasId,
         nodeId: sourceNodeId,
         episodes: selected,
-        scriptGrade: state.scriptGrade,
       }),
     });
     state.currentCanvas = data.canvas;
@@ -4589,6 +5945,10 @@ async function submitArchiveLearning() {
 }
 
 function openSettings(tab = "deepseek") {
+  if (tab === "learning") {
+    openLearningPage();
+    return;
+  }
   $("settings").classList.add("open");
   $("settings").setAttribute("aria-hidden", "false");
   switchSettingsTab(tab);
@@ -4600,6 +5960,7 @@ function closeSettings() {
 }
 
 function openTrash() {
+  state.trashMode = currentTrashMode();
   $("trash").classList.add("open");
   $("trash").setAttribute("aria-hidden", "false");
   renderTrashPanel();
@@ -4610,8 +5971,46 @@ function closeTrash() {
   $("trash").setAttribute("aria-hidden", "true");
 }
 
+function openLearningLibrary() {
+  openLearningPage();
+}
+
+function openLearningPage() {
+  closeSettings();
+  $("learningPage").classList.add("open");
+  $("learningPage").setAttribute("aria-hidden", "false");
+  loadLearningPanel();
+}
+
+function closeLearningPage() {
+  $("learningPage").classList.remove("open");
+  $("learningPage").setAttribute("aria-hidden", "true");
+}
+
+function openCanvasArchivePage() {
+  closeSettings();
+  closeLearningPage();
+  closeWorkbench();
+  $("canvasArchivePage").classList.add("open");
+  $("canvasArchivePage").setAttribute("aria-hidden", "false");
+  loadCanvasArchiveItems();
+}
+
+function closeCanvasArchivePage() {
+  $("canvasArchivePage").classList.remove("open");
+  $("canvasArchivePage").setAttribute("aria-hidden", "true");
+}
+
+function openArchiveView() {
+  openCanvasArchivePage();
+}
+
 function switchSettingsTab(tab) {
-  const target = tab === "learning" ? "learning" : "deepseek";
+  if (tab === "learning") {
+    openLearningPage();
+    return;
+  }
+  const target = "deepseek";
   document.querySelectorAll("[data-settings-tab]").forEach((button) => {
     const active = button.dataset.settingsTab === target;
     button.classList.toggle("active", active);
@@ -4622,12 +6021,7 @@ function switchSettingsTab(tab) {
     panel.classList.toggle("active", active);
     panel.hidden = !active;
   });
-  if (target === "learning") {
-    loadLearningPanel();
-  }
-  if (target === "deepseek") {
-    loadConfig();
-  }
+  loadConfig();
 }
 
 async function loadConfig() {
@@ -4685,48 +6079,307 @@ function applyAppName(appName) {
 }
 
 async function loadLearningPanel() {
-  const statusBox = $("learningStatus");
-  const list = $("completenessList");
-  if (!statusBox || !list) return;
+  await loadLearningLibrary();
+}
+
+async function loadLearningLibrary() {
+  const records = $("learningLibraryRecords");
+  if (!records) return;
   try {
-    const [status, completeness] = await Promise.all([
-      api("/api/learning-status"),
-      api("/api/product-completeness"),
-    ]);
-    statusBox.textContent = `runs ${status.runs}｜对话学习 ${status.conversationRecords}｜快照 ${status.snapshots}｜进化草案 ${status.skillEvolutionReports}`;
-    list.innerHTML = "";
-    for (const item of completeness.milestones || []) {
-      const row = document.createElement("div");
-      row.className = "completeness-item";
-      const title = document.createElement("div");
-      title.className = "completeness-title";
-      title.textContent = `${item.milestone} ${item.name}`;
-      const state = document.createElement("div");
-      state.className = "completeness-state";
-      state.textContent = item.webStatus || "";
-      row.append(title, state);
-      list.appendChild(row);
-    }
+    state.learningLibrary = await api("/api/learning-library");
+    renderLearningLibrary();
   } catch (error) {
-    statusBox.textContent = error.message;
+    const status = $("learningStatus");
+    if (status) status.textContent = `学习资料读取失败：${error.message}`;
+    records.innerHTML = `<div class="learning-library-empty">${escapeHtml(error.message)}</div>`;
   }
 }
 
-async function refreshLearningCycle() {
-  const statusBox = $("learningStatus");
-  if (statusBox) statusBox.textContent = "刷新中...";
-  try {
-    const data = await api("/api/learning-cycle", {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-    if (statusBox) {
-      statusBox.textContent = `候选 ${data.ConversationCandidateCount ?? data.conversationCandidateCount ?? "-"}｜回归 ${data.RegressionTaskCount ?? data.regressionTaskCount ?? "-"}｜记录 ${data.ConversationRecordCount ?? data.conversationRecordCount ?? "-"}`;
-    }
-    await loadLearningPanel();
-  } catch (error) {
-    if (statusBox) statusBox.textContent = error.message;
+function renderLearningLibrary() {
+  const data = state.learningLibrary || { records: [], currentRules: [], skills: [] };
+  renderLearningTabCounts(data);
+  document.querySelectorAll("[data-learning-library-tab]").forEach((button) => {
+    const active = button.dataset.learningLibraryTab === state.learningLibraryTab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll("[data-learning-library-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.learningLibraryPanel !== state.learningLibraryTab;
+  });
+  renderLearningLibraryList("learningLibraryRecords", data.records || [], renderLearningRecordItem, "暂无学习记录");
+  renderLearningLibraryList("learningLibraryRules", data.currentRules || [], renderCurrentRuleItem, "暂无当前规则");
+  renderLearningLibraryList("learningLibrarySkills", data.skills || [], renderSkillLibraryItem, "暂无技能");
+}
+
+function renderLearningTabCounts(data) {
+  const records = data.records || [];
+  const rules = data.currentRules || [];
+  const skillCount = data.skills?.length || 0;
+  const activeRuleCount = rules.filter((rule) => !rule.coveredByRuleId && rule.status !== "covered").length;
+  const unviewedFailures = records.filter((record) => (
+    isFailedLearningRecord(record) && !state.viewedLearningFailureIds.has(learningRecordKey(record))
+  ));
+  setTextIfPresent("learningRecordsTabCount", String(records.length));
+  setTextIfPresent("learningRulesTabCount", String(activeRuleCount));
+  setTextIfPresent("learningSkillsTabCount", String(skillCount));
+  setTextIfPresent("learningFailureTabCount", String(unviewedFailures.length));
+
+  const failureJump = $("learningFailureJump");
+  if (failureJump) {
+    failureJump.hidden = unviewedFailures.length === 0;
+    failureJump.title = unviewedFailures.length
+      ? `还有 ${unviewedFailures.length} 条失败学习记录未查看`
+      : "暂无未查看失败记录";
   }
+
+  const status = $("learningStatus");
+  if (!status) return;
+  if (!records.length && !rules.length) {
+    status.textContent = "还没有沉淀学习记录。后续在对话、样例学习或画布归档中产生的结果会出现在这里。";
+    status.hidden = false;
+    return;
+  }
+  status.hidden = true;
+}
+
+function renderLearningLibraryList(id, items, renderer, emptyText) {
+  const node = $(id);
+  if (!node) return;
+  node.innerHTML = "";
+  if (!items.length) {
+    node.innerHTML = `<div class="learning-library-empty">${escapeHtml(emptyText)}</div>`;
+    return;
+  }
+  for (const item of items) {
+    node.appendChild(renderer(item));
+  }
+}
+
+function renderLearningRecordItem(record) {
+  const item = document.createElement("article");
+  const key = learningRecordKey(record);
+  const failed = isFailedLearningRecord(record);
+  item.className = `learning-library-item status-${safeClassName(record.status)}`;
+  item.dataset.learningRecordKey = key;
+  item.classList.toggle("failed", failed);
+  item.classList.toggle("failure-viewed", failed && state.viewedLearningFailureIds.has(key));
+  const error = record.error?.message
+    ? `<p class="learning-library-error">失败原因：${escapeHtml(record.error.message)}</p>`
+    : "";
+  const covered = record.coveredByEventId ? `<p>已被后续学习覆盖：${escapeHtml(record.coveredByEventId)}</p>` : "";
+  const localRecord = record.learningRecord ? `<p>本地记录：${escapeHtml(record.learningRecord)}</p>` : "";
+  item.innerHTML = `
+    <div class="learning-library-item-head">
+      <strong>${escapeHtml(record.summary || record.rawTrigger || record.topicKey || "学习事件")}</strong>
+      <span>${escapeHtml(formatLearningStatus(record.status))}</span>
+    </div>
+    <p>${escapeHtml(formatLearningSource(record.sourceType))} · ${escapeHtml(formatLearningTopic(record.topicKey))} · ${escapeHtml(formatDateTime(record.updatedAt || record.createdAt))}</p>
+    <p>${escapeHtml(formatLearningTokenUsage(record.tokenUsage))}</p>
+    ${localRecord}
+    ${error}
+    ${covered}
+  `;
+  return item;
+}
+
+function learningRecordKey(record) {
+  return String(record?.eventId || record?.ruleId || [
+    record?.summary,
+    record?.rawTrigger,
+    record?.topicKey,
+    record?.createdAt,
+  ].filter(Boolean).join("|") || "learning-record");
+}
+
+function isFailedLearningRecord(record) {
+  const status = String(record?.status || "").trim().toLowerCase();
+  return Boolean(record?.error) || status === "失败" || status.includes("failed");
+}
+
+function jumpToNextLearningFailure() {
+  const records = state.learningLibrary?.records || [];
+  const failures = records.filter((record) => (
+    isFailedLearningRecord(record) && !state.viewedLearningFailureIds.has(learningRecordKey(record))
+  ));
+  if (!failures.length) {
+    renderLearningTabCounts(state.learningLibrary || {});
+    return;
+  }
+  const record = failures[state.learningFailureCursor % failures.length] || failures[0];
+  const key = learningRecordKey(record);
+  state.viewedLearningFailureIds.add(key);
+  state.learningFailureCursor += 1;
+  state.learningLibraryTab = "records";
+  renderLearningLibrary();
+  window.requestAnimationFrame(() => {
+    const target = Array.from(document.querySelectorAll("#learningLibraryRecords .learning-library-item"))
+      .find((item) => item.dataset.learningRecordKey === key);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.classList.add("focus");
+    window.setTimeout(() => target.classList.remove("focus"), 1600);
+  });
+}
+
+function renderCurrentRuleItem(rule) {
+  const item = document.createElement("article");
+  item.className = `learning-library-item status-${safeClassName(rule.status)}`;
+  const canToggle = ["active", "disabled"].includes(rule.status) && !rule.coveredByRuleId;
+  const nextStatus = rule.status === "active" ? "disabled" : "active";
+  const actionLabel = rule.status === "active" ? "停用" : "启用";
+  item.innerHTML = `
+    <div class="learning-library-item-head">
+      <strong>${escapeHtml(rule.content || rule.topicKey || "规则")}</strong>
+      <span>${escapeHtml(formatCurrentRuleStatus(rule.status))}</span>
+    </div>
+    <p>适用：${escapeHtml(formatLearningCapability(rule.capability))} · ${escapeHtml(formatLearningTopic(rule.topicKey))} · 更新时间 ${escapeHtml(formatDateTime(rule.updatedAt || rule.createdAt))}</p>
+    ${canToggle ? `
+      <div class="learning-rule-actions">
+        <button type="button" data-rule-status-action data-rule-id="${escapeHtml(rule.ruleId)}" data-next-status="${nextStatus}">
+          ${actionLabel}
+        </button>
+      </div>
+    ` : ""}
+  `;
+  const action = item.querySelector("[data-rule-status-action]");
+  if (action) {
+    action.addEventListener("click", () => setCurrentRuleStatus(rule.ruleId, nextStatus));
+  }
+  return item;
+}
+
+async function setCurrentRuleStatus(ruleId, status) {
+  const statusNode = $("learningStatus");
+  if (statusNode) {
+    statusNode.hidden = false;
+    statusNode.textContent = status === "disabled" ? "正在停用当前规则..." : "正在启用当前规则...";
+  }
+  try {
+    const result = await api("/api/learning-rules/status", {
+      method: "POST",
+      body: JSON.stringify({ ruleId, status }),
+    });
+    if (result.library) {
+      state.learningLibrary = result.library;
+      renderLearningLibrary();
+    } else {
+      await loadLearningLibrary();
+    }
+    if (statusNode) {
+      statusNode.hidden = false;
+      statusNode.textContent = status === "disabled" ? "当前规则已停用。" : "当前规则已启用。";
+    }
+  } catch (error) {
+    if (statusNode) {
+      statusNode.hidden = false;
+      statusNode.textContent = `当前规则状态更新失败：${error.message}`;
+    }
+  }
+}
+
+function renderSkillLibraryItem(skill) {
+  const item = document.createElement("article");
+  item.className = `learning-library-item${skill.exists ? "" : " missing"}`;
+  const description = skill.description || "暂无技能摘要。";
+  const instructions = skill.instructions || "未读取到技能说明。";
+  const hints = Array.isArray(skill.keywordHints) && skill.keywordHints.length
+    ? `<p>常见触发：${escapeHtml(skill.keywordHints.slice(0, 8).join("、"))}</p>`
+    : "";
+  item.innerHTML = `
+    <div class="learning-library-item-head">
+      <strong>${escapeHtml(skill.name || skill.id)}</strong>
+      <span>${skill.exists ? "可用" : "未安装"}</span>
+    </div>
+    <p>${escapeHtml(description)}</p>
+    <p>${escapeHtml(formatSkillCategory(skill.category))} · ${escapeHtml(skill.path || "")}</p>
+    ${hints}
+    <details class="learning-skill-detail">
+      <summary>查看技能详细说明</summary>
+      <pre>${escapeHtml(instructions)}</pre>
+    </details>
+  `;
+  return item;
+}
+
+function formatLearningTokenUsage(usage) {
+  if (!usage) return "学习 token：0";
+  return `学习 token：${Number(usage.total_tokens || 0)}`;
+}
+
+function setTextIfPresent(id, value) {
+  const node = $(id);
+  if (node) node.textContent = value;
+}
+
+function formatLearningStatus(status) {
+  const value = String(status || "").trim();
+  const labels = {
+    active: "已生效",
+    disabled: "已停用",
+    covered: "已被覆盖",
+    queued: "处理中",
+    failed_retrying: "处理中",
+  };
+  return labels[value] || value || "处理中";
+}
+
+function formatCurrentRuleStatus(status) {
+  const value = String(status || "").trim();
+  const labels = {
+    active: "已启用",
+    disabled: "已停用",
+    covered: "已被覆盖",
+  };
+  return labels[value] || formatLearningStatus(value);
+}
+
+function formatLearningSource(sourceType) {
+  const labels = {
+    conversation: "对话学习",
+    canvas_archive: "画布归档",
+    sample: "样例学习",
+    manual: "手动记录",
+  };
+  return labels[sourceType] || "系统学习";
+}
+
+function formatLearningTopic(topicKey) {
+  const labels = {
+    "storyboard.dialogue.length": "分镜台词长度",
+    "storyboard.structure": "分镜结构",
+    "script.format": "剧本格式",
+    "script.style": "剧本写法",
+    "general": "通用规则",
+  };
+  if (!topicKey) return "通用规则";
+  return labels[topicKey] || String(topicKey).split(".").filter(Boolean).join(" / ");
+}
+
+function formatLearningCapability(capability) {
+  const labels = {
+    storyboard: "分镜生成",
+    script: "剧本生成",
+    review: "评审分析",
+    general: "通用能力",
+  };
+  return labels[capability] || "通用能力";
+}
+
+function formatSkillCategory(category) {
+  const labels = {
+    "skills/00-orchestrator": "任务路由",
+    "skills/01-input-analysis": "资料理解",
+    "skills/02-script": "剧本能力",
+    "skills/03-storyboard": "分镜能力",
+    "skills/04-learning": "学习能力",
+    "skills/05-evolution": "技能进化",
+  };
+  if (!category) return "技能";
+  return labels[category] || String(category).replace(/^skills\//, "技能 / ");
+}
+
+function safeClassName(value) {
+  return String(value || "unknown").replace(/[^\w-]+/g, "-");
 }
 
 function updateApiKeyBadge(saved) {
@@ -4894,10 +6547,17 @@ function bindEvents() {
   window.addEventListener("pointermove", updateSidebarResize);
   window.addEventListener("pointerup", endCanvasPointer);
   window.addEventListener("pointerup", endSidebarResize);
-  $("saveCanvasNode").addEventListener("click", saveActiveCanvasNode);
+  $("canvasNodeTitle").addEventListener("input", scheduleActiveCanvasNodeAutosave);
+  $("canvasNodeContent").addEventListener("input", scheduleActiveCanvasNodeAutosave);
+  renderMarkdownToolbarContent($("canvasNodeMarkdownToolbar"));
   $("closeCanvasNode").addEventListener("click", closeCanvasNodeModal);
   $("canvasNodeModal").addEventListener("click", (event) => {
     if (event.target === $("canvasNodeModal")) closeCanvasNodeModal();
+  });
+  $("canvasNodeMarkdownToolbar").addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    handleMarkdownToolbarButton(button, $("canvasNodeContent"), state.activeCanvasNodeId);
   });
   $("generateScriptFromNode").addEventListener("click", () => generateScriptFromNode());
   $("generateStoryboardsFromNode").addEventListener("click", () => planStoryboardsFromNode());
@@ -4934,10 +6594,25 @@ function bindEvents() {
   $("canvasStage").addEventListener("scroll", updateCanvasViewportTools);
   $("toggleCanvasMiniMap").addEventListener("click", toggleCanvasMiniMap);
   $("canvasMiniMapSvg").addEventListener("pointerdown", beginCanvasMiniMapDrag);
+  $("undoCanvasEdit").addEventListener("click", undoCanvasEdit);
+  $("redoCanvasEdit").addEventListener("click", redoCanvasEdit);
   $("fitCanvasView").addEventListener("click", fitCanvasToContent);
   $("centerSelectedCanvasNode").addEventListener("click", () => centerCanvasOnNode());
   $("canvasZoomOut").addEventListener("click", () => setCanvasZoom(canvasZoom() - canvasZoomStep));
   $("canvasZoomIn").addEventListener("click", () => setCanvasZoom(canvasZoom() + canvasZoomStep));
+  $("archiveCurrentCanvas").addEventListener("click", () => archiveCurrentCanvas());
+  $("deleteCurrentCanvas").addEventListener("click", deleteCurrentCanvas);
+  $("closeStoryboardIssue").addEventListener("click", closeStoryboardIssueDetail);
+  $("autoFixStoryboardIssues").addEventListener("click", autoFixStoryboardIssues);
+  $("acknowledgeStoryboardIssues").addEventListener("click", () => resolveStoryboardIssues("acknowledge"));
+  $("adoptStoryboardIssues").addEventListener("click", () => resolveStoryboardIssues("adopt"));
+  $("storyboardIssueModal").addEventListener("click", (event) => {
+    if (event.target === $("storyboardIssueModal")) closeStoryboardIssueDetail();
+  });
+  $("closeCanvasArchiveBlocked").addEventListener("click", closeCanvasArchiveBlockedModal);
+  $("canvasArchiveBlockedModal").addEventListener("click", (event) => {
+    if (event.target === $("canvasArchiveBlockedModal")) closeCanvasArchiveBlockedModal();
+  });
   window.addEventListener("pointermove", updateCanvasMiniMapDrag);
   window.addEventListener("pointerup", endCanvasMiniMapDrag);
   window.addEventListener("pointercancel", endCanvasMiniMapDrag);
@@ -4971,6 +6646,16 @@ function bindEvents() {
   });
   $("openSettings").addEventListener("click", () => openSettings("deepseek"));
   $("openTrash").addEventListener("click", openTrash);
+  $("openArchiveView").addEventListener("click", openArchiveView);
+  $("closeCanvasArchivePage").addEventListener("click", closeCanvasArchivePage);
+  $("canvasArchivePage").addEventListener("click", (event) => {
+    if (event.target === $("canvasArchivePage")) closeCanvasArchivePage();
+  });
+  $("openLearningLibrary").addEventListener("click", openLearningLibrary);
+  $("closeLearningPage").addEventListener("click", closeLearningPage);
+  $("learningPage").addEventListener("click", (event) => {
+    if (event.target === $("learningPage")) closeLearningPage();
+  });
   $("closeTrash").addEventListener("click", closeTrash);
   $("trash").addEventListener("click", (event) => {
     if (event.target === $("trash")) closeTrash();
@@ -4978,16 +6663,19 @@ function bindEvents() {
   $("closeSettings").addEventListener("click", closeSettings);
   $("saveConfig").addEventListener("click", saveConfig);
   $("testApi").addEventListener("click", testApi);
-  $("refreshLearning").addEventListener("click", refreshLearningCycle);
   document.querySelectorAll("[data-compose-mode]").forEach((button) => {
     button.addEventListener("click", () => setComposeMode(button.dataset.composeMode));
-  });
-  document.querySelectorAll("[data-script-grade]").forEach((button) => {
-    button.addEventListener("click", () => setScriptGrade(button.dataset.scriptGrade));
   });
   document.querySelectorAll("[data-settings-tab]").forEach((button) => {
     button.addEventListener("click", () => switchSettingsTab(button.dataset.settingsTab));
   });
+  document.querySelectorAll("[data-learning-library-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.learningLibraryTab = button.dataset.learningLibraryTab || "records";
+      renderLearningLibrary();
+    });
+  });
+  $("learningFailureJump").addEventListener("click", jumpToNextLearningFailure);
   $("configApiKey").addEventListener("pointerdown", prepareApiKeyEdit);
   $("configApiKey").addEventListener("focus", prepareApiKeyEdit);
   $("configApiKey").addEventListener("keydown", prepareApiKeyEdit);
@@ -5030,18 +6718,37 @@ function bindEvents() {
     }
   });
   document.addEventListener("click", (event) => {
+    maybeStopCanvasBodyEditFromEvent(event);
     if (!$("contextMenu").contains(event.target)) closeContextMenu();
     if (!$("canvasActionMenu").contains(event.target) && !(event.target.closest && event.target.closest(".canvas-node-plus"))) closeCanvasActionMenu();
     if (!$("canvasContextMenu").contains(event.target)) closeCanvasContextMenu();
   });
   document.addEventListener("keydown", (event) => {
+    if (state.appMode === "canvas" && !isCanvasHistoryShortcutTarget(event.target)) {
+      const key = String(event.key || "").toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && key === "z") {
+        event.preventDefault();
+        undoCanvasEdit();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && (key === "y" || (event.shiftKey && key === "z"))) {
+        event.preventDefault();
+        redoCanvasEdit();
+        return;
+      }
+    }
     if (event.key === "Escape") {
       closeContextMenu();
       closeCanvasMenus();
+      stopCanvasNodeBodyEdit({ render: true });
+      closeLearningPage();
+      closeCanvasArchivePage();
       closeTrash();
       closeWorkbench();
       closeConversationSearch();
       closeNewConversationModal();
+      closeStoryboardIssueDetail();
+      closeCanvasArchiveBlockedModal();
       closeCanvasDeleteConfirm(false);
     }
   });
@@ -5071,7 +6778,6 @@ async function init() {
   bindEvents();
   setAppMode(state.appMode);
   setComposeMode("");
-  setScriptGrade("B");
   autoGrowTextarea();
   updateSendState();
   initSidebarCat();
