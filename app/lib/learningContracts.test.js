@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { normalizeLearningEvent } = require("./learningContracts");
+const { normalizeLearningEvent, validateGenerationProofCombination } = require("./learningContracts");
 
 test("normalizeLearningEvent keeps required locator keys even when values are empty", () => {
   const event = normalizeLearningEvent({
@@ -61,4 +61,64 @@ test("normalizeLearningEvent maps legacy status values into internal and job sta
   const covered = normalizeLearningEvent({ eventId: "event-covered", status: "已被覆盖" });
   assert.equal(covered.internalStatus, "covered");
   assert.equal(covered.jobStatus, "completed");
+});
+
+test("validateGenerationProofCombination accepts valid proof and display status pairs", () => {
+  assert.doesNotThrow(() => validateGenerationProofCombination({
+    displayStatus: "已保存",
+    affectsGeneration: false,
+    proofStatus: "not_applicable",
+    claimText: "这个学习只保存为资料，不直接影响生成。",
+  }));
+  assert.doesNotThrow(() => validateGenerationProofCombination({
+    displayStatus: "已影响生成",
+    affectsGeneration: true,
+    proofStatus: "pending_first_hit",
+    claimText: "规则已进入当前规则层，等待下一次生成命中验证。",
+  }));
+  assert.doesNotThrow(() => validateGenerationProofCombination({
+    displayStatus: "已影响生成",
+    affectsGeneration: true,
+    proofStatus: "unknown",
+    claimText: "当前仍会影响生成，证据不完整需排查。",
+  }));
+});
+
+test("validateGenerationProofCombination rejects misleading proof combinations", () => {
+  assert.throws(
+    () => validateGenerationProofCombination({
+      displayStatus: "已影响生成",
+      affectsGeneration: true,
+      proofStatus: "not_applicable",
+      claimText: "不适用",
+    }),
+    /not_applicable/,
+  );
+  assert.throws(
+    () => validateGenerationProofCombination({
+      displayStatus: "已保存",
+      affectsGeneration: false,
+      proofStatus: "participated",
+      claimText: "已参与生成",
+    }),
+    /已影响生成/,
+  );
+  assert.throws(
+    () => validateGenerationProofCombination({
+      displayStatus: "已影响生成",
+      affectsGeneration: true,
+      proofStatus: "failed",
+      claimText: "失败",
+    }),
+    /failed/,
+  );
+  assert.throws(
+    () => validateGenerationProofCombination({
+      displayStatus: "已影响生成",
+      affectsGeneration: true,
+      proofStatus: "unknown",
+      claimText: "证据未知",
+    }),
+    /证据不完整/,
+  );
 });

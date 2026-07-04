@@ -91,11 +91,15 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   assert.strictEqual(library.records.length, 1);
   assert.ok(library.records.some((record) => record.eventId === "event-1"));
   const eventRecord = library.records.find((record) => record.eventId === "event-1");
-  assert.strictEqual(eventRecord.status, "已生效");
-  assert.strictEqual(eventRecord.internalStatus, "landed");
-  assert.strictEqual(eventRecord.jobStatus, "completed");
-  assert.strictEqual(eventRecord.learningMode, "overall");
-  assert.strictEqual(eventRecord.landingType, "current-rule");
+  assert.strictEqual(eventRecord.displayStatus, "已影响生成");
+  assert.strictEqual(eventRecord.status, "已影响生成");
+  assert.strictEqual(eventRecord.actionLabel, "不用管");
+  assert.strictEqual(eventRecord.affectsGeneration, true);
+  assert.strictEqual(eventRecord.generationProof.proofStatus, "pending_first_hit");
+  assert.strictEqual(eventRecord.advanced.internalStatus, "landed");
+  assert.strictEqual(eventRecord.advanced.jobStatus, "completed");
+  assert.strictEqual(eventRecord.advanced.learningMode, "overall");
+  assert.strictEqual(eventRecord.advanced.landingType, "current-rule");
   assert.ok(!library.records.some((record) => record.sourceType === "conversation_record"));
   assert.strictEqual(library.currentRules[0].topicKey, "storyboard.dialogue.length");
   assert.strictEqual(library.currentRules[0].status, "disabled");
@@ -111,7 +115,7 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   assert.ok(library.skills.every((skill) => skill.readonly === true));
 });
 
-test("buildLearningLibrary preserves legacy display statuses after event normalization", async () => {
+test("buildLearningLibrary maps normalized legacy events into D2 display statuses", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-legacy-"));
   const learningDir = path.join(root, "learning");
   await fsp.mkdir(learningDir, { recursive: true });
@@ -140,10 +144,13 @@ test("buildLearningLibrary preserves legacy display statuses after event normali
   const waiting = library.records.find((record) => record.eventId === "event-waiting");
   const validated = library.records.find((record) => record.eventId === "event-validated");
 
-  assert.strictEqual(waiting.internalStatus, "received");
-  assert.strictEqual(waiting.jobStatus, "waiting");
+  assert.strictEqual(waiting.advanced.internalStatus, "received");
+  assert.strictEqual(waiting.advanced.jobStatus, "waiting");
+  assert.strictEqual(waiting.displayStatus, "待确认");
   assert.strictEqual(waiting.status, "待确认");
-  assert.strictEqual(validated.internalStatus, "validated");
-  assert.strictEqual(validated.jobStatus, "completed");
+  assert.strictEqual(validated.advanced.internalStatus, "validated");
+  assert.strictEqual(validated.advanced.jobStatus, "completed");
+  assert.strictEqual(validated.displayStatus, "已影响生成");
   assert.strictEqual(validated.status, "已影响生成");
+  assert.strictEqual(validated.affectsGeneration, true);
 });

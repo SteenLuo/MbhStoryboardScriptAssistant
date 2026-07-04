@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const { listLearningEvents, readCurrentRuleset } = require("./autonomousLearning");
+const { mapLearningDisplayRecord } = require("./learningStatusMapper");
 const { FALLBACK_ROUTE, SKILL_ROUTES } = require("./localSkills");
 
 async function buildLearningLibrary(root) {
@@ -18,41 +19,22 @@ async function buildLearningLibrary(root) {
 }
 
 function publicLearningRecord(event) {
+  const displayRecord = mapLearningDisplayRecord(event);
   return {
-    eventId: event.eventId,
-    topicKey: event.topicKey,
-    sourceType: event.sourceType,
-    projectId: event.projectId,
-    canvasId: event.canvasId,
-    conversationId: event.conversationId,
-    status: legacyDisplayStatusForEvent(event),
-    internalStatus: event.internalStatus,
-    jobStatus: event.jobStatus,
-    learningMode: event.learningMode,
-    landingType: event.landingType,
+    ...displayRecord,
+    eventId: displayRecord.recordId,
+    status: displayRecord.displayStatus,
     summary: event.summary,
     rawTrigger: event.rawTrigger,
-    capability: event.capability,
-    tokenUsage: event.tokenUsage,
-    ruleId: event.ruleId,
-    coveredByEventId: event.coveredByEventId,
-    error: event.error,
     createdAt: event.createdAt,
     updatedAt: event.updatedAt,
+    ruleId: event.ruleId,
+    coveredByEventId: event.coveredByEventId,
+    error: displayRecord.displayStatus === "失败" ? event.error : null,
+    sourceType: event.sourceType,
+    topicKey: event.topicKey,
+    tokenUsage: event.tokenUsage,
   };
-}
-
-function legacyDisplayStatusForEvent(event = {}) {
-  const legacyStatus = String(event.status || "").trim();
-  if (legacyStatus) return legacyStatus;
-  if (event.internalStatus === "failed" || event.jobStatus === "failed") return "失败";
-  if (event.internalStatus === "covered") return "已被覆盖";
-  if (event.internalStatus === "landed" && event.landingType === "current-rule") return "已生效";
-  if (event.jobStatus === "waiting") return "待确认";
-  if (event.internalStatus === "validated") return "已影响生成";
-  if (event.jobStatus === "running" || event.internalStatus === "received") return "处理中";
-  if (event.internalStatus === "landed" || event.jobStatus === "completed") return "已保存";
-  return "待确认";
 }
 
 function publicRule(rule) {
