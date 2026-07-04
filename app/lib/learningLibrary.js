@@ -25,7 +25,11 @@ function publicLearningRecord(event) {
     projectId: event.projectId,
     canvasId: event.canvasId,
     conversationId: event.conversationId,
-    status: event.status,
+    status: legacyDisplayStatusForEvent(event),
+    internalStatus: event.internalStatus,
+    jobStatus: event.jobStatus,
+    learningMode: event.learningMode,
+    landingType: event.landingType,
     summary: event.summary,
     rawTrigger: event.rawTrigger,
     capability: event.capability,
@@ -36,6 +40,18 @@ function publicLearningRecord(event) {
     createdAt: event.createdAt,
     updatedAt: event.updatedAt,
   };
+}
+
+function legacyDisplayStatusForEvent(event = {}) {
+  const legacyStatus = String(event.status || "").trim();
+  if (legacyStatus) return legacyStatus;
+  if (event.internalStatus === "failed" || event.jobStatus === "failed") return "失败";
+  if (event.internalStatus === "covered") return "已被覆盖";
+  if (event.internalStatus === "landed" && event.landingType === "current-rule") return "已生效";
+  if (event.jobStatus === "running" || event.internalStatus === "received") return "处理中";
+  if (event.jobStatus === "waiting") return "待确认";
+  if (event.internalStatus === "landed" || event.jobStatus === "completed") return "已保存";
+  return "待确认";
 }
 
 function publicRule(rule) {

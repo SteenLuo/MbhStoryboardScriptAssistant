@@ -90,6 +90,12 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   assert.ok(Array.isArray(library.skills));
   assert.strictEqual(library.records.length, 1);
   assert.ok(library.records.some((record) => record.eventId === "event-1"));
+  const eventRecord = library.records.find((record) => record.eventId === "event-1");
+  assert.strictEqual(eventRecord.status, "已生效");
+  assert.strictEqual(eventRecord.internalStatus, "landed");
+  assert.strictEqual(eventRecord.jobStatus, "completed");
+  assert.strictEqual(eventRecord.learningMode, "overall");
+  assert.strictEqual(eventRecord.landingType, "current-rule");
   assert.ok(!library.records.some((record) => record.sourceType === "conversation_record"));
   assert.strictEqual(library.currentRules[0].topicKey, "storyboard.dialogue.length");
   assert.strictEqual(library.currentRules[0].status, "disabled");
