@@ -60,6 +60,7 @@ const state = {
   activeNotificationIndex: 0,
   learningLibrary: null,
   learningLibraryTab: "records",
+  pendingLearningCorrection: null,
   viewedLearningFailureIds: new Set(),
   learningFailureCursor: 0,
   storyboardIssueNodeId: "",
@@ -1910,6 +1911,7 @@ async function sendMessage(event) {
   event.preventDefault();
   const input = $("chatInput");
   const text = input.value.trim();
+  const pendingCorrection = state.pendingLearningCorrection;
   const attachments = state.pendingAttachments.map((item) => ({ ...item }));
   if (!canSendCurrentCompose(text, attachments)) {
     updateSendState();
@@ -1927,12 +1929,31 @@ async function sendMessage(event) {
   const waiting = appendMessage("assistant", "正在思考...", false);
   const learningMode = state.composeMode === "learning";
   const forcedSkillRouteId = selectedChatSkillRouteId();
-  if (learningMode) {
+  if (pendingCorrection) {
+    waiting.textContent = "正在记录纠正说明...";
+  } else if (learningMode) {
     waiting.textContent = "正在保存到本地学习资料库...";
   } else if (forcedSkillRouteId) {
     waiting.textContent = `正在调用${composeModeLabel(state.composeMode)}技能...`;
   }
   try {
+    if (pendingCorrection) {
+      state.pendingLearningCorrection = null;
+      const data = await api("/api/learning-corrections", {
+        method: "POST",
+        body: JSON.stringify({
+          payload: pendingCorrection.payload,
+          action: pendingCorrection.action,
+          message: outgoingText,
+        }),
+      });
+      waiting.textContent = data.message || data.record?.nextStepText || "已记录纠正说明。";
+      if (data.library) {
+        state.learningLibrary = data.library;
+        renderLearningLibrary();
+      }
+      return;
+    }
     const data = await api("/api/chat", {
       method: "POST",
       body: JSON.stringify({
@@ -6185,6 +6206,10 @@ function renderLearningRecordItem(record) {
     formatDateTime(record.updatedAt || record.createdAt),
   ].filter(Boolean);
   const localRecord = record.learningRecord ? `<p>本地记录：${escapeHtml(record.learningRecord)}</p>` : "";
+  const correctionAction = record.correctionAction;
+  const correctionButton = correctionAction
+    ? `<div class="learning-correction-actions"><button type="button" data-learning-correction="${escapeHtml(key)}">带引用去纠正</button></div>`
+    : "";
   item.innerHTML = `
     <div class="learning-library-item-head">
       <strong>${escapeHtml(title)}</strong>
@@ -6195,8 +6220,45 @@ function renderLearningRecordItem(record) {
     ${localRecord}
     ${error}
     ${covered}
+    ${correctionButton}
   `;
   return item;
+}
+
+function beginLearningCorrection(recordKey) {
+  const records = state.learningLibrary?.records || [];
+  const record = records.find((item) => learningRecordKey(item) === recordKey);
+  const correctionAction = record?.correctionAction;
+  if (!record || !correctionAction) return;
+  if (!correctionAction.enabled) {
+    setTextIfPresent("learningStatus", correctionAction.disabledReason || "这条记录缺少可引用的位置。");
+    return;
+  }
+
+  const input = $("chatInput");
+  const reference = buildLearningCorrectionReference(record, correctionAction.payload);
+  input.value = `${correctionAction.defaultText}\n\n引用：${reference}\n补充说明：`;
+  state.pendingLearningCorrection = {
+    payload: correctionAction.payload,
+    action: correctionAction.action || "override",
+    recordKey,
+  };
+  closeLearningPage();
+  setAppMode("chat");
+  autoGrowTextarea();
+  updateSendState();
+  input.focus();
+}
+
+function buildLearningCorrectionReference(record, payload = {}) {
+  const ids = [
+    payload.recordId ? `记录 ${payload.recordId}` : "",
+    payload.eventId ? `事件 ${payload.eventId}` : "",
+    payload.landingIds?.length ? `落点 ${payload.landingIds.join("、")}` : "",
+    payload.outputId ? `输出 ${payload.outputId}` : "",
+  ].filter(Boolean);
+  const title = record.learnedText || record.sourceText || record.usedWhereText || "学习记录";
+  return [title, ...ids].filter(Boolean).join("；");
 }
 
 function learningRecordKey(record) {
@@ -6671,6 +6733,11 @@ function bindEvents() {
   $("openLearningLibrary").addEventListener("click", openLearningLibrary);
   $("closeLearningPage").addEventListener("click", closeLearningPage);
   $("learningPage").addEventListener("click", (event) => {
+    const correctionButton = event.target.closest("[data-learning-correction]");
+    if (correctionButton) {
+      beginLearningCorrection(correctionButton.dataset.learningCorrection || "");
+      return;
+    }
     if (event.target === $("learningPage")) closeLearningPage();
   });
   $("closeTrash").addEventListener("click", closeTrash);

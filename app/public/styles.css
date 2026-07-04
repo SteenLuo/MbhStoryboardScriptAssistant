@@ -5206,13 +5206,15 @@ input.masked-key {
   line-height: 1.45;
 }
 
-.learning-rule-actions {
+.learning-rule-actions,
+.learning-correction-actions {
   display: flex;
   justify-content: flex-end;
   margin-top: 10px;
 }
 
-.learning-rule-actions button {
+.learning-rule-actions button,
+.learning-correction-actions button {
   min-height: 30px;
   border: 1px solid color-mix(in srgb, var(--accent) 52%, var(--line));
   border-radius: 999px;
@@ -5223,7 +5225,9 @@ input.masked-key {
 }
 
 .learning-rule-actions button:hover,
-.learning-rule-actions button:focus-visible {
+.learning-rule-actions button:focus-visible,
+.learning-correction-actions button:hover,
+.learning-correction-actions button:focus-visible {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 15%, var(--field-bg));
 }

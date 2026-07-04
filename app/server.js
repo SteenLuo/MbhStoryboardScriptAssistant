@@ -18,6 +18,7 @@ const { DEFAULT_PROJECT_ID, createProject, groupConversationsByProject, normaliz
 const { normalizeModelSettings, publicModelSettings, resolveActiveModelSettings, updateModelSettings } = require("./lib/modelSettings");
 const { handleNotification, listNotifications } = require("./lib/notifications");
 const { buildLearningLibrary } = require("./lib/learningLibrary");
+const { buildLearningCorrectionEvent, findCorrectionRuleId } = require("./lib/learningCorrection");
 const { appendLearningEvent, learnExplicitRule, updateCurrentRuleStatus } = require("./lib/autonomousLearning");
 const { recordArchiveLearningEvidence } = require("./lib/learningEvidence");
 const { analyzeCanvasArchiveReadiness } = require("./lib/canvasArchive");
@@ -1976,6 +1977,55 @@ async function learningStatus() {
   };
 }
 
+async function handleLearningCorrection(body = {}) {
+  const correction = buildLearningCorrectionEvent({
+    record: body.record,
+    payload: body.payload,
+    action: body.action,
+    message: body.message,
+    learningMode: "correction",
+  });
+  await appendLearningEvent(ROOT, correction.event);
+
+  const response = {
+    ok: true,
+    correctionEvent: correction.event,
+    record: correction.record,
+    disabledReason: correction.disabledReason,
+    disableResult: null,
+    warning: "",
+  };
+
+  if (!correction.enabled) {
+    response.record = {
+      ...correction.record,
+      displayStatus: "待确认",
+      status: "待确认",
+      actionLabel: "待纠正",
+      nextStepText: correction.disabledReason || "需要你补充是哪条记录。",
+    };
+    response.message = "已记录纠正说明，但需要你补充是哪条记录，暂不覆盖或停用规则。";
+    response.library = await buildLearningLibrary(ROOT);
+    return response;
+  }
+
+  const action = correction.action;
+  const ruleId = findCorrectionRuleId(correction.payload);
+  if (action === "disable") {
+    if (ruleId) {
+      response.disableResult = await updateCurrentRuleStatus(ROOT, { ruleId, status: "disabled" });
+      response.message = `已记录纠正说明，并停用当前规则：${ruleId}`;
+    } else {
+      response.warning = "已记录纠正说明，但没有可安全停用的当前规则编号，未盲改规则。";
+      response.message = response.warning;
+    }
+  } else {
+    response.message = "已记录纠正说明，后续可按这条引用继续覆盖或收窄。";
+  }
+  response.library = await buildLearningLibrary(ROOT);
+  return response;
+}
+
 async function runLearningCycle() {
   const script = path.join(ROOT, "tools", "Invoke-AutoLearningCycle.ps1");
   if (!fs.existsSync(script)) {
@@ -2088,6 +2138,9 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/learning-rules/status") {
     const result = await updateCurrentRuleStatus(ROOT, body);
     return sendJson(res, 200, { ...result, library: await buildLearningLibrary(ROOT) });
+  }
+  if (req.method === "POST" && url.pathname === "/api/learning-corrections") {
+    return sendJson(res, 200, await handleLearningCorrection(body));
   }
   if (req.method === "POST" && url.pathname === "/api/conversations") {
     let projectId = body.projectId;

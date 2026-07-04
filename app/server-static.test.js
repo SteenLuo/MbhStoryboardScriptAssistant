@@ -176,11 +176,27 @@ test("learning library API exposes records rules and skills", () => {
   const apiSource = extractFunction("handleApi");
 
   assert.match(serverSource, /require\("\.\/lib\/learningLibrary"\)/);
+  assert.match(serverSource, /require\("\.\/lib\/learningCorrection"\)/);
   assert.match(serverSource, /updateCurrentRuleStatus/);
   assert.match(apiSource, /\/api\/learning-library/);
   assert.match(apiSource, /buildLearningLibrary\(ROOT\)/);
   assert.match(apiSource, /\/api\/learning-rules\/status/);
   assert.match(apiSource, /updateCurrentRuleStatus\(ROOT/);
+});
+
+test("learning correction API writes referenced correction events without blind rule edits", () => {
+  const apiSource = extractFunction("handleApi");
+  const correctionSource = extractFunction("handleLearningCorrection");
+
+  assert.match(apiSource, /\/api\/learning-corrections/);
+  assert.match(apiSource, /handleLearningCorrection\(body\)/);
+  assert.match(correctionSource, /buildLearningCorrectionEvent/);
+  assert.match(correctionSource, /appendLearningEvent\(ROOT,\s*correction\.event\)/);
+  assert.match(correctionSource, /learningMode:\s*"correction"/);
+  assert.match(correctionSource, /需要你补充是哪条记录/);
+  assert.match(correctionSource, /actionLabel:\s*"待纠正"/);
+  assert.match(correctionSource, /updateCurrentRuleStatus\(ROOT,\s*\{\s*ruleId,\s*status:\s*"disabled"\s*\}/s);
+  assert.match(correctionSource, /disableResult/);
 });
 
 test("chat flow applies explicit learning rules into the current ruleset", () => {

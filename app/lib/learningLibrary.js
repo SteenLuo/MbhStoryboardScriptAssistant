@@ -3,6 +3,7 @@ const fsp = require("node:fs/promises");
 const path = require("node:path");
 
 const { listLearningEvents, readCurrentRuleset } = require("./autonomousLearning");
+const { buildCorrectionAction } = require("./learningCorrection");
 const { mapLearningDisplayRecord } = require("./learningStatusMapper");
 const { FALLBACK_ROUTE, SKILL_ROUTES } = require("./localSkills");
 
@@ -27,11 +28,15 @@ async function buildLearningLibrary(root) {
 
 function publicLearningRecord(event) {
   const displayRecord = mapLearningDisplayRecord(event);
-  return {
+  const record = {
     ...displayRecord,
     status: displayRecord.status || displayRecord.displayStatus,
     createdAt: event.createdAt,
     updatedAt: event.updatedAt,
+  };
+  return {
+    ...record,
+    correctionAction: buildCorrectionAction(record),
   };
 }
 
@@ -81,7 +86,7 @@ function publicSampleRecord(sample) {
 }
 
 function savedMaterialRecord(input) {
-  return {
+  const record = {
     recordId: input.recordId,
     displayStatus: "已保存",
     status: "已保存",
@@ -99,6 +104,10 @@ function savedMaterialRecord(input) {
     advanced: input.advanced,
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
+  };
+  return {
+    ...record,
+    correctionAction: buildCorrectionAction(record),
   };
 }
 

@@ -263,6 +263,14 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   assert.strictEqual(eventRecord.advanced.sourceType, "conversation");
   assert.strictEqual(eventRecord.advanced.ruleId, "rule-event-1");
   assert.strictEqual(eventRecord.advanced.tokenUsage.total_tokens, 18);
+  assert.strictEqual(eventRecord.correctionAction.enabled, true);
+  assert.strictEqual(eventRecord.correctionAction.payload.recordId, "event-1");
+  assert.strictEqual(eventRecord.correctionAction.payload.eventId, "event-1");
+  assert.deepStrictEqual(eventRecord.correctionAction.payload.landingIds, ["rule-event-1"]);
+  assert.strictEqual(eventRecord.correctionAction.payload.projectId, "");
+  assert.strictEqual(eventRecord.correctionAction.payload.scope, "overall");
+  assert.strictEqual(eventRecord.correctionAction.defaultText, "这条学错了，请按这次说明覆盖。");
+  assert.equal(Object.hasOwn(eventRecord.correctionAction.payload, "tokenUsage"), false);
   assert.strictEqual(library.currentRules[0].topicKey, "storyboard.dialogue.length");
   assert.strictEqual(library.currentRules[0].status, "disabled");
   const storyboardSkill = library.skills.find((skill) => skill.id === "storyboard-generate");
@@ -522,4 +530,47 @@ test("buildLearningLibrary keeps archive evidence failure visible without markin
   assert.strictEqual(record.generationProof.proofStatus, "failed");
   assert.strictEqual(record.learnedText, "画布已归档，学习证据生成失败");
   assert.strictEqual(record.advanced.error.stage, "write-learning-evidence");
+});
+
+test("buildLearningLibrary disables correction action when a record has no primary locator", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-correction-disabled-"));
+  const learningDir = path.join(root, "learning");
+  await fsp.mkdir(learningDir, { recursive: true });
+  await fsp.writeFile(
+    path.join(learningDir, "events.jsonl"),
+    JSON.stringify({
+      eventId: "event-context-only",
+      internalStatus: "received",
+      jobStatus: "waiting",
+      learningMode: "uncertain",
+      sourceType: "conversation",
+      projectId: "project-context",
+      canvasId: "canvas-context",
+      conversationId: "chat-context",
+      topicKey: "storyboard.general",
+      conflictKey: "storyboard.general",
+      summary: "上下文足够展示，但纠错测试会移除主定位",
+      createdAt: "2026-07-04T00:00:00.000Z",
+      updatedAt: "2026-07-04T00:00:00.000Z",
+    }) + "\n",
+    "utf8",
+  );
+
+  const { buildCorrectionAction } = require("./learningCorrection");
+  const library = await buildLearningLibrary(root);
+  const record = library.records.find((item) => item.recordId === "event-context-only");
+  const disabled = buildCorrectionAction({
+    advanced: {
+      projectId: record.advanced.projectId,
+      canvasId: record.advanced.canvasId,
+      conversationId: record.advanced.conversationId,
+      topicKey: record.advanced.topicKey,
+      conflictKey: record.advanced.conflictKey,
+      learningMode: record.advanced.learningMode,
+    },
+  });
+
+  assert.strictEqual(record.correctionAction.enabled, true);
+  assert.strictEqual(disabled.enabled, false);
+  assert.match(disabled.disabledReason, /需要你补充是哪条记录/);
 });

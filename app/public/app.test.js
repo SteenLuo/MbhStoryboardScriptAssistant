@@ -25,3 +25,11 @@ test("archiveCurrentCanvas warns when archive succeeds but learning evidence fai
   assert.match(archiveSource, /画布已归档，但学习证据生成失败，可在学习资料库查看。/);
   assert.match(archiveSource, /canvasStatus\("画布已归档，但学习证据生成失败，可在学习资料库查看。", \{ lockMs: 6000 \}\)/);
 });
+
+test("sendMessage submits pending learning corrections through correction API", () => {
+  const sendSource = extractFunction("sendMessage");
+
+  assert.match(sendSource, /const pendingCorrection = state\.pendingLearningCorrection/);
+  assert.match(sendSource, /\/api\/learning-corrections/);
+  assert.match(sendSource, /waiting\.textContent = "正在记录纠正说明\.\.\."/);
+});

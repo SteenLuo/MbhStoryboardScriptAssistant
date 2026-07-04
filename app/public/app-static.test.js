@@ -316,11 +316,34 @@ test("learning record renderer uses D2 display fields before raw legacy fields",
   assert.match(renderRecordSource, /record\.generationProof\?\.claimText/);
   assert.match(renderRecordSource, /record\.advanced\?\.error\?\.message/);
   assert.match(renderRecordSource, /record\.advanced\?\.coveredByEventId/);
+  assert.match(renderRecordSource, /record\.correctionAction/);
+  assert.match(renderRecordSource, /data-learning-correction/);
+  assert.match(renderRecordSource, /带引用去纠正/);
   assert.match(keySource, /record\?\.recordId/);
   assert.match(failedSource, /record\?\.displayStatus\s*\|\|\s*record\?\.status/);
   assert.doesNotMatch(renderRecordSource, /record\.summary \|\| record\.rawTrigger \|\| record\.topicKey/);
   assert.doesNotMatch(renderRecordSource, /formatLearningSource\(record\.sourceType\)/);
   assert.doesNotMatch(renderRecordSource, /formatLearningTokenUsage\(record\.tokenUsage\)/);
+});
+
+test("learning correction button fills composer and sends pending correction payload", () => {
+  const beginSource = extractFunction("beginLearningCorrection");
+  const sendSource = extractFunction("sendMessage");
+  const bindSource = extractFunction("bindEvents");
+
+  assert.match(appSource, /pendingLearningCorrection:\s*null/);
+  assert.match(beginSource, /correctionAction\.disabledReason/);
+  assert.match(beginSource, /chatInput/);
+  assert.match(beginSource, /defaultText/);
+  assert.match(beginSource, /引用/);
+  assert.match(beginSource, /pendingLearningCorrection/);
+  assert.match(sendSource, /state\.pendingLearningCorrection/);
+  assert.match(sendSource, /\/api\/learning-corrections/);
+  assert.match(sendSource, /payload:\s*pendingCorrection\.payload/);
+  assert.match(sendSource, /action:\s*pendingCorrection\.action/);
+  assert.match(sendSource, /message:\s*outgoingText/);
+  assert.match(bindSource, /data-learning-correction/);
+  assert.match(bindSource, /beginLearningCorrection/);
 });
 
 test("chat no longer renders legacy long-memory confirmation cards", () => {
