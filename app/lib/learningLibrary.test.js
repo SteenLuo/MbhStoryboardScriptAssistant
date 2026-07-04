@@ -309,6 +309,61 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   assert.ok(library.skills.every((skill) => skill.readonly === true));
 });
 
+test("buildLearningLibrary aggregates saved skill drafts without affecting generation", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-skill-drafts-"));
+  await fsp.mkdir(path.join(root, "learning", "skill-evolution-reports"), { recursive: true });
+  await fsp.writeFile(path.join(root, "learning", "skill-evolution-reports", "skill-evolution-draft-draft-a.json"), JSON.stringify({
+    draftId: "draft-a",
+    skillId: "storyboard-generate",
+    skillKind: "storyboard",
+    draftStatus: "saved",
+    humanConfirmationStatus: "pending",
+    relatedRuleIds: ["rule-a", "rule-b"],
+    relatedEvalResultIds: ["eval-result-a"],
+    sourceEventIds: ["event-a"],
+    diffSummary: "Draft only: no official skill files or routes are changed.",
+    generatedAt: "2026-07-04T12:00:00.000Z",
+    affectsGeneration: false,
+  }), "utf8");
+
+  const library = await buildLearningLibrary(root);
+  const draft = library.skillItems.find((item) => item.recordId === "skill-draft:draft-a");
+
+  assert.ok(draft);
+  assert.strictEqual(draft.recordId, "skill-draft:draft-a");
+  assert.strictEqual(draft.skillId, "storyboard-generate");
+  assert.strictEqual(draft.skillKind, "storyboard");
+  assert.strictEqual(draft.draftStatus, "saved");
+  assert.strictEqual(draft.humanConfirmationStatus, "pending");
+  assert.deepStrictEqual(draft.relatedRuleIds, ["rule-a", "rule-b"]);
+  assert.deepStrictEqual(draft.relatedEvalResultIds, ["eval-result-a"]);
+  assert.deepStrictEqual(draft.sourceEventIds, ["event-a"]);
+  assert.strictEqual(draft.diffSummary, "Draft only: no official skill files or routes are changed.");
+  assert.strictEqual(draft.displayStatus, "已保存");
+  assert.strictEqual(draft.generationImpactText, "暂不影响生成；等待人工确认后才可能进入正式技能。");
+  assert.strictEqual(draft.nextStepText, "等待人工确认；确认前不会写入正式技能或生成上下文。");
+  assert.strictEqual(draft.affectsGeneration, false);
+  assert.equal(library.impactItems.some((item) => item.recordId === "skill-draft:draft-a"), false);
+});
+
+test("buildLearningLibrary reports malformed skill drafts as access issues while keeping skills visible", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-bad-skill-drafts-"));
+  const draftDir = path.join(root, "learning", "skill-evolution-reports");
+  await fsp.mkdir(draftDir, { recursive: true });
+  await fsp.mkdir(path.join(root, "skills", "99-test", "existing-skill"), { recursive: true });
+  await fsp.writeFile(path.join(root, "skills", "99-test", "existing-skill", "SKILL.md"), "# Existing skill\n", "utf8");
+  await fsp.writeFile(path.join(draftDir, "skill-evolution-draft-bad.json"), "{", "utf8");
+
+  const library = await buildLearningLibrary(root);
+
+  assert.ok(library.skillItems.some((item) => item.recordId === "skill:existing-skill"));
+  assert.ok(library.accessIssues.some((issue) =>
+    issue.area === "skill-drafts" &&
+    issue.path?.endsWith("skill-evolution-draft-bad.json") &&
+    issue.message
+  ));
+});
+
 test("buildLearningLibrary maps normalized legacy events into D2 display statuses", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-legacy-"));
   const learningDir = path.join(root, "learning");

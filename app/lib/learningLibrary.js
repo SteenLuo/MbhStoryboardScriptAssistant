@@ -9,12 +9,13 @@ const { FALLBACK_ROUTE, SKILL_ROUTES } = require("./localSkills");
 
 async function buildLearningLibrary(root) {
   const accessIssues = [];
-  const [events, ruleset, evidenceResult, sampleResult, evalResult] = await Promise.all([
+  const [events, ruleset, evidenceResult, sampleResult, evalResult, skillDraftResult] = await Promise.all([
     safeReadEvents(root, accessIssues),
     safeReadRuleset(root, accessIssues),
     readMaterialRecords(path.join(root, "learning", "evidence"), "evidenceId", "evidence", accessIssues),
     readMaterialRecords(path.join(root, "learning", "samples"), "sampleId", "samples", accessIssues),
     readEvalRecords(path.join(root, "learning", "evals"), accessIssues),
+    readSkillDraftRecords(path.join(root, "learning", "skill-evolution-reports"), accessIssues),
   ]);
 
   const eventRecords = buildPublicLearningRecords(events, accessIssues);
@@ -39,9 +40,12 @@ async function buildLearningLibrary(root) {
       ["sample-insufficient", "eval", "eval-result"].includes(record.advanced?.landingType)
     ),
   ]));
-  const skillItems = uniqueRecordsById(skillRoutes(root, accessIssues)
-    .map((route) => publicSkill(root, route, accessIssues))
-    .filter(hasUsableRecordId));
+  const skillItems = uniqueRecordsById([
+    ...skillRoutes(root, accessIssues)
+      .map((route) => publicSkill(root, route, accessIssues))
+      .filter(hasUsableRecordId),
+    ...skillDraftResult.records.map(publicSkillDraft).filter(hasUsableRecordId),
+  ]);
 
   return {
     records: records,
@@ -380,6 +384,37 @@ async function readEvalRecords(dir, accessIssues) {
   return { records };
 }
 
+async function readSkillDraftRecords(dir, accessIssues) {
+  if (!fs.existsSync(dir)) return { records: [] };
+  let entries;
+  try {
+    entries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    accessIssues.push(accessIssue("skill-drafts", error, dir));
+    return { records: [] };
+  }
+
+  const records = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== ".json") continue;
+    const file = path.join(dir, entry.name);
+    const draftLikeName = /^skill-evolution-draft-.*\.json$/i.test(entry.name);
+    try {
+      const parsed = JSON.parse(await fsp.readFile(file, "utf8"));
+      if (isValidSkillDraftRecord(parsed)) {
+        records.push(parsed);
+      } else if (draftLikeName) {
+        accessIssues.push(accessIssue("skill-drafts", new Error("Skill draft JSON is missing draftId."), file, { count: 1 }));
+      }
+    } catch (error) {
+      if (draftLikeName) {
+        accessIssues.push(accessIssue("skill-drafts", error, file, { count: 1 }));
+      }
+    }
+  }
+  return { records };
+}
+
 function collectJsonFiles(dir, files) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const fullPath = path.join(dir, entry.name);
@@ -409,6 +444,15 @@ function isValidEvalRecord(record) {
   );
 }
 
+function isValidSkillDraftRecord(record) {
+  return Boolean(
+    record &&
+    typeof record === "object" &&
+    !Array.isArray(record) &&
+    normalizeString(record.draftId),
+  );
+}
+
 function publicSkill(root, route, accessIssues) {
   const skillFile = path.join(root, route.path, "SKILL.md");
   const exists = fs.existsSync(skillFile);
@@ -435,6 +479,55 @@ function publicSkill(root, route, accessIssues) {
     },
   };
   return record;
+}
+
+function publicSkillDraft(draft) {
+  const draftId = normalizeString(draft.draftId);
+  const skillId = normalizeString(draft.skillId || draft.targetSkillId || draft.id);
+  const skillKind = normalizeString(draft.skillKind || draft.skillType || draft.kind || draft.type);
+  const draftStatus = normalizeString(draft.draftStatus || draft.status || "saved");
+  const humanConfirmationStatus = normalizeString(draft.humanConfirmationStatus || draft.confirmationStatus || "pending");
+  const diffSummary = normalizeString(draft.diffSummary || draft.summary);
+  return {
+    recordId: prefixedId("skill-draft", draftId),
+    recordType: "skill-draft",
+    id: draftId,
+    draftId,
+    skillId,
+    skillKind,
+    name: "技能草案",
+    draftStatus,
+    humanConfirmationStatus,
+    displayStatus: "已保存",
+    status: "已保存",
+    actionLabel: "等待人工确认",
+    affectsGeneration: false,
+    generationImpactText: "暂不影响生成；等待人工确认后才可能进入正式技能。",
+    nextStepText: "等待人工确认；确认前不会写入正式技能或生成上下文。",
+    relatedRuleIds: normalizeStringArray(draft.relatedRuleIds),
+    relatedEvalResultIds: normalizeStringArray(draft.relatedEvalResultIds),
+    sourceEventIds: normalizeStringArray(draft.sourceEventIds),
+    diffSummary,
+    draftMarkdownPath: normalizeString(draft.draftMarkdownPath),
+    draftMetadataPath: normalizeString(draft.draftMetadataPath),
+    snapshotPath: normalizeString(draft.snapshotPath),
+    generatedAt: normalizeString(draft.generatedAt),
+    updatedAt: normalizeString(draft.updatedAt || draft.generatedAt || draft.createdAt),
+    createdAt: normalizeString(draft.createdAt || draft.generatedAt),
+    readonly: true,
+    advanced: {
+      ...draft,
+      draftId,
+      skillId,
+      skillKind,
+      draftStatus,
+      humanConfirmationStatus,
+      relatedRuleIds: normalizeStringArray(draft.relatedRuleIds),
+      relatedEvalResultIds: normalizeStringArray(draft.relatedEvalResultIds),
+      sourceEventIds: normalizeStringArray(draft.sourceEventIds),
+      diffSummary,
+    },
+  };
 }
 
 function readSkillMarkdown(skillFile, accessIssues) {

@@ -67,6 +67,31 @@ function evaluateLearningRecordRenderer() {
   return sandbox.renderLearningRecordItem;
 }
 
+function evaluateSkillRenderer() {
+  const sandbox = {
+    document: {
+      createElement(tagName) {
+        return {
+          tagName,
+          className: "",
+          dataset: {},
+          innerHTML: "",
+        };
+      },
+    },
+  };
+  const names = [
+    "escapeHtml",
+    "formatSkillCategory",
+    "formatSkillDraftStatus",
+    "formatSkillDraftConfirmationStatus",
+    "renderSkillLibraryItem",
+  ];
+  const source = `${names.map(extractFunction).join("\n")}\nglobalThis.renderSkillLibraryItem = renderSkillLibraryItem;`;
+  vm.runInNewContext(source, sandbox);
+  return sandbox.renderSkillLibraryItem;
+}
+
 function learningRecordDefaultHtml(item) {
   return item.innerHTML.split('<details class="learning-record-advanced">')[0];
 }
@@ -320,6 +345,9 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(appSource, /rule\.status === "active" \? "disabled" : "active"/);
   assert.match(appSource, /viewedLearningFailureIds/);
   assert.match(appSource, /function renderSkillLibraryItem/);
+  assert.match(appSource, /暂无技能草案，正式技能仍可用/);
+  assert.match(appSource, /draftStatus/);
+  assert.match(appSource, /humanConfirmationStatus/);
   assert.match(indexSource, /<span>学习记录<\/span>/);
   assert.match(indexSource, /<span>技能库<\/span>/);
   assert.doesNotMatch(appSource, /"已记录":\s*"已记录"/);
@@ -356,6 +384,34 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(stylesSource, /\.learning-record-advanced/);
   assert.match(stylesSource, /\.learning-record-failure/);
   assert.match(stylesSource, /\.sidebar-icon-stack/);
+});
+
+test("skill library renderer shows saved non-generation draft cards and draft empty state", () => {
+  const renderSkillLibrarySource = extractFunction("renderLearningLibrary");
+  const renderSkillItemSource = extractFunction("renderSkillLibraryItem");
+  const renderSkillLibraryItem = evaluateSkillRenderer();
+  const item = renderSkillLibraryItem({
+    recordType: "skill-draft",
+    recordId: "skill-draft:draft-a",
+    name: "技能草案",
+    skillId: "storyboard-generate",
+    skillKind: "storyboard",
+    draftStatus: "saved",
+    humanConfirmationStatus: "pending",
+    affectsGeneration: false,
+    generationImpactText: "暂不影响生成；等待人工确认后才可能进入正式技能。",
+    diffSummary: "Draft only: no official skill files or routes are changed.",
+  });
+
+  assert.match(renderSkillLibrarySource, /暂无技能草案，正式技能仍可用/);
+  assert.match(renderSkillItemSource, /recordType === "skill-draft"/);
+  assert.match(renderSkillItemSource, /draftStatus/);
+  assert.match(renderSkillItemSource, /humanConfirmationStatus/);
+  assert.match(item.innerHTML, /技能草案/);
+  assert.match(item.innerHTML, /已保存/);
+  assert.match(item.innerHTML, /暂不影响生成/);
+  assert.match(item.innerHTML, /等待人工确认/);
+  assert.match(item.innerHTML, /diff 摘要/);
 });
 
 test("learning record renderer keeps novice fields in the default card", () => {

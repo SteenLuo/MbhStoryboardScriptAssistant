@@ -6138,6 +6138,10 @@ async function loadLearningLibrary() {
 
 function renderLearningLibrary() {
   const data = state.learningLibrary || { records: [], currentRules: [], skills: [] };
+  const skills = data.skills || [];
+  const skillItems = skills.some((skill) => skill.recordType === "skill-draft")
+    ? skills
+    : [{ recordType: "skill-draft-empty", recordId: "skill-draft-empty" }, ...skills];
   renderLearningTabCounts(data);
   document.querySelectorAll("[data-learning-library-tab]").forEach((button) => {
     const active = button.dataset.learningLibraryTab === state.learningLibraryTab;
@@ -6149,7 +6153,7 @@ function renderLearningLibrary() {
   });
   renderLearningLibraryList("learningLibraryRecords", data.records || [], renderLearningRecordItem, "还没有学习记录；当你说以后都这样、投喂样例或归档画布后，会出现在这里");
   renderLearningLibraryList("learningLibraryRules", data.currentRules || [], renderCurrentRuleItem, "暂无当前规则");
-  renderLearningLibraryList("learningLibrarySkills", data.skills || [], renderSkillLibraryItem, "暂无技能");
+  renderLearningLibraryList("learningLibrarySkills", skillItems, renderSkillLibraryItem, "暂无技能草案，正式技能仍可用");
 }
 
 function renderLearningTabCounts(data) {
@@ -6561,6 +6565,36 @@ async function setCurrentRuleStatus(ruleId, status) {
 
 function renderSkillLibraryItem(skill) {
   const item = document.createElement("article");
+  if (skill.recordType === "skill-draft-empty") {
+    item.className = "learning-library-item status-已保存";
+    item.innerHTML = `
+      <div class="learning-library-item-head">
+        <strong>技能草案</strong>
+        <span>暂无草案</span>
+      </div>
+      <p>暂无技能草案，正式技能仍可用。</p>
+      <p>这里仅展示已保存、等待人工确认的技能草案；确认前不会影响生成。</p>
+    `;
+    return item;
+  }
+  if (skill.recordType === "skill-draft") {
+    const draftStatus = formatSkillDraftStatus(skill.draftStatus || skill.status);
+    const confirmationStatus = formatSkillDraftConfirmationStatus(skill.humanConfirmationStatus);
+    const diffSummary = skill.diffSummary || "暂无 diff 摘要。";
+    const typeText = [skill.skillKind, skill.skillId].filter(Boolean).join(" · ") || "技能草案";
+    item.className = "learning-library-item status-已保存";
+    item.innerHTML = `
+      <div class="learning-library-item-head">
+        <strong>${escapeHtml(skill.name || "技能草案")}</strong>
+        <span>${escapeHtml(draftStatus)}</span>
+      </div>
+      <p><b>类型：</b>${escapeHtml(typeText)}</p>
+      <p><b>是否影响生成：</b>${escapeHtml(skill.generationImpactText || "暂不影响生成；等待人工确认后才可能进入正式技能。")}</p>
+      <p><b>人工确认：</b>${escapeHtml(confirmationStatus)}</p>
+      <p><b>diff 摘要：</b>${escapeHtml(diffSummary)}</p>
+    `;
+    return item;
+  }
   item.className = `learning-library-item${skill.exists ? "" : " missing"}`;
   const description = skill.description || "暂无技能摘要。";
   const instructions = skill.instructions || "未读取到技能说明。";
@@ -6581,6 +6615,30 @@ function renderSkillLibraryItem(skill) {
     </details>
   `;
   return item;
+}
+
+function formatSkillDraftStatus(status) {
+  const value = String(status || "").trim();
+  const labels = {
+    saved: "已保存",
+    draft: "已保存",
+    pending: "已保存",
+    "已保存": "已保存",
+  };
+  return labels[value] || value || "已保存";
+}
+
+function formatSkillDraftConfirmationStatus(status) {
+  const value = String(status || "").trim();
+  const labels = {
+    pending: "等待人工确认",
+    waiting: "等待人工确认",
+    unconfirmed: "等待人工确认",
+    confirmed: "已人工确认",
+    rejected: "已驳回",
+    "等待人工确认": "等待人工确认",
+  };
+  return labels[value] || value || "等待人工确认";
 }
 
 function formatLearningTokenUsage(usage) {
