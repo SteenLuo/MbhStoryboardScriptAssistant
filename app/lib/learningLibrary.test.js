@@ -128,6 +128,36 @@ test("writeLearningSample only satisfies sample-insufficient tasks with matching
   assert.strictEqual(tone.advanced.landingType, "sample-insufficient");
 });
 
+test("writeLearningSample does not satisfy a related task when sampleType differs from neededSampleType", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-related-type-"));
+  await appendSampleInsufficientLearningEvent(root, {
+    eventId: "event-related-task",
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length",
+    neededSampleType: "dialogue-length-failure",
+    neededCount: 1,
+    summary: "Need dialogue samples.",
+  }, {
+    now: () => "2026-07-04T08:00:00.000Z",
+  });
+
+  await writeLearningSample(root, {
+    summary: "wrong type but related",
+    content: "example",
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length",
+    sampleType: "tone-drift",
+    relatedTaskId: "event-related-task",
+    createdAt: "2026-07-04T08:10:00.000Z",
+  });
+
+  const library = await buildLearningLibrary(root);
+  const task = library.records.find((item) => item.recordId === "event-related-task");
+
+  assert.strictEqual(task.advanced.landingType, "sample-insufficient");
+  assert.strictEqual(task.advanced.jobStatus, "waiting");
+});
+
 test("buildLearningLibrary exposes records current rules and readonly skill groups", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-"));
   await fsp.mkdir(path.join(root, "skills/03-storyboard/storyboard-generate"), { recursive: true });

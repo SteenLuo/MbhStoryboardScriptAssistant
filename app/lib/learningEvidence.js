@@ -312,6 +312,7 @@ function matchesSampleNeed(task = {}, record = {}) {
   const neededSampleType = normalizeString(task.neededSampleType);
   const recordType = normalizeString(record.sampleType || record.evidenceType);
   const relatedRecordIds = new Set(normalizeStringArray(task.relatedRecordIds));
+  if (neededSampleType && recordType !== neededSampleType) return false;
   if (normalizeString(record.relatedTaskId) && normalizeString(record.relatedTaskId) === taskId) return true;
   if (
     relatedRecordIds.has(normalizeString(record.recordId)) ||
@@ -320,8 +321,7 @@ function matchesSampleNeed(task = {}, record = {}) {
   ) {
     return true;
   }
-  if (!neededSampleType) return true;
-  return recordType === neededSampleType;
+  return true;
 }
 
 function isSameTopicOrConflict(item, topicKey, conflictKey) {

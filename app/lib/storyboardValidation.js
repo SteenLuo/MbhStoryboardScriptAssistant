@@ -153,7 +153,7 @@ function parseDialogueLine(line) {
   const match = String(line || "").match(/^(\s*(?:台词|对白|dialogue)\s*[:：]\s*)(.+)$/i);
   if (!match) return null;
   const rawDialogue = String(match[2] || "").trim();
-  const markerMatch = rawDialogue.match(/^((?:旁白VO|角色OS|画外音|[A-Za-z][A-Za-z0-9_-]*)\s*[:：])\s*(.+)$/);
+  const markerMatch = rawDialogue.match(/^((?:[\u4e00-\u9fa5A-Za-z][\u4e00-\u9fa5A-Za-z0-9_-]{0,20}(?:OS)?)\s*[:：])\s*(.+)$/);
   if (!markerMatch) {
     return {
       fieldPrefix: match[1],
