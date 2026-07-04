@@ -6257,13 +6257,16 @@ function learningRecordLine(label, value) {
 }
 
 function renderLearningFailureSummary(record) {
-  const stage = readableLearningFailureValue(
+  const stage = readableLearningFailureStage(
     record.failureStage || record.stage || record.advanced?.failureStage || record.advanced?.stage || record.advanced?.error?.stage,
     "未返回明确阶段",
   );
+  const userFacingReason = record.failureReason || record.reason || record.error?.userMessage || record.advanced?.error?.userMessage;
+  const internalReason = record.error?.message || record.advanced?.error?.message;
   const reason = readableLearningFailureValue(
-    record.failureReason || record.reason || record.error?.userMessage || record.advanced?.error?.userMessage || record.error?.message || record.advanced?.error?.message,
+    userFacingReason || internalReason,
     "未返回明确原因",
+    { hideTechnical: !userFacingReason },
   );
   return `
     <div class="learning-record-failure" role="note" aria-label="失败状态">
@@ -6275,14 +6278,66 @@ function renderLearningFailureSummary(record) {
   `;
 }
 
-function readableLearningFailureValue(value, fallback) {
+function readableLearningFailureStage(value, fallback) {
+  const learningFailureStageLabels = {
+    "write-learning-evidence": "写入学习证据",
+    "archive-evidence": "写入学习证据",
+    evidence: "写入学习证据",
+    "publish-current-ruleset": "发布当前规则",
+    "current-ruleset": "发布当前规则",
+    "ruleset-publish": "发布当前规则",
+    "hard-rule-validation": "校验生成结果",
+    "hard-rule-validation-failed": "校验生成结果",
+    "learning-correction": "处理纠错说明",
+    correction: "处理纠错说明",
+    "sample-evaluation": "评测学习样例",
+    "regression-evaluation": "评测学习样例",
+    eval: "评测学习样例",
+  };
+  const text = readableLearningFailureValue(value, "");
+  if (!text) return fallback;
+  if (hasChineseText(text)) return text;
+  const normalized = text.toLowerCase().replace(/_/g, "-").replace(/\s+/g, "-");
+  if (learningFailureStageLabels[normalized]) return learningFailureStageLabels[normalized];
+  return isInternalLearningCode(text) ? "学习流程处理" : text;
+}
+
+function readableLearningFailureValue(value, fallback, options = {}) {
   const text = String(value || "").trim();
   if (!text) return fallback;
   const firstLine = text.split(/\r?\n/).find((line) => line.trim()) || "";
-  return firstLine
+  if (options.hideTechnical && isTechnicalLearningFailureValue(firstLine)) {
+    return "学习流程处理失败，详情可在高级详情中查看。";
+  }
+  const sanitized = firstLine
     .replace(/\bBearer\s+[A-Za-z0-9._-]+/g, "已隐藏凭据")
     .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "已隐藏邮箱")
-    .replace(/\b(api[_-]?key|token|secret)\b\s*[:=]\s*\S+/gi, "$1 已隐藏");
+    .replace(/\b(api[_-]?key|token|secret)\b\s*[:=]\s*\S+/gi, "$1 已隐藏")
+    .replace(/\b[A-Za-z]:\\[^\s"'<>]+/g, "已隐藏路径")
+    .replace(/\/(?:Users|home|var|tmp|app|src|mnt)\/[^\s"'<>]+/g, "已隐藏路径");
+  return sanitized || fallback;
+}
+
+function hasChineseText(value) {
+  return /[\u4e00-\u9fff]/.test(String(value || ""));
+}
+
+function isInternalLearningCode(value) {
+  const text = String(value || "").trim();
+  return !hasChineseText(text) && text.length <= 80 && /^[a-z0-9]+(?:[-_][a-z0-9]+){1,6}$/i.test(text);
+}
+
+function isTechnicalLearningFailureValue(value) {
+  const text = String(value || "");
+  return /\b(?:Error|TypeError|ReferenceError|SyntaxError|RangeError):/i.test(text)
+    || /\b(?:ENOENT|EACCES|EPERM|ECONNREFUSED|ETIMEDOUT)\b/i.test(text)
+    || /JSON\s*parse|Unexpected token/i.test(text)
+    || /\bat\s+[\w.$<>]+\s*\(/.test(text)
+    || /\b[A-Za-z]:\\[^\s"'<>]+/.test(text)
+    || /\/(?:Users|home|var|tmp|app|src|mnt)\/[^\s"'<>]+/.test(text)
+    || /\bBearer\s+[A-Za-z0-9._-]+/.test(text)
+    || /\b(api[_-]?key|token|secret)\b\s*[:=]\s*\S+/i.test(text)
+    || /\b[a-z][a-z0-9]+(?:[-_][a-z0-9]+){1,6}\b/.test(text);
 }
 
 function renderLearningAdvancedDetails(record) {

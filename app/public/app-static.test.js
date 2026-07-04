@@ -307,6 +307,8 @@ test("learning record renderer keeps novice fields in the default card", () => {
   const advancedSource = extractFunction("renderLearningAdvancedDetails");
   const advancedPayloadSource = extractFunction("learningAdvancedPayload");
   const failureSource = extractFunction("renderLearningFailureSummary");
+  const failureStageSource = extractFunction("readableLearningFailureStage");
+  const failureValueSource = extractFunction("readableLearningFailureValue");
   const keySource = extractFunction("learningRecordKey");
   const failedSource = extractFunction("isFailedLearningRecord");
 
@@ -339,7 +341,18 @@ test("learning record renderer keeps novice fields in the default card", () => {
   assert.match(failureSource, /原因/);
   assert.match(failureSource, /是否影响生成/);
   assert.match(failureSource, /下一步/);
-  assert.match(failureSource, /record\.advanced\?\.error\?\.message/);
+  assert.match(failureSource, /readableLearningFailureStage/);
+  assert.match(failureSource, /record\.failureReason\s*\|\|\s*record\.reason\s*\|\|\s*record\.error\?\.userMessage\s*\|\|\s*record\.advanced\?\.error\?\.userMessage/);
+  assert.match(failureStageSource, /write-learning-evidence/);
+  assert.match(failureStageSource, /publish-current-ruleset/);
+  assert.match(failureStageSource, /hard-rule-validation/);
+  assert.match(failureStageSource, /learning-correction/);
+  assert.match(failureStageSource, /sample-evaluation/);
+  assert.match(failureStageSource, /学习流程处理/);
+  assert.match(failureValueSource, /学习流程处理失败，详情可在高级详情中查看。/);
+  assert.match(failureValueSource, /isTechnicalLearningFailureValue/);
+  assert.match(failureValueSource, /Bearer/);
+  assert.match(failureValueSource, /api\[_-\]\?key\|token\|secret/);
   assert.match(keySource, /record\?\.recordId/);
   assert.match(failedSource, /record\?\.displayStatus\s*\|\|\s*record\?\.status/);
   assert.doesNotMatch(renderRecordSource, /record\.displayStatus\s*\|\|\s*record\.status/);
@@ -347,6 +360,9 @@ test("learning record renderer keeps novice fields in the default card", () => {
   assert.doesNotMatch(renderRecordSource, /record\.advanced\?\.topicKey/);
   assert.doesNotMatch(renderRecordSource, /record\.tokenUsage/);
   assert.doesNotMatch(renderRecordSource, /stack/);
+  assert.doesNotMatch(failureSource, /const stage = readableLearningFailureValue/);
+  assert.doesNotMatch(failureSource, /record\.advanced\?\.error\?\.message,[\s\S]*未返回明确原因/);
+  assert.doesNotMatch(failureSource, /learningRecordLine\("失败阶段",\s*record\.advanced\?\.error\?\.stage\)/);
   assert.doesNotMatch(renderRecordSource, /formatLearningSource\(record\.sourceType\)/);
   assert.doesNotMatch(renderRecordSource, /formatLearningTokenUsage\(record\.tokenUsage\)/);
   assert.match(appSource, /还没有学习记录；当你说以后都这样、投喂样例或归档画布后，会出现在这里/);
