@@ -8,6 +8,14 @@ const { appendSampleInsufficientLearningEvent, learnExplicitRule, updateCurrentR
 const { buildLearningLibrary } = require("./learningLibrary");
 const { writeLearningEvidence, writeLearningSample } = require("./learningEvidence");
 
+function assertNoDuplicateRecordIds(items, listName) {
+  const seen = new Set();
+  for (const item of items) {
+    assert.equal(seen.has(item.recordId), false, `${listName} has duplicate recordId ${item.recordId}`);
+    seen.add(item.recordId);
+  }
+}
+
 test("buildLearningLibrary returns the fixed D7 view contract", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-contract-"));
   const library = await buildLearningLibrary(root);
@@ -514,6 +522,84 @@ test("buildLearningLibrary skips malformed evidence and sample records without e
   assert.strictEqual(recordIds.filter((id) => id.startsWith("sample:")).length, 1);
 });
 
+test("buildLearningLibrary records per-file access issues while keeping good material and eval records", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-file-issues-"));
+  const evidenceDir = path.join(root, "learning", "evidence");
+  const sampleDir = path.join(root, "learning", "samples");
+  const evalDir = path.join(root, "learning", "evals", "tasks");
+  await fsp.mkdir(evidenceDir, { recursive: true });
+  await fsp.mkdir(sampleDir, { recursive: true });
+  await fsp.mkdir(evalDir, { recursive: true });
+  await fsp.writeFile(path.join(evidenceDir, "bad-json.json"), "{", "utf8");
+  await fsp.writeFile(path.join(evidenceDir, "good.json"), JSON.stringify({
+    evidenceId: "evidence-good",
+    summary: "good evidence",
+    createdAt: "2026-07-04T12:00:00.000Z",
+  }), "utf8");
+  await fsp.writeFile(path.join(sampleDir, "bad-json.json"), "{", "utf8");
+  await fsp.writeFile(path.join(sampleDir, "good.json"), JSON.stringify({
+    sampleId: "sample-good",
+    summary: "good sample",
+    createdAt: "2026-07-04T12:01:00.000Z",
+  }), "utf8");
+  await fsp.writeFile(path.join(evalDir, "bad-json.json"), "{", "utf8");
+  await fsp.writeFile(path.join(evalDir, "good.json"), JSON.stringify({
+    evalTaskId: "eval-good",
+    summary: "good eval",
+    createdAt: "2026-07-04T12:02:00.000Z",
+  }), "utf8");
+
+  const library = await buildLearningLibrary(root);
+  const recordIds = library.records.map((record) => record.recordId);
+
+  assert.ok(recordIds.includes("evidence:evidence-good"));
+  assert.ok(recordIds.includes("sample:sample-good"));
+  assert.ok(recordIds.includes("eval:eval-good"));
+  assert.ok(library.accessIssues.some((issue) => issue.area === "evidence" && issue.path?.endsWith("bad-json.json") && issue.message));
+  assert.ok(library.accessIssues.some((issue) => issue.area === "samples" && issue.path?.endsWith("bad-json.json") && issue.message));
+  assert.ok(library.accessIssues.some((issue) => issue.area === "evals" && issue.path?.endsWith("bad-json.json") && issue.message));
+});
+
+test("buildLearningLibrary skips event records that fail public display mapping", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-event-issue-"));
+  const learningDir = path.join(root, "learning");
+  await fsp.mkdir(learningDir, { recursive: true });
+  await fsp.writeFile(path.join(learningDir, "events.jsonl"), [
+    JSON.stringify({
+      eventId: "event-good",
+      internalStatus: "received",
+      jobStatus: "waiting",
+      summary: "good event",
+      createdAt: "2026-07-04T12:00:00.000Z",
+      updatedAt: "2026-07-04T12:00:00.000Z",
+    }),
+    JSON.stringify({
+      eventId: "event-bad-proof",
+      internalStatus: "landed",
+      jobStatus: "completed",
+      landingType: "current-rule",
+      ruleId: "rule-bad-proof",
+      summary: "bad proof event",
+      generationProof: {
+        proofStatus: "not_applicable",
+        claimText: "bad combination",
+      },
+      createdAt: "2026-07-04T12:01:00.000Z",
+      updatedAt: "2026-07-04T12:01:00.000Z",
+    }),
+  ].join("\n"), "utf8");
+
+  const library = await buildLearningLibrary(root);
+
+  assert.ok(library.records.some((record) => record.recordId === "event:event-good"));
+  assert.equal(library.records.some((record) => record.recordId === "rule:rule-bad-proof"), false);
+  assert.ok(library.accessIssues.some((issue) =>
+    issue.area === "events" &&
+    issue.eventId === "event-bad-proof" &&
+    issue.message
+  ));
+});
+
 test("buildLearningLibrary assigns stable prefixed record ids for every learning item kind", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-record-ids-"));
   await fsp.mkdir(path.join(root, "learning", "evidence"), { recursive: true });
@@ -612,6 +698,17 @@ test("buildLearningLibrary assigns stable prefixed record ids for every learning
   for (const prefix of ["rule:", "sample:", "evidence:", "eval:", "eval-result:", "skill:", "event:"]) {
     assert.equal(Array.from(ids).includes(prefix), false, `${prefix} should not be emitted without an id`);
   }
+  for (const listName of ["impactItems", "sampleItems", "evalItems", "skillItems"]) {
+    assertNoDuplicateRecordIds(library[listName], listName);
+  }
+  assert.strictEqual(library.impactItems.filter((item) => item.recordId === "rule:rule-record").length, 1);
+  const impactRule = library.impactItems.find((item) => item.recordId === "rule:rule-record");
+  for (const internalField of ["topicKey", "conflictKey", "sourceEventIds", "ruleId"]) {
+    assert.equal(Object.hasOwn(impactRule, internalField), false);
+  }
+  assert.strictEqual(impactRule.advanced.ruleId, "rule-record");
+  assert.strictEqual(impactRule.advanced.topicKey, "storyboard.general");
+  assert.deepStrictEqual(impactRule.advanced.sourceEventIds, ["event-rule"]);
 });
 
 test("buildLearningLibrary returns available data and accessIssues when optional library areas fail", async () => {

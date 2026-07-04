@@ -17,31 +17,31 @@ async function buildLearningLibrary(root) {
     readEvalRecords(path.join(root, "learning", "evals"), accessIssues),
   ]);
 
-  const eventRecords = events.map(publicLearningRecord).filter(hasUsableRecordId);
+  const eventRecords = buildPublicLearningRecords(events, accessIssues);
   const evidenceRecords = evidenceResult.records.map(publicEvidenceRecord).filter(hasUsableRecordId);
   const sampleRecords = sampleResult.records.map(publicSampleRecord).filter(hasUsableRecordId);
   const evalRecords = evalResult.records.map(publicEvalRecord).filter(hasUsableRecordId);
   const materialRecords = [...evidenceRecords, ...sampleRecords];
   const records = sortLearningRecords([...eventRecords, ...materialRecords, ...evalRecords]);
-  const impactItems = sortLearningRecords([
-    ...(ruleset.rules || []).map(publicRule).filter(hasUsableRecordId),
+  const impactItems = sortLearningRecords(uniqueRecordsById([
+    ...(ruleset.rules || []).map(publicImpactRule).filter(hasUsableRecordId),
     ...eventRecords.filter((record) => record.affectsGeneration || record.recordId.startsWith("rule:")),
-  ]);
-  const sampleItems = sortLearningRecords([
+  ]));
+  const sampleItems = sortLearningRecords(uniqueRecordsById([
     ...materialRecords,
     ...eventRecords.filter((record) => record.recordId.startsWith("sample:") || record.recordId.startsWith("evidence:")),
-  ]);
-  const evalItems = sortLearningRecords([
+  ]));
+  const evalItems = sortLearningRecords(uniqueRecordsById([
     ...evalRecords,
     ...eventRecords.filter((record) =>
       record.recordId.startsWith("eval:") ||
       record.recordId.startsWith("eval-result:") ||
       ["sample-insufficient", "eval", "eval-result"].includes(record.advanced?.landingType)
     ),
-  ]);
-  const skillItems = skillRoutes(root, accessIssues)
+  ]));
+  const skillItems = uniqueRecordsById(skillRoutes(root, accessIssues)
     .map((route) => publicSkill(root, route, accessIssues))
-    .filter(hasUsableRecordId);
+    .filter(hasUsableRecordId));
 
   return {
     records: records,
@@ -50,7 +50,7 @@ async function buildLearningLibrary(root) {
     evalItems: evalItems,
     skillItems: skillItems,
     accessIssues: accessIssues,
-    currentRules: impactItems.filter((item) => item.ruleId),
+    currentRules: (ruleset.rules || []).map(publicCurrentRule).filter(hasUsableRecordId),
     skills: skillItems,
   };
 }
@@ -92,6 +92,22 @@ function publicLearningRecord(event) {
     ...record,
     correctionAction: buildCorrectionAction(record),
   };
+}
+
+function buildPublicLearningRecords(events, accessIssues) {
+  const records = [];
+  for (const event of events) {
+    try {
+      const record = publicLearningRecord(event);
+      if (hasUsableRecordId(record)) records.push(record);
+    } catch (error) {
+      accessIssues.push(accessIssue("events", error, path.join("learning", "events.jsonl"), {
+        eventId: normalizeString(event?.eventId),
+        count: 1,
+      }));
+    }
+  }
+  return records;
 }
 
 function learningEventRecordId(event = {}) {
@@ -210,7 +226,36 @@ function savedMaterialRecord(input) {
   };
 }
 
-function publicRule(rule) {
+function publicImpactRule(rule) {
+  return {
+    recordId: prefixedId("rule", rule.ruleId),
+    displayStatus: rule.status === "active" ? "已影响生成" : "已保存",
+    status: rule.status,
+    actionLabel: "不用管",
+    affectsGeneration: rule.status === "active",
+    generationImpactText: rule.status === "active"
+      ? "会参与后续生成：已进入当前规则层。"
+      : "当前规则已保留在规则层，但未处于启用状态。",
+    learnedText: rule.content,
+    sourceText: "当前规则",
+    usedWhereText: "当前规则层",
+    nextStepText: "无需处理，可通过规则列表启用或停用。",
+    createdAt: rule.createdAt,
+    updatedAt: rule.updatedAt,
+    advanced: {
+      ruleId: rule.ruleId,
+      topicKey: rule.topicKey,
+      conflictKey: rule.conflictKey,
+      capability: rule.capability,
+      priority: rule.priority,
+      sourceEventIds: normalizeStringArray(rule.sourceEventIds),
+      status: rule.status,
+      coveredByRuleId: rule.coveredByRuleId,
+    },
+  };
+}
+
+function publicCurrentRule(rule) {
   return {
     recordId: prefixedId("rule", rule.ruleId),
     ruleId: rule.ruleId,
@@ -306,8 +351,8 @@ async function readMaterialRecords(dir, idField, area, accessIssues) {
     try {
       const parsed = JSON.parse(await fsp.readFile(path.join(dir, entry.name), "utf8"));
       if (isValidMaterialRecord(parsed, idField)) records.push(parsed);
-    } catch {
-      continue;
+    } catch (error) {
+      accessIssues.push(accessIssue(area, error, path.join(dir, entry.name), { count: 1 }));
     }
   }
   return { records };
@@ -328,8 +373,8 @@ async function readEvalRecords(dir, accessIssues) {
     try {
       const parsed = JSON.parse(await fsp.readFile(file, "utf8"));
       if (isValidEvalRecord(parsed)) records.push(parsed);
-    } catch {
-      continue;
+    } catch (error) {
+      accessIssues.push(accessIssue("evals", error, file, { count: 1 }));
     }
   }
   return { records };
@@ -432,6 +477,18 @@ function sortLearningRecords(records) {
     });
 }
 
+function uniqueRecordsById(records) {
+  const unique = [];
+  const seen = new Set();
+  for (const record of records) {
+    const recordId = normalizeString(record?.recordId);
+    if (!recordId || seen.has(recordId)) continue;
+    seen.add(recordId);
+    unique.push(record);
+  }
+  return unique;
+}
+
 function hasUsableRecordId(record) {
   const recordId = normalizeString(record?.recordId);
   return Boolean(recordId && !/^[a-z-]+:$/.test(recordId));
@@ -442,11 +499,12 @@ function prefixedId(prefix, id) {
   return value ? `${prefix}:${value}` : "";
 }
 
-function accessIssue(area, error, filePath) {
+function accessIssue(area, error, filePath, extra = {}) {
   return {
     area,
     message: error?.message || String(error),
     ...(filePath ? { path: filePath } : {}),
+    ...extra,
   };
 }
 
