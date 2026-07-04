@@ -6261,7 +6261,12 @@ function renderLearningFailureSummary(record) {
     record.failureStage || record.stage || record.advanced?.failureStage || record.advanced?.stage || record.advanced?.error?.stage,
     "未返回明确阶段",
   );
-  const userFacingReason = record.failureReason || record.reason || record.error?.userMessage || record.advanced?.error?.userMessage;
+  const userFacingReason = record.failureReason
+    || record.reason
+    || record.error?.userMessage
+    || record.advanced?.error?.userMessage
+    || record.error?.message
+    || record.advanced?.error?.message;
   const reason = readableLearningFailureValue(
     userFacingReason,
     "学习流程处理失败，详情可在高级详情中查看。",

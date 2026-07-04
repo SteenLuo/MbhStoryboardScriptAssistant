@@ -67,6 +67,10 @@ function evaluateLearningRecordRenderer() {
   return sandbox.renderLearningRecordItem;
 }
 
+function learningRecordDefaultHtml(item) {
+  return item.innerHTML.split('<details class="learning-record-advanced">')[0];
+}
+
 function extractStyleBlock(selector) {
   const marker = `${selector} {`;
   const start = stylesSource.indexOf(marker);
@@ -401,7 +405,7 @@ test("learning record renderer keeps novice fields in the default card", () => {
   assert.match(failureSource, /是否影响生成/);
   assert.match(failureSource, /下一步/);
   assert.match(failureSource, /readableLearningFailureStage/);
-  assert.match(failureSource, /record\.failureReason\s*\|\|\s*record\.reason\s*\|\|\s*record\.error\?\.userMessage\s*\|\|\s*record\.advanced\?\.error\?\.userMessage/);
+  assert.match(failureSource, /record\.failureReason[\s\S]*record\.reason[\s\S]*record\.error\?\.userMessage[\s\S]*record\.advanced\?\.error\?\.userMessage[\s\S]*record\.error\?\.message[\s\S]*record\.advanced\?\.error\?\.message/);
   assert.doesNotMatch(failureSource, /internalReason/);
   assert.doesNotMatch(failureSource, /readableLearningFailureValue\([\s\S]*internalReason/);
   assert.match(failureStageSource, /write-learning-evidence/);
@@ -465,6 +469,46 @@ test("learning record renderer falls back to legacy status-only records", () => 
 
   assert.match(item.innerHTML, /已保存/);
   assert.doesNotMatch(item.innerHTML, /待确认/);
+});
+
+test("learning record renderer surfaces readable advanced error messages in default failure summary", () => {
+  const renderLearningRecordItem = evaluateLearningRecordRenderer();
+
+  const item = renderLearningRecordItem({
+    recordId: "advanced-readable-error",
+    displayStatus: "失败",
+    generationImpactText: "未影响生成",
+    advanced: {
+      error: {
+        message: "当前规则冲突：topic-key 已存在，需要人工确认",
+      },
+    },
+  });
+  const defaultHtml = learningRecordDefaultHtml(item);
+
+  assert.match(defaultHtml, /当前规则冲突/);
+  assert.match(defaultHtml, /需要人工确认/);
+  assert.doesNotMatch(defaultHtml, /topic-key/);
+  assert.doesNotMatch(defaultHtml, /学习流程处理失败，详情可在高级详情中查看。/);
+});
+
+test("learning record renderer keeps short technical advanced error messages out of default summary", () => {
+  const renderLearningRecordItem = evaluateLearningRecordRenderer();
+
+  const item = renderLearningRecordItem({
+    recordId: "advanced-technical-error",
+    displayStatus: "失败",
+    generationImpactText: "未影响生成",
+    advanced: {
+      error: {
+        message: "disk full",
+      },
+    },
+  });
+  const defaultHtml = learningRecordDefaultHtml(item);
+
+  assert.doesNotMatch(defaultHtml, /disk full/);
+  assert.match(defaultHtml, /学习流程处理失败，详情可在高级详情中查看。/);
 });
 
 test("learning failure summaries sanitize mixed Chinese technical details", () => {
