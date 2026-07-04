@@ -48,8 +48,9 @@ function legacyDisplayStatusForEvent(event = {}) {
   if (event.internalStatus === "failed" || event.jobStatus === "failed") return "失败";
   if (event.internalStatus === "covered") return "已被覆盖";
   if (event.internalStatus === "landed" && event.landingType === "current-rule") return "已生效";
-  if (event.jobStatus === "running" || event.internalStatus === "received") return "处理中";
   if (event.jobStatus === "waiting") return "待确认";
+  if (event.internalStatus === "validated") return "已影响生成";
+  if (event.jobStatus === "running" || event.internalStatus === "received") return "处理中";
   if (event.internalStatus === "landed" || event.jobStatus === "completed") return "已保存";
   return "待确认";
 }

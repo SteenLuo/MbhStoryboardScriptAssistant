@@ -110,3 +110,40 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   assert.strictEqual(hardIssueSkill.discovered, true);
   assert.ok(library.skills.every((skill) => skill.readonly === true));
 });
+
+test("buildLearningLibrary preserves legacy display statuses after event normalization", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-legacy-"));
+  const learningDir = path.join(root, "learning");
+  await fsp.mkdir(learningDir, { recursive: true });
+  await fsp.writeFile(
+    path.join(learningDir, "events.jsonl"),
+    [
+      JSON.stringify({
+        eventId: "event-waiting",
+        status: "待确认",
+        summary: "等待确认的旧事件",
+        createdAt: "2026-07-04T00:00:00.000Z",
+        updatedAt: "2026-07-04T00:00:00.000Z",
+      }),
+      JSON.stringify({
+        eventId: "event-validated",
+        status: "已影响生成",
+        summary: "已影响生成的旧事件",
+        createdAt: "2026-07-04T00:01:00.000Z",
+        updatedAt: "2026-07-04T00:01:00.000Z",
+      }),
+    ].join("\n"),
+    "utf8",
+  );
+
+  const library = await buildLearningLibrary(root);
+  const waiting = library.records.find((record) => record.eventId === "event-waiting");
+  const validated = library.records.find((record) => record.eventId === "event-validated");
+
+  assert.strictEqual(waiting.internalStatus, "received");
+  assert.strictEqual(waiting.jobStatus, "waiting");
+  assert.strictEqual(waiting.status, "待确认");
+  assert.strictEqual(validated.internalStatus, "validated");
+  assert.strictEqual(validated.jobStatus, "completed");
+  assert.strictEqual(validated.status, "已影响生成");
+});
