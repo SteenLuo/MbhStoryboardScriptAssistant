@@ -948,6 +948,8 @@ async function chatWithAssistant(body) {
           name: skillContext.name,
           path: skillContext.path,
           files: skillContext.files,
+          currentRulesUsed: skillContext.currentRulesUsed,
+          currentRulesLoadError: skillContext.currentRulesLoadError,
         }
       : null,
   });

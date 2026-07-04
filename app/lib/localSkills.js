@@ -1,7 +1,7 @@
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
-const { readCurrentRuleset } = require("./autonomousLearning");
+const { buildCurrentRulesetContext } = require("./currentRulesetContext");
 
 const SKILL_ROUTES = [
   {
@@ -103,13 +103,21 @@ async function loadLocalSkillContext(root, route, options = {}) {
     }
   }
 
-  await addCurrentRulesetSection(sections, files, root, selected);
+  const currentRulesetContext = await buildCurrentRulesetContext(root, { route: selected });
+  if (currentRulesetContext.promptText) {
+    sections.push(currentRulesetContext.promptText);
+    if (currentRulesetContext.sourceFile && !files.includes(currentRulesetContext.sourceFile)) {
+      files.push(currentRulesetContext.sourceFile);
+    }
+  }
 
   return {
     id: selected.id,
     name: selected.name,
     path: selected.path,
     files,
+    currentRulesUsed: currentRulesetContext.currentRulesUsed,
+    currentRulesLoadError: currentRulesetContext.loadError,
     prompt: [
       `【本轮本地技能】${selected.name}（${selected.id}）`,
       "以下内容来自本项目本地 skills 目录。你必须优先遵守这些技能说明；如果与普通聊天习惯冲突，以本地技能为准。",
@@ -123,30 +131,6 @@ async function addFileSection(sections, files, root, file, title, limitPerFile) 
   const text = await fsp.readFile(file, "utf8");
   files.push(relative);
   sections.push(`## ${title}：${relative}\n\n${text.slice(0, limitPerFile)}`);
-}
-
-async function addCurrentRulesetSection(sections, files, root, route) {
-  const rulesetPath = path.join(root, "learning", "current-ruleset.json");
-  if (!fs.existsSync(rulesetPath)) return;
-  const ruleset = await readCurrentRuleset(root);
-  const capability = capabilityForRoute(route);
-  const activeRules = (ruleset.rules || []).filter((rule) =>
-    rule.status === "active" &&
-    (capability === "all" || rule.capability === capability || rule.capability === "general")
-  );
-  if (!activeRules.length) return;
-  const relative = path.relative(root, rulesetPath).replace(/\\/g, "/");
-  files.push(relative);
-  const lines = activeRules.map((rule) => `- [${rule.topicKey}] ${rule.content}`);
-  sections.push(`## 当前规则层：${relative}\n\n${lines.join("\n")}`);
-}
-
-function capabilityForRoute(route) {
-  const id = route?.id || "";
-  if (id.includes("storyboard")) return "storyboard";
-  if (id.includes("script")) return "script";
-  if (id.includes("novel")) return "novel";
-  return "all";
 }
 
 function safeResolve(root, relativePath) {

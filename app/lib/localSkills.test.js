@@ -88,3 +88,44 @@ test("loadLocalSkillContext ignores legacy web confirmed preferences", async () 
   assert.doesNotMatch(context.prompt, /分镜避免连续固定镜头/);
   assert.ok(!context.files.includes("learning/accepted-rules/web-confirmed-preferences.md"));
 });
+
+test("loadLocalSkillContext includes current rules context and exposes currentRulesUsed", async () => {
+  const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-skill-rules-"));
+  const skillDir = path.join(tempRoot, "skills/03-storyboard/storyboard-generate");
+  await fsp.mkdir(skillDir, { recursive: true });
+  await fsp.writeFile(path.join(skillDir, "SKILL.md"), "# 分镜生成\n", "utf8");
+  await fsp.mkdir(path.join(tempRoot, "learning"), { recursive: true });
+  await fsp.writeFile(
+    path.join(tempRoot, "learning/current-ruleset.json"),
+    JSON.stringify({
+      version: 1,
+      lastGoodVersion: 1,
+      updatedAt: "2026-07-01T10:00:00.000Z",
+      rules: [{
+        ruleId: "rule-storyboard",
+        topicKey: "storyboard.dialogue.length",
+        conflictKey: "storyboard.dialogue.length",
+        capability: "storyboard",
+        content: "分镜台词每句 20 字以内。",
+        priority: 50,
+        sourceEventIds: ["event-storyboard"],
+        status: "active",
+      }],
+    }),
+    "utf8",
+  );
+
+  const context = await loadLocalSkillContext(tempRoot, routeLocalSkill("帮我生成分镜"));
+
+  assert.match(context.prompt, /当前规则层/);
+  assert.match(context.prompt, /分镜台词每句 20 字以内/);
+  assert.ok(context.files.includes("learning/current-ruleset.json"));
+  assert.deepStrictEqual(context.currentRulesUsed, [{
+    ruleId: "rule-storyboard",
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length",
+    capability: "storyboard",
+    sourceEventIds: ["event-storyboard"],
+    content: "分镜台词每句 20 字以内。",
+  }]);
+});

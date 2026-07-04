@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
@@ -39,10 +40,19 @@ test("learnExplicitRule publishes a valid rule into the current ruleset", async 
   assert.equal(result.event.landingType, "current-rule");
   assert.strictEqual(ruleset.rules.length, 1);
   assert.strictEqual(ruleset.rules[0].topicKey, "storyboard.dialogue.length");
+  assert.strictEqual(ruleset.rules[0].conflictKey, "storyboard.dialogue.length");
   assert.match(ruleset.rules[0].content, /20 字以内/);
   assert.strictEqual(events[0].internalStatus, "landed");
   assert.strictEqual(events[0].jobStatus, "completed");
   assert.strictEqual(events[0].landingType, "current-rule");
+
+  const snapshot = JSON.parse(await fsp.readFile(path.join(root, "learning/ruleset-history/v1.json"), "utf8"));
+  assert.strictEqual(snapshot.version, 1);
+  assert.strictEqual(snapshot.lastGoodVersion, 1);
+  assert.strictEqual(snapshot.createdAt, "2026-07-01T10:00:00.000Z");
+  assert.deepStrictEqual(snapshot.sourceEventIds, ["event-1"]);
+  assert.strictEqual(snapshot.rules[0].ruleId, "rule-event-1");
+  assert.strictEqual(snapshot.rules[0].conflictKey, "storyboard.dialogue.length");
 
   const rawRecords = (await fsp.readFile(path.join(root, "learning/events.jsonl"), "utf8"))
     .trim()
@@ -100,6 +110,7 @@ test("learnExplicitRule records failure without replacing last-good ruleset", as
     capability: "storyboard",
     sourceType: "conversation",
   }, options);
+  const lastGoodSnapshot = await fsp.readFile(path.join(root, "learning/ruleset-history/v1.json"), "utf8");
   const failed = await learnExplicitRule(root, {
     rawTrigger: "以后分镜台词限制",
     summary: "",
@@ -113,9 +124,116 @@ test("learnExplicitRule records failure without replacing last-good ruleset", as
   assert.strictEqual(failed.event.internalStatus, "failed");
   assert.strictEqual(failed.event.jobStatus, "failed");
   assert.match(failed.event.error.message, /规则内容为空/);
+  assert.strictEqual(ruleset.version, 1);
+  assert.strictEqual(ruleset.lastGoodVersion, 1);
   assert.strictEqual(ruleset.rules.filter((rule) => rule.status === "active").length, 1);
   assert.match(ruleset.rules[0].content, /20 字以内/);
   assert.strictEqual(events.find((event) => event.eventId === "event-bad").internalStatus, "failed");
+  assert.strictEqual(await fsp.readFile(path.join(root, "learning/ruleset-history/v1.json"), "utf8"), lastGoodSnapshot);
+  assert.strictEqual(fs.existsSync(path.join(root, "learning/ruleset-history/v2.json")), false);
+});
+
+test("learnExplicitRule validates overall mode conflictKey and expectedVersion before publishing", async () => {
+  const root = await tempRoot();
+
+  await learnExplicitRule(root, {
+    rawTrigger: "dialogue max 20 chars",
+    summary: "dialogue max 20 chars",
+    capability: "storyboard",
+    conflictKey: "storyboard.dialogue.length",
+    sourceType: "conversation",
+    expectedVersion: 0,
+  }, {
+    now: () => "2026-07-01T10:00:00.000Z",
+    idSource: () => "event-good",
+  });
+
+  const before = await readCurrentRuleset(root);
+  assert.strictEqual(before.version, 1);
+  assert.strictEqual(before.lastGoodVersion, 1);
+
+  const expectedVersionMismatch = await learnExplicitRule(root, {
+    rawTrigger: "storyboard shot numbering",
+    summary: "storyboard shot numbering",
+    capability: "storyboard",
+    conflictKey: "storyboard.shot.numbering",
+    sourceType: "conversation",
+    expectedVersion: 0,
+  }, {
+    now: () => "2026-07-01T10:05:00.000Z",
+    idSource: () => "event-version-mismatch",
+  });
+
+  const temporaryMode = await learnExplicitRule(root, {
+    rawTrigger: "temporary only",
+    summary: "temporary only",
+    capability: "storyboard",
+    conflictKey: "storyboard.temporary",
+    learningMode: "temporary",
+    sourceType: "conversation",
+  }, {
+    now: () => "2026-07-01T10:10:00.000Z",
+    idSource: () => "event-temporary",
+  });
+
+  const emptyConflictKey = await learnExplicitRule(root, {
+    rawTrigger: "empty conflict",
+    summary: "empty conflict",
+    capability: "storyboard",
+    conflictKey: " ",
+    sourceType: "conversation",
+  }, {
+    now: () => "2026-07-01T10:15:00.000Z",
+    idSource: () => "event-empty-conflict",
+  });
+
+  const after = await readCurrentRuleset(root);
+  assert.strictEqual(expectedVersionMismatch.event.internalStatus, "failed");
+  assert.match(expectedVersionMismatch.event.error.message, /expectedVersion|版本|version/);
+  assert.strictEqual(temporaryMode.event.internalStatus, "failed");
+  assert.match(temporaryMode.event.error.message, /overall|当前规则|learningMode/);
+  assert.strictEqual(emptyConflictKey.event.internalStatus, "failed");
+  assert.match(emptyConflictKey.event.error.message, /conflictKey|冲突键/);
+  assert.deepStrictEqual(after, before);
+  assert.strictEqual(fs.existsSync(path.join(root, "learning/ruleset-history/v2.json")), false);
+});
+
+test("learnExplicitRule covers older same-conflict rules when a newer rule succeeds", async () => {
+  const root = await tempRoot();
+  let index = 0;
+  const ids = ["event-script", "event-storyboard"];
+  const times = ["2026-07-01T10:00:00.000Z", "2026-07-01T10:20:00.000Z"];
+  const options = {
+    now: () => times[index],
+    idSource: () => ids[index++],
+  };
+
+  await learnExplicitRule(root, {
+    rawTrigger: "script shared conflict",
+    summary: "script shared conflict",
+    capability: "script",
+    conflictKey: "shared.output.format",
+    sourceType: "conversation",
+  }, options);
+  await learnExplicitRule(root, {
+    rawTrigger: "storyboard shared conflict",
+    summary: "storyboard shared conflict",
+    capability: "storyboard",
+    conflictKey: "shared.output.format",
+    sourceType: "conversation",
+  }, options);
+
+  const ruleset = await readCurrentRuleset(root);
+  const activeRules = ruleset.rules.filter((rule) => rule.status === "active");
+  const coveredRule = ruleset.rules.find((rule) => rule.ruleId === "rule-event-script");
+
+  assert.strictEqual(ruleset.version, 2);
+  assert.strictEqual(ruleset.lastGoodVersion, 2);
+  assert.strictEqual(activeRules.length, 1);
+  assert.strictEqual(activeRules[0].ruleId, "rule-event-storyboard");
+  assert.strictEqual(activeRules[0].conflictKey, "shared.output.format");
+  assert.strictEqual(coveredRule.status, "covered");
+  assert.strictEqual(coveredRule.coveredByRuleId, "rule-event-storyboard");
 });
 
 test("learnExplicitRule notifies failure and withdraws stale failure when a newer same-topic rule succeeds", async () => {

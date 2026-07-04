@@ -21,16 +21,27 @@ function rulesetFile(root) {
   return path.join(learningDir(root), "current-ruleset.json");
 }
 
+function rulesetHistoryDir(root) {
+  return path.join(learningDir(root), "ruleset-history");
+}
+
+function rulesetSnapshotFile(root, version) {
+  return path.join(rulesetHistoryDir(root), `v${Number(version || 0)}.json`);
+}
+
 async function learnExplicitRule(root, input = {}, options = {}) {
   const now = options.now || (() => new Date().toISOString());
   const idSource = options.idSource || (() => `learn-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`);
   const createdAt = now();
   const eventId = input.eventId || idSource();
   const topicKey = inferTopicKey(input);
+  const conflictKey = Object.hasOwn(input, "conflictKey")
+    ? String(input.conflictKey || "").trim()
+    : topicKey;
   const baseEvent = normalizeEvent({
     eventId,
     topicKey,
-    conflictKey: topicKey,
+    conflictKey,
     sourceType: input.sourceType || "conversation",
     sourceEventIds: input.sourceEventIds,
     landingIds: input.landingIds,
@@ -52,21 +63,31 @@ async function learnExplicitRule(root, input = {}, options = {}) {
   await appendLearningEvent(root, baseEvent);
 
   try {
-    const content = baseEvent.summary.trim();
+    const content = String(input.content || baseEvent.summary).trim();
+    if (baseEvent.learningMode !== "overall") {
+      throw new Error(`只有 learningMode=overall 可以发布到当前规则层：${baseEvent.learningMode}`);
+    }
     if (!content) throw new Error("规则内容为空，无法发布到当前规则层");
+    if (!conflictKey) throw new Error("conflictKey 不能为空，无法发布到当前规则层");
 
-    const ruleset = await readCurrentRuleset(root);
+    const ruleset = await readCurrentRulesetStrict(root);
+    const expectedVersion = normalizeOptionalVersion(
+      Object.hasOwn(input, "expectedVersion") ? input.expectedVersion : options.expectedVersion,
+    );
+    if (expectedVersion !== null && expectedVersion !== Number(ruleset.version || 0)) {
+      throw new Error(`expectedVersion 不匹配：当前版本 ${Number(ruleset.version || 0)}，收到 ${expectedVersion}`);
+    }
     const existingEvents = await listLearningEvents(root, { includeCovered: true });
     const publishTime = now();
     const newRuleId = `rule-${eventId}`;
     const nextRules = (ruleset.rules || []).map((rule) =>
-      rule.topicKey === topicKey && [ACTIVE_STATUS, DISABLED_STATUS].includes(rule.status)
+      isSameTopicOrConflict(rule, topicKey, conflictKey) && [ACTIVE_STATUS, DISABLED_STATUS].includes(rule.status)
         ? { ...rule, status: COVERED_STATUS, coveredByRuleId: newRuleId, updatedAt: publishTime }
         : rule
     );
     const coveredEvents = existingEvents.filter((event) =>
       event.eventId !== eventId &&
-      event.topicKey === topicKey &&
+      isSameTopicOrConflict(event, topicKey, conflictKey) &&
       event.internalStatus !== "covered" &&
       event.internalStatus !== "failed"
     );
@@ -75,7 +96,7 @@ async function learnExplicitRule(root, input = {}, options = {}) {
       ...coveredEvents,
       ...existingEvents.filter((item) =>
         item.eventId !== eventId &&
-        item.topicKey === topicKey &&
+        isSameTopicOrConflict(item, topicKey, conflictKey) &&
         item.internalStatus === "failed" &&
         !coveredEvents.some((covered) => covered.eventId === item.eventId)
       ),
@@ -101,6 +122,7 @@ async function learnExplicitRule(root, input = {}, options = {}) {
         {
           ruleId: newRuleId,
           topicKey,
+          conflictKey,
           capability: baseEvent.capability,
           content,
           priority: Number(input.priority || 50),
@@ -112,7 +134,7 @@ async function learnExplicitRule(root, input = {}, options = {}) {
       ],
     };
     validateRuleset(nextRuleset);
-    await writeCurrentRuleset(root, nextRuleset);
+    const writtenRuleset = await writeCurrentRuleset(root, nextRuleset);
 
     const event = normalizeEvent({
       ...baseEvent,
@@ -124,7 +146,7 @@ async function learnExplicitRule(root, input = {}, options = {}) {
       updatedAt: publishTime,
     });
     await appendLearningEvent(root, event);
-    return { event, ruleset: nextRuleset };
+    return { event, ruleset: writtenRuleset };
   } catch (error) {
     const failedAt = now();
     const event = normalizeEvent({
@@ -155,30 +177,59 @@ async function learnExplicitRule(root, input = {}, options = {}) {
 }
 
 async function readCurrentRuleset(root) {
-  const file = rulesetFile(root);
-  if (!fs.existsSync(file)) {
-    return { version: 0, lastGoodVersion: 0, updatedAt: "", rules: [] };
-  }
   try {
-    const parsed = JSON.parse(await fsp.readFile(file, "utf8"));
-    const ruleset = {
-      version: Number(parsed.version || 0),
-      lastGoodVersion: Number(parsed.lastGoodVersion || parsed.version || 0),
-      updatedAt: String(parsed.updatedAt || ""),
-      rules: Array.isArray(parsed.rules) ? parsed.rules.map(normalizeRule).filter(Boolean) : [],
-    };
-    validateRuleset(ruleset);
-    return ruleset;
+    return await readCurrentRulesetStrict(root);
   } catch {
     return { version: 0, lastGoodVersion: 0, updatedAt: "", rules: [] };
   }
 }
 
-async function writeCurrentRuleset(root, ruleset) {
+async function readCurrentRulesetStrict(root) {
+  const file = rulesetFile(root);
+  if (!fs.existsSync(file)) {
+    return normalizeRuleset({ version: 0, lastGoodVersion: 0, updatedAt: "", rules: [] });
+  }
+  const parsed = JSON.parse(await fsp.readFile(file, "utf8"));
+  const ruleset = normalizeRuleset(parsed);
   validateRuleset(ruleset);
+  return ruleset;
+}
+
+async function writeCurrentRuleset(root, ruleset) {
+  const normalized = normalizeRuleset(ruleset);
+  validateRuleset(normalized);
   const file = rulesetFile(root);
   await fsp.mkdir(path.dirname(file), { recursive: true });
-  await fsp.writeFile(file, JSON.stringify(ruleset, null, 2), "utf8");
+  await fsp.writeFile(file, JSON.stringify(normalized, null, 2), "utf8");
+  await writeRulesetSnapshot(root, normalized);
+  return normalized;
+}
+
+async function writeRulesetSnapshot(root, ruleset) {
+  const version = Number(ruleset.version || 0);
+  if (!version) return null;
+  const snapshot = {
+    version,
+    lastGoodVersion: Number(ruleset.lastGoodVersion || version),
+    createdAt: String(ruleset.updatedAt || ruleset.createdAt || new Date().toISOString()),
+    sourceEventIds: collectSourceEventIds(ruleset.rules),
+    rules: ruleset.rules,
+  };
+  const file = rulesetSnapshotFile(root, version);
+  await fsp.mkdir(path.dirname(file), { recursive: true });
+  await fsp.writeFile(file, JSON.stringify(snapshot, null, 2), "utf8");
+  return snapshot;
+}
+
+function collectSourceEventIds(rules = []) {
+  const ids = new Set();
+  for (const rule of rules) {
+    for (const id of Array.isArray(rule.sourceEventIds) ? rule.sourceEventIds : []) {
+      const value = String(id || "").trim();
+      if (value) ids.add(value);
+    }
+  }
+  return Array.from(ids);
 }
 
 async function updateCurrentRuleStatus(root, input = {}, options = {}) {
@@ -191,7 +242,7 @@ async function updateCurrentRuleStatus(root, input = {}, options = {}) {
     throw new Error("当前规则只允许启用或停用");
   }
 
-  const ruleset = await readCurrentRuleset(root);
+  const ruleset = await readCurrentRulesetStrict(root);
   const rule = (ruleset.rules || []).find((item) => item.ruleId === ruleId);
   if (!rule) throw new Error(`当前规则不存在：${ruleId}`);
   if (rule.status === COVERED_STATUS || rule.coveredByRuleId) {
@@ -202,11 +253,13 @@ async function updateCurrentRuleStatus(root, input = {}, options = {}) {
   }
 
   if (nextStatus === ACTIVE_STATUS) {
-    const activeSameTopic = (ruleset.rules || []).find((item) =>
-      item.ruleId !== ruleId && item.topicKey === rule.topicKey && item.status === ACTIVE_STATUS
+    const activeSameRule = (ruleset.rules || []).find((item) =>
+      item.ruleId !== ruleId &&
+      item.status === ACTIVE_STATUS &&
+      isSameTopicOrConflict(item, rule.topicKey, rule.conflictKey)
     );
-    if (activeSameTopic) {
-      throw new Error(`同一主题已存在启用规则：${rule.topicKey}`);
+    if (activeSameRule) {
+      throw new Error(`同一主题已存在启用规则或同一冲突键已存在启用规则：${rule.topicKey} / ${rule.conflictKey}`);
     }
   }
 
@@ -223,11 +276,11 @@ async function updateCurrentRuleStatus(root, input = {}, options = {}) {
     ),
   };
   validateRuleset(nextRuleset);
-  await writeCurrentRuleset(root, nextRuleset);
+  const writtenRuleset = await writeCurrentRuleset(root, nextRuleset);
 
   return {
-    rule: nextRuleset.rules.find((item) => item.ruleId === ruleId),
-    ruleset: nextRuleset,
+    rule: writtenRuleset.rules.find((item) => item.ruleId === ruleId),
+    ruleset: writtenRuleset,
   };
 }
 
@@ -273,18 +326,32 @@ function validateRuleset(ruleset) {
   if (!ruleset || typeof ruleset !== "object") throw new Error("当前规则层结构不合法");
   if (!Array.isArray(ruleset.rules)) throw new Error("当前规则层缺少 rules 数组");
   const activeTopics = new Set();
+  const activeConflicts = new Set();
   for (const rule of ruleset.rules) {
-    if (!rule.ruleId || !rule.topicKey || !rule.capability || !rule.content || !rule.status) {
+    const normalizedRule = normalizeRule(rule);
+    if (!normalizedRule) throw new Error("当前规则层规则字段不完整");
+    if (!normalizedRule.ruleId || !normalizedRule.topicKey || !normalizedRule.conflictKey || !normalizedRule.capability || !normalizedRule.content || !normalizedRule.status) {
       throw new Error("当前规则层规则字段不完整");
     }
-    if (!RULE_STATUSES.has(rule.status)) {
-      throw new Error(`当前规则状态不合法：${rule.status}`);
+    if (!RULE_STATUSES.has(normalizedRule.status)) {
+      throw new Error(`当前规则状态不合法：${normalizedRule.status}`);
     }
-    if (rule.status === ACTIVE_STATUS) {
-      if (activeTopics.has(rule.topicKey)) throw new Error(`同一主题存在多个生效规则：${rule.topicKey}`);
-      activeTopics.add(rule.topicKey);
+    if (normalizedRule.status === ACTIVE_STATUS) {
+      if (activeTopics.has(normalizedRule.topicKey)) throw new Error(`同一主题存在多个生效规则：${normalizedRule.topicKey}`);
+      if (activeConflicts.has(normalizedRule.conflictKey)) throw new Error(`同一冲突键存在多个生效规则：${normalizedRule.conflictKey}`);
+      activeTopics.add(normalizedRule.topicKey);
+      activeConflicts.add(normalizedRule.conflictKey);
     }
   }
+}
+
+function normalizeRuleset(ruleset = {}) {
+  return {
+    version: Number(ruleset.version || 0),
+    lastGoodVersion: Number(ruleset.lastGoodVersion || ruleset.version || 0),
+    updatedAt: String(ruleset.updatedAt || ""),
+    rules: Array.isArray(ruleset.rules) ? ruleset.rules.map(normalizeRule) : [],
+  };
 }
 
 function normalizeEvent(event) {
@@ -301,9 +368,12 @@ function normalizeEvent(event) {
 
 function normalizeRule(rule) {
   if (!rule || typeof rule !== "object") return null;
+  const topicKey = String(rule.topicKey || "").trim();
+  const conflictKey = String(rule.conflictKey || topicKey).trim();
   return {
     ruleId: String(rule.ruleId || "").trim(),
-    topicKey: String(rule.topicKey || "").trim(),
+    topicKey,
+    conflictKey,
     capability: String(rule.capability || "").trim(),
     content: String(rule.content || "").trim(),
     priority: Number(rule.priority || 50),
@@ -313,6 +383,20 @@ function normalizeRule(rule) {
     createdAt: String(rule.createdAt || ""),
     updatedAt: String(rule.updatedAt || ""),
   };
+}
+
+function isSameTopicOrConflict(item, topicKey, conflictKey) {
+  if (!item || typeof item !== "object") return false;
+  return String(item.topicKey || "") === topicKey || String(item.conflictKey || "") === conflictKey;
+}
+
+function normalizeOptionalVersion(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const version = Number(value);
+  if (!Number.isInteger(version) || version < 0) {
+    throw new Error(`expectedVersion 不合法：${value}`);
+  }
+  return version;
 }
 
 function inferTopicKey(input = {}) {
@@ -346,6 +430,7 @@ module.exports = {
   appendLearningEvent,
   learnExplicitRule,
   listLearningEvents,
+  normalizeRuleset,
   readCurrentRuleset,
   readLearningEventRecords,
   updateCurrentRuleStatus,

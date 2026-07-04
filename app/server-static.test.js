@@ -75,6 +75,12 @@ test("chat composer can force dedicated review and adaptation skills", () => {
   assert.match(chatSource, /forcedSkillRoute \|\| routeLocalSkill/);
 });
 
+test("chat assistant skillRoute includes current rules trace refs", () => {
+  const chatSource = extractFunction("chatWithAssistant");
+
+  assert.match(chatSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
+});
+
 test("canvas revision endpoint only updates revision nodes once", () => {
   const reviseSource = extractFunction("reviseCanvasNode");
 
