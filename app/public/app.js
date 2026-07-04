@@ -6200,7 +6200,7 @@ function renderLearningRecordItem(record) {
   const item = document.createElement("article");
   const key = learningRecordKey(record);
   const failed = isFailedLearningRecord(record);
-  const displayStatus = record.displayStatus || "待确认";
+  const displayStatus = normalizeLearningDisplayStatus(record.displayStatus, "待确认");
   item.className = `learning-library-item status-${safeClassName(displayStatus)}`;
   item.dataset.learningRecordKey = key;
   item.classList.toggle("failed", failed);
@@ -6295,9 +6295,13 @@ function readableLearningFailureStage(value, fallback) {
   };
   const text = String(value || "").trim();
   if (!text) return fallback;
-  if (hasChineseText(text)) return text.split(/\r?\n/).find((line) => line.trim()) || fallback;
   const normalized = text.toLowerCase().replace(/_/g, "-").replace(/\s+/g, "-");
   if (learningFailureStageLabels[normalized]) return learningFailureStageLabels[normalized];
+  const knownStageCode = Object.keys(learningFailureStageLabels)
+    .find((code) => normalized.includes(code));
+  if (knownStageCode) return learningFailureStageLabels[knownStageCode];
+  if (isTechnicalLearningFailureValue(text) || isInternalLearningCode(text)) return "学习流程处理";
+  if (hasChineseText(text)) return text.split(/\r?\n/).find((line) => line.trim()) || fallback;
   return "学习流程处理";
 }
 
@@ -6330,27 +6334,31 @@ function hasChineseText(value) {
 
 function isInternalLearningCode(value) {
   const text = String(value || "").trim();
-  return !hasChineseText(text) && text.length <= 80 && /^[a-z0-9]+(?:[-_][a-z0-9]+){1,6}$/i.test(text);
+  return (text.length <= 80 && /^[a-z0-9]+(?:[-_][a-z0-9]+){1,6}$/i.test(text))
+    || /\b[a-z][a-z0-9]+(?:[-_][a-z0-9]+){1,6}\b/i.test(text);
 }
 
 function isShortEnglishLearningFailureValue(value) {
   const text = String(value || "").trim();
-  if (!text || hasChineseText(text)) return false;
-  const commonShortEnglishFailures = /^(?:disk full|permission denied|timeout|network error|request failed)$/i;
+  if (!text) return false;
+  const commonShortEnglishFailures = /\b(?:disk full|permission denied|timeout|network error|request failed)\b/i;
+  if (commonShortEnglishFailures.test(text)) return true;
+  if (hasChineseText(text)) return false;
   return commonShortEnglishFailures.test(text)
     || (text.length <= 80 && /^[a-z0-9][a-z0-9\s._:/\\-]*$/i.test(text));
 }
 
 function isTechnicalLearningFailureValue(value) {
   const text = String(value || "");
-  return /\b(?:Error|TypeError|ReferenceError|SyntaxError|RangeError):/i.test(text)
+  return /\b(?:Error|TypeError|ReferenceError|SyntaxError|RangeError)(?::|\b)/i.test(text)
     || /\b(?:ENOENT|EACCES|EPERM|ECONNREFUSED|ETIMEDOUT)\b/i.test(text)
     || /JSON\s*parse|Unexpected token/i.test(text)
+    || /\bstack\b/i.test(text)
     || /\bat\s+[\w.$<>]+\s*\(/.test(text)
     || /\b[A-Za-z]:\\[^\s"'<>]+/.test(text)
     || /\/(?:Users|home|var|tmp|app|src|mnt)\/[^\s"'<>]+/.test(text)
     || /\bBearer\s+[A-Za-z0-9._-]+/.test(text)
-    || /\b(api[_-]?key|token|secret)\b\s*[:=]\s*\S+/i.test(text)
+    || /\b(api[_-]?key|token|secret)\b(?:\s*[:=]\s*\S+)?/i.test(text)
     || /\b[a-z][a-z0-9]+(?:[-_][a-z0-9]+){1,6}\b/.test(text);
 }
 
@@ -6575,16 +6583,21 @@ function setTextIfPresent(id, value) {
   if (node) node.textContent = value;
 }
 
-function formatLearningStatus(status) {
+function normalizeLearningDisplayStatus(status, fallback = "处理中") {
   const value = String(status || "").trim();
   const labels = {
     active: "已保存",
+    "已生效": "已保存",
     disabled: "已停用",
     covered: "已被覆盖",
     queued: "待确认",
     failed_retrying: "待确认",
   };
-  return labels[value] || value || "处理中";
+  return labels[value] || value || fallback;
+}
+
+function formatLearningStatus(status) {
+  return normalizeLearningDisplayStatus(status);
 }
 
 function formatCurrentRuleStatus(status) {

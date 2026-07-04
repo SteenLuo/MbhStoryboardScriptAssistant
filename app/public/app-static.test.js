@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const vm = require("node:vm");
 
 const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const stylesSource = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
@@ -13,6 +14,13 @@ function extractFunction(name) {
   assert.notEqual(start, -1, `${name} should exist`);
   const next = appSource.indexOf("\nfunction ", start + marker.length);
   return appSource.slice(start, next === -1 ? appSource.length : next);
+}
+
+function evaluateAppFunctions(names) {
+  const sandbox = {};
+  const source = `${names.map(extractFunction).join("\n")}\n${names.map((name) => `globalThis.${name} = ${name};`).join("\n")}`;
+  vm.runInNewContext(source, sandbox);
+  return sandbox;
 }
 
 function extractStyleBlock(selector) {
@@ -304,6 +312,7 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
 
 test("learning record renderer keeps novice fields in the default card", () => {
   const renderRecordSource = extractFunction("renderLearningRecordItem");
+  const normalizeDisplayStatusSource = extractFunction("normalizeLearningDisplayStatus");
   const advancedSource = extractFunction("renderLearningAdvancedDetails");
   const advancedPayloadSource = extractFunction("learningAdvancedPayload");
   const failureSource = extractFunction("renderLearningFailureSummary");
@@ -314,7 +323,12 @@ test("learning record renderer keeps novice fields in the default card", () => {
   const failedSource = extractFunction("isFailedLearningRecord");
 
   assert.match(renderRecordSource, /record\.learnedText/);
-  assert.match(renderRecordSource, /record\.displayStatus\s*\|\|\s*"待确认"/);
+  assert.match(renderRecordSource, /normalizeLearningDisplayStatus\(record\.displayStatus,\s*"待确认"\)/);
+  assert.doesNotMatch(renderRecordSource, /record\.displayStatus\s*\|\|\s*"待确认"/);
+  assert.match(normalizeDisplayStatusSource, /"已生效"\s*:\s*"已保存"/);
+  assert.match(normalizeDisplayStatusSource, /active\s*:\s*"已保存"/);
+  assert.match(normalizeDisplayStatusSource, /queued\s*:\s*"待确认"/);
+  assert.match(normalizeDisplayStatusSource, /failed_retrying\s*:\s*"待确认"/);
   assert.match(renderRecordSource, /record\.actionLabel/);
   assert.match(renderRecordSource, /record\.sourceText/);
   assert.match(renderRecordSource, /record\.usedWhereText/);
@@ -381,6 +395,40 @@ test("learning record renderer keeps novice fields in the default card", () => {
   assert.doesNotMatch(renderRecordSource, /formatLearningTokenUsage\(record\.tokenUsage\)/);
   assert.doesNotMatch(appSource, /还没有沉淀学习记录。后续在对话、样例学习或画布归档中产生的结果会出现在这里。/);
   assert.match(appSource, /还没有学习记录；当你说以后都这样、投喂样例或归档画布后，会出现在这里/);
+});
+
+test("learning visible status normalizes legacy active display text", () => {
+  const { normalizeLearningDisplayStatus, formatLearningStatus } = evaluateAppFunctions([
+    "normalizeLearningDisplayStatus",
+    "formatLearningStatus",
+  ]);
+
+  assert.equal(normalizeLearningDisplayStatus("已生效"), "已保存");
+  assert.equal(normalizeLearningDisplayStatus("active"), "已保存");
+  assert.equal(normalizeLearningDisplayStatus("queued"), "待确认");
+  assert.equal(normalizeLearningDisplayStatus("failed_retrying"), "待确认");
+  assert.equal(normalizeLearningDisplayStatus("", "待确认"), "待确认");
+  assert.equal(formatLearningStatus("已生效"), "已保存");
+});
+
+test("learning failure summaries hide mixed Chinese technical details", () => {
+  const {
+    readableLearningFailureStage,
+    readableLearningFailureValue,
+  } = evaluateAppFunctions([
+    "hasChineseText",
+    "isInternalLearningCode",
+    "isShortEnglishLearningFailureValue",
+    "isTechnicalLearningFailureValue",
+    "readableLearningFailureStage",
+    "readableLearningFailureValue",
+  ]);
+
+  assert.equal(readableLearningFailureStage("write-learning-evidence 写入失败", "未返回明确阶段"), "写入学习证据");
+  assert.equal(
+    readableLearningFailureValue("学习失败：disk full", "fallback", { hideTechnical: true }),
+    "学习流程处理失败，详情可在高级详情中查看。",
+  );
 });
 
 test("learning correction button fills composer and sends pending correction payload", () => {
