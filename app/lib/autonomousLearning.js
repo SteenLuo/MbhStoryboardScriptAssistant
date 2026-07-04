@@ -198,27 +198,101 @@ async function readCurrentRulesetStrict(root) {
 async function writeCurrentRuleset(root, ruleset) {
   const normalized = normalizeRuleset(ruleset);
   validateRuleset(normalized);
-  const file = rulesetFile(root);
-  await writeRulesetSnapshot(root, normalized);
-  await fsp.mkdir(path.dirname(file), { recursive: true });
-  await fsp.writeFile(file, JSON.stringify(normalized, null, 2), "utf8");
+  await writeRulesetFilesAtomically(root, normalized);
   return normalized;
 }
 
-async function writeRulesetSnapshot(root, ruleset) {
+async function writeRulesetFilesAtomically(root, ruleset) {
+  const learningPath = learningDir(root);
+  const historyPath = rulesetHistoryDir(root);
+  const currentPath = rulesetFile(root);
+  const snapshotPath = rulesetSnapshotFile(root, ruleset.version);
+  const tempId = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const currentTempPath = path.join(learningPath, `.current-ruleset.json.tmp-${tempId}`);
+  const snapshotTempPath = path.join(historyPath, `.v${Number(ruleset.version || 0)}.json.tmp-${tempId}`);
+  const rulesetText = JSON.stringify(ruleset, null, 2);
+  const snapshotText = JSON.stringify(buildRulesetSnapshot(ruleset), null, 2);
+  let snapshotPromoted = false;
+  let hadPreviousSnapshot = false;
+  let previousSnapshot = null;
+
+  try {
+    await fsp.mkdir(learningPath, { recursive: true });
+    await fsp.mkdir(historyPath, { recursive: true });
+    await fsp.writeFile(snapshotTempPath, snapshotText, "utf8");
+    await fsp.writeFile(currentTempPath, rulesetText, "utf8");
+
+    hadPreviousSnapshot = fs.existsSync(snapshotPath);
+    if (hadPreviousSnapshot) previousSnapshot = await fsp.readFile(snapshotPath);
+
+    await fsp.rename(snapshotTempPath, snapshotPath);
+    snapshotPromoted = true;
+    await fsp.rename(currentTempPath, currentPath);
+  } catch (error) {
+    await cleanupRulesetPublishFiles({
+      currentTempPath,
+      snapshotTempPath,
+      snapshotPath,
+      snapshotPromoted,
+      hadPreviousSnapshot,
+      previousSnapshot,
+      error,
+    });
+    throw error;
+  }
+}
+
+function buildRulesetSnapshot(ruleset) {
   const version = Number(ruleset.version || 0);
-  if (!version) return null;
-  const snapshot = {
+  return {
     version,
     lastGoodVersion: Number(ruleset.lastGoodVersion || version),
     createdAt: String(ruleset.updatedAt || ruleset.createdAt || new Date().toISOString()),
     sourceEventIds: collectSourceEventIds(ruleset.rules),
     rules: ruleset.rules,
   };
-  const file = rulesetSnapshotFile(root, version);
-  await fsp.mkdir(path.dirname(file), { recursive: true });
-  await fsp.writeFile(file, JSON.stringify(snapshot, null, 2), "utf8");
-  return snapshot;
+}
+
+async function cleanupRulesetPublishFiles({
+  currentTempPath,
+  snapshotTempPath,
+  snapshotPath,
+  snapshotPromoted,
+  hadPreviousSnapshot,
+  previousSnapshot,
+  error,
+}) {
+  const cleanupErrors = [];
+  await Promise.all([
+    removeFileIfExists(currentTempPath, cleanupErrors),
+    removeFileIfExists(snapshotTempPath, cleanupErrors),
+  ]);
+  if (!snapshotPromoted) {
+    if (cleanupErrors.length) {
+      error.message = `${error.message || String(error)}；${cleanupErrors.join("；")}`;
+    }
+    return;
+  }
+  try {
+    if (hadPreviousSnapshot) {
+      await fsp.writeFile(snapshotPath, previousSnapshot);
+    } else {
+      await removeFileIfExists(snapshotPath, cleanupErrors);
+    }
+  } catch (rollbackError) {
+    cleanupErrors.push(`规则快照回滚失败：${rollbackError.message || String(rollbackError)}`);
+  }
+  if (cleanupErrors.length) {
+    error.message = `${error.message || String(error)}；${cleanupErrors.join("；")}`;
+  }
+}
+
+async function removeFileIfExists(file, cleanupErrors = []) {
+  try {
+    await fsp.unlink(file);
+  } catch (error) {
+    if (error?.code !== "ENOENT") cleanupErrors.push(`临时文件清理失败：${file}：${error.message || String(error)}`);
+  }
 }
 
 function collectSourceEventIds(rules = []) {

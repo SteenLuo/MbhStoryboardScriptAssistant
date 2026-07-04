@@ -190,6 +190,87 @@ test("learnExplicitRule does not advance current ruleset when snapshot write fai
   assert.strictEqual(await fsp.readFile(path.join(previousRoot, "learning/current-ruleset.json"), "utf8"), previousCurrentFile);
 });
 
+test("learnExplicitRule removes official snapshot when current ruleset write fails", async () => {
+  const originalWriteFile = fsp.writeFile;
+  const originalRename = fsp.rename;
+  const failCurrentTarget = (target) => path.basename(String(target)) === "current-ruleset.json";
+  fsp.writeFile = async (target, ...args) => {
+    if (failCurrentTarget(target)) throw new Error("simulated current ruleset write failure");
+    return originalWriteFile.call(fsp, target, ...args);
+  };
+  fsp.rename = async (from, to) => {
+    if (failCurrentTarget(to)) throw new Error("simulated current ruleset rename failure");
+    return originalRename.call(fsp, from, to);
+  };
+
+  try {
+    const root = await tempRoot();
+    const failedFirstPublish = await learnExplicitRule(root, {
+      rawTrigger: "dialogue max 20 chars",
+      summary: "dialogue max 20 chars",
+      capability: "storyboard",
+      conflictKey: "storyboard.dialogue.length",
+      sourceType: "conversation",
+    }, {
+      now: () => "2026-07-01T10:00:00.000Z",
+      idSource: () => "event-current-write-fails",
+    });
+
+    const emptyRuleset = await readCurrentRuleset(root);
+    assert.strictEqual(failedFirstPublish.event.internalStatus, "failed");
+    assert.match(failedFirstPublish.event.error.message, /simulated current ruleset/);
+    assert.strictEqual(emptyRuleset.version, 0);
+    assert.strictEqual(emptyRuleset.lastGoodVersion, 0);
+    assert.deepStrictEqual(emptyRuleset.rules.filter((rule) => rule.status === "active"), []);
+    assert.strictEqual(fs.existsSync(path.join(root, "learning/ruleset-history/v1.json")), false);
+
+    fsp.writeFile = originalWriteFile;
+    fsp.rename = originalRename;
+    const previousRoot = await tempRoot();
+    await learnExplicitRule(previousRoot, {
+      rawTrigger: "dialogue max 20 chars",
+      summary: "dialogue max 20 chars",
+      capability: "storyboard",
+      conflictKey: "storyboard.dialogue.length",
+      sourceType: "conversation",
+    }, {
+      now: () => "2026-07-01T10:00:00.000Z",
+      idSource: () => "event-good",
+    });
+    const previousRuleset = await readCurrentRuleset(previousRoot);
+    const previousSnapshot = await fsp.readFile(path.join(previousRoot, "learning/ruleset-history/v1.json"), "utf8");
+
+    fsp.writeFile = async (target, ...args) => {
+      if (failCurrentTarget(target)) throw new Error("simulated current ruleset write failure");
+      return originalWriteFile.call(fsp, target, ...args);
+    };
+    fsp.rename = async (from, to) => {
+      if (failCurrentTarget(to)) throw new Error("simulated current ruleset rename failure");
+      return originalRename.call(fsp, from, to);
+    };
+
+    const failedSecondPublish = await learnExplicitRule(previousRoot, {
+      rawTrigger: "storyboard shot numbering",
+      summary: "storyboard shot numbering",
+      capability: "storyboard",
+      conflictKey: "storyboard.shot.numbering",
+      sourceType: "conversation",
+    }, {
+      now: () => "2026-07-01T10:05:00.000Z",
+      idSource: () => "event-current-write-fails-again",
+    });
+
+    const unchangedRuleset = await readCurrentRuleset(previousRoot);
+    assert.strictEqual(failedSecondPublish.event.internalStatus, "failed");
+    assert.deepStrictEqual(unchangedRuleset, previousRuleset);
+    assert.strictEqual(fs.existsSync(path.join(previousRoot, "learning/ruleset-history/v2.json")), false);
+    assert.strictEqual(await fsp.readFile(path.join(previousRoot, "learning/ruleset-history/v1.json"), "utf8"), previousSnapshot);
+  } finally {
+    fsp.writeFile = originalWriteFile;
+    fsp.rename = originalRename;
+  }
+});
+
 test("learnExplicitRule validates overall mode conflictKey and expectedVersion before publishing", async () => {
   const root = await tempRoot();
 
