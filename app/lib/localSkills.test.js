@@ -1,8 +1,10 @@
 const assert = require("assert");
+const { execFile } = require("child_process");
 const fsp = require("fs/promises");
 const os = require("os");
 const path = require("path");
 const test = require("node:test");
+const { promisify } = require("util");
 
 const {
   findLocalSkillRoute,
@@ -11,6 +13,7 @@ const {
 } = require("./localSkills");
 
 const ROOT = path.resolve(__dirname, "..", "..");
+const execFileAsync = promisify(execFile);
 
 test("routeLocalSkill selects storyboard skill for direct storyboard requests", () => {
   const route = routeLocalSkill("请根据这个已经认可的剧本生成分镜");
@@ -129,4 +132,101 @@ test("loadLocalSkillContext includes current rules context and exposes currentRu
     sourceFile: "learning/current-ruleset.json",
     version: 1,
   }]);
+});
+
+test("pending skill evolution drafts stay out of generated local skill context and routes", async () => {
+  const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-skill-draft-context-"));
+  const skillDir = path.join(tempRoot, "skills/03-storyboard/storyboard-generate");
+  await fsp.mkdir(skillDir, { recursive: true });
+  await fsp.writeFile(path.join(skillDir, "SKILL.md"), "# Official storyboard skill\n\nOfficial route only.\n", "utf8");
+  await fsp.mkdir(path.join(tempRoot, "learning/skill-evolution-reports"), { recursive: true });
+  await fsp.writeFile(
+    path.join(tempRoot, "learning/skill-evolution-reports/skill-evolution-draft-2026-07-04.json"),
+    JSON.stringify({
+      skillId: "storyboard-generate",
+      humanConfirmationStatus: "pending",
+      publishAllowed: false,
+      affectsGeneration: false,
+      diffSummary: "Draft-only content that must not enter prompts.",
+    }),
+    "utf8",
+  );
+
+  const routeBefore = findLocalSkillRoute("storyboard-generate");
+  const routedBefore = routeLocalSkill("storyboard request");
+  const context = await loadLocalSkillContext(tempRoot, routeBefore);
+  const routeAfter = findLocalSkillRoute("storyboard-generate");
+  const routedAfter = routeLocalSkill("storyboard request");
+
+  assert.deepStrictEqual(routeAfter, routeBefore);
+  assert.deepStrictEqual(routedAfter, routedBefore);
+  assert.doesNotMatch(context.prompt, /Draft-only content/);
+  assert.ok(!context.files.some((file) => file.includes("skill-evolution-draft")));
+});
+
+test("New-SkillEvolutionDraft writes draft metadata without touching official skills or skill index", async () => {
+  const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-skill-draft-script-"));
+  const snapshotDir = path.join(tempRoot, "learning/snapshots");
+  const skillDir = path.join(tempRoot, "skills/03-storyboard/storyboard-generate");
+  await fsp.mkdir(snapshotDir, { recursive: true });
+  await fsp.mkdir(skillDir, { recursive: true });
+  await fsp.mkdir(path.join(tempRoot, "learning/candidate-rules"), { recursive: true });
+  await fsp.mkdir(path.join(tempRoot, "learning/evals"), { recursive: true });
+  await fsp.mkdir(path.join(tempRoot, "learning/conversation-records"), { recursive: true });
+
+  const officialSkillPath = path.join(skillDir, "SKILL.md");
+  const officialSkillText = "# Official storyboard skill\n\nThis is the current official skill.\n";
+  await fsp.writeFile(officialSkillPath, officialSkillText, "utf8");
+  await fsp.writeFile(
+    path.join(snapshotDir, "learning-snapshot-2026-07-04.md"),
+    [
+      "# Learning Snapshot",
+      "",
+      "## 一、资产概览",
+      "| 资产 | 数量 |",
+      "| --- | --- |",
+      "| 候选规则文件 | 1 |",
+      "| 评测结果 | 1 |",
+      "",
+      "## 三、已完成的新样例对齐任务",
+      "- event-alpha: completed alignment",
+    ].join("\n"),
+    "utf8",
+  );
+  await fsp.writeFile(path.join(tempRoot, "learning/candidate-rules/rule-alpha.md"), "# Rule alpha\n", "utf8");
+  await fsp.writeFile(path.join(tempRoot, "learning/evals/eval-alpha.md"), "# Eval alpha\n", "utf8");
+  await fsp.writeFile(path.join(tempRoot, "learning/conversation-records/event-alpha.md"), "# Event alpha\n", "utf8");
+
+  const scriptPath = path.join(ROOT, "tools/New-SkillEvolutionDraft.ps1");
+  const { stdout } = await execFileAsync("powershell", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    scriptPath,
+    "-Root",
+    tempRoot,
+    "-Date",
+    "2026-07-04",
+    "-Force",
+  ]);
+
+  const metadataPath = path.join(
+    tempRoot,
+    "learning/skill-evolution-reports/skill-evolution-draft-2026-07-04.json",
+  );
+  const metadata = JSON.parse(await fsp.readFile(metadataPath, "utf8"));
+
+  assert.match(stdout, /JsonPath/);
+  assert.strictEqual(metadata.skillId, "skill-evolution");
+  assert.deepStrictEqual(metadata.relatedRuleIds, ["rule-alpha"]);
+  assert.deepStrictEqual(metadata.relatedEvalResultIds, ["eval-alpha"]);
+  assert.deepStrictEqual(metadata.sourceEventIds, ["event-alpha"]);
+  assert.match(metadata.diffSummary, /Draft only/);
+  assert.strictEqual(metadata.humanConfirmationStatus, "pending");
+  assert.strictEqual(metadata.publishAllowed, false);
+  assert.strictEqual(metadata.affectsGeneration, false);
+  assert.strictEqual(await fsp.readFile(officialSkillPath, "utf8"), officialSkillText);
+  await assert.rejects(fsp.access(path.join(tempRoot, "learning/skill-index.json")));
+  await assert.rejects(fsp.access(path.join(tempRoot, "skills/skill-evolution/SKILL.md")));
 });

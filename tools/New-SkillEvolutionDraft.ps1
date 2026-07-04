@@ -33,15 +33,20 @@ try {
     $snapshotFile = Get-Item -LiteralPath $SnapshotPath
   }
 
-  $outPath = if (Test-Path -LiteralPath $OutDir) {
-    Resolve-Path -LiteralPath $OutDir
+  $outItem = if (Test-Path -LiteralPath $OutDir) {
+    Get-Item -LiteralPath $OutDir
   } else {
     New-Item -ItemType Directory -Force -Path $OutDir
   }
+  $outFullPath = $outItem.FullName
 
-  $draftPath = Join-Path $outPath.Path ("skill-evolution-draft-{0}.md" -f $Date)
+  $draftPath = Join-Path $outFullPath ("skill-evolution-draft-{0}.md" -f $Date)
+  $draftMetadataPath = Join-Path $outFullPath ("skill-evolution-draft-{0}.json" -f $Date)
   if ((Test-Path -LiteralPath $draftPath) -and -not $Force) {
     throw "草案已存在：$draftPath。若要覆盖，请添加 -Force。"
+  }
+  if ((Test-Path -LiteralPath $draftMetadataPath) -and -not $Force) {
+    throw "草案元数据已存在：$draftMetadataPath。若要覆盖，请添加 -Force。"
   }
 
   function Get-RelativePath {
@@ -52,6 +57,11 @@ try {
       return $full.Substring($base.Length).Replace('\', '/')
     }
     return $Path.Replace('\', '/')
+  }
+
+  function Get-StableIdFromFile {
+    param([System.IO.FileInfo]$File)
+    return ([System.IO.Path]::GetFileNameWithoutExtension($File.Name)).Trim()
   }
 
   $snapshotText = Get-Content -LiteralPath $snapshotFile.FullName -Encoding UTF8 -Raw
@@ -85,19 +95,23 @@ try {
 
   $candidateFiles = @()
   if (Test-Path -LiteralPath "learning/candidate-rules") {
-    $candidateFiles = @(Get-ChildItem -LiteralPath "learning/candidate-rules" -File | Where-Object { $_.Name -ne "README.md" } | Sort-Object Name)
+    $candidateFiles = @(Get-ChildItem -LiteralPath "learning/candidate-rules" -File | Where-Object { $_.BaseName -ne "README" } | Sort-Object Name)
   }
   $acceptedFiles = @()
   if (Test-Path -LiteralPath "learning/accepted-rules") {
-    $acceptedFiles = @(Get-ChildItem -LiteralPath "learning/accepted-rules" -File | Where-Object { $_.Name -ne "README.md" } | Sort-Object Name)
+    $acceptedFiles = @(Get-ChildItem -LiteralPath "learning/accepted-rules" -File | Where-Object { $_.BaseName -ne "README" } | Sort-Object Name)
   }
   $regressionFiles = @()
   if (Test-Path -LiteralPath "learning/regression-reports") {
-    $regressionFiles = @(Get-ChildItem -LiteralPath "learning/regression-reports" -File | Where-Object { $_.Name -ne "README.md" } | Sort-Object Name)
+    $regressionFiles = @(Get-ChildItem -LiteralPath "learning/regression-reports" -File | Where-Object { $_.BaseName -ne "README" } | Sort-Object Name)
+  }
+  $evalResultFiles = @()
+  if (Test-Path -LiteralPath "learning/evals") {
+    $evalResultFiles = @(Get-ChildItem -LiteralPath "learning/evals" -File | Where-Object { $_.BaseName -ne "README" } | Sort-Object Name)
   }
   $conversationFiles = @()
   if (Test-Path -LiteralPath "learning/conversation-records") {
-    $conversationFiles = @(Get-ChildItem -LiteralPath "learning/conversation-records" -File | Where-Object { $_.Name -ne "README.md" } | Sort-Object Name)
+    $conversationFiles = @(Get-ChildItem -LiteralPath "learning/conversation-records" -File | Where-Object { $_.BaseName -ne "README" } | Sort-Object Name)
   }
   $alignmentReviews = @()
   if (Test-Path -LiteralPath "runs") {
@@ -112,6 +126,7 @@ try {
   $lines.Add(("来源快照：``{0}``" -f (Get-RelativePath $snapshotFile.FullName)))
   $lines.Add("")
   $lines.Add("说明：本文件是待审草案，不等于正式修改。正式修改仍需读取原始证据，并按 `skill-evolution` 规则判断是否满足升级条件。")
+  $lines.Add("边界：草案已保存，暂不影响生成；需要人工确认后才可发布，且发布失败必须保留旧 skill 和旧路由。")
   $lines.Add("")
 
   $lines.Add("## 一、证据摘要")
@@ -241,14 +256,44 @@ try {
 
   Set-Content -LiteralPath $draftPath -Encoding UTF8 -Value ($lines -join "`r`n")
 
+  $relatedRuleIds = @($candidateFiles + $acceptedFiles | ForEach-Object { Get-StableIdFromFile $_ } | Where-Object { $_ } | Sort-Object -Unique)
+  $relatedEvalResultIds = @($evalResultFiles | ForEach-Object { Get-StableIdFromFile $_ } | Where-Object { $_ } | Sort-Object -Unique)
+  $sourceEventIds = @($conversationFiles | ForEach-Object { Get-StableIdFromFile $_ } | Where-Object { $_ } | Sort-Object -Unique)
+  $diffSummary = "Draft only: generated metadata and markdown summary for human review; no official skill files, skill-index, or generation routes are changed."
+
+  $metadata = [ordered]@{
+    schemaVersion = 1
+    draftId = ("skill-evolution-draft-{0}" -f $Date)
+    skillId = "skill-evolution"
+    draftMarkdownPath = (Get-RelativePath $draftPath)
+    draftMetadataPath = (Get-RelativePath $draftMetadataPath)
+    snapshotPath = (Get-RelativePath $snapshotFile.FullName)
+    relatedRuleIds = $relatedRuleIds
+    relatedEvalResultIds = $relatedEvalResultIds
+    sourceEventIds = $sourceEventIds
+    diffSummary = $diffSummary
+    humanConfirmationStatus = "pending"
+    publishAllowed = $false
+    affectsGeneration = $false
+    publishBoundary = "Pending draft only. Do not write official skills/ or learning/skill-index.json before explicit human confirmation."
+    generatedAt = (Get-Date).ToString("o")
+  }
+  $metadataJson = $metadata | ConvertTo-Json -Depth 8
+  [System.IO.File]::WriteAllText($draftMetadataPath, $metadataJson, [System.Text.UTF8Encoding]::new($false))
+
   [pscustomobject]@{
     DraftPath = $draftPath
+    JsonPath = $draftMetadataPath
     SnapshotPath = $snapshotFile.FullName
     AlignmentReviewCount = $alignmentReviews.Count
     CandidateRuleFileCount = $candidateFiles.Count
     AcceptedRuleFileCount = $acceptedFiles.Count
+    EvalResultFileCount = $evalResultFiles.Count
     RegressionReportCount = $regressionFiles.Count
     ConversationRecordCount = $conversationFiles.Count
+    HumanConfirmationStatus = "pending"
+    PublishAllowed = $false
+    AffectsGeneration = $false
   }
 } finally {
   Pop-Location
