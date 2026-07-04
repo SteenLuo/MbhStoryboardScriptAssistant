@@ -29,14 +29,18 @@ async function buildCurrentRulesetContext(root, input = {}) {
   }
 
   const rules = selectActiveRules(ruleset, capability);
-  const currentRulesUsed = rules.map(traceRule);
+  const sourceFileRef = rules.length ? relativePath(root, sourceFile) : "";
+  const currentRulesUsed = rules.map((rule) => traceRule(rule, {
+    sourceFile: sourceFileRef,
+    version: ruleset.version,
+  }));
   return {
     ok: true,
     rules,
     promptText: buildPromptText(root, sourceFile, rules),
     currentRulesUsed,
     loadError,
-    sourceFile: rules.length ? relativePath(root, sourceFile) : "",
+    sourceFile: sourceFileRef,
   };
 }
 
@@ -52,6 +56,7 @@ async function readRulesetFileStrict(file) {
 
   const ruleset = normalizeRuleset(parsed);
   try {
+    validateRawRulesetForPrompt(parsed);
     validateRuleset(ruleset);
   } catch (error) {
     const wrapped = new Error(`${path.basename(file)} 校验失败：${error.message || String(error)}`);
@@ -59,6 +64,26 @@ async function readRulesetFileStrict(file) {
     throw wrapped;
   }
   return ruleset;
+}
+
+function validateRawRulesetForPrompt(raw) {
+  if (!raw || typeof raw !== "object") throw new Error("ruleset 结构不合法");
+  validateFiniteVersion(raw.version, "version");
+  validateFiniteVersion(raw.lastGoodVersion ?? raw.version, "lastGoodVersion");
+  if (!Array.isArray(raw.rules)) throw new Error("rules 缺失或不合法");
+  for (const rule of raw.rules) {
+    if (!rule || typeof rule !== "object") throw new Error("rule 结构不合法");
+    if (typeof rule.conflictKey !== "string" || !rule.conflictKey.trim()) {
+      throw new Error("rule 缺少 conflictKey");
+    }
+  }
+}
+
+function validateFiniteVersion(value, field) {
+  const version = Number(value);
+  if (!Number.isFinite(version) || !Number.isInteger(version) || version < 0) {
+    throw new Error(`${field} 不合法`);
+  }
 }
 
 async function loadLastGoodRuleset(root, preferredVersion = null) {
@@ -110,14 +135,15 @@ function buildPromptText(root, sourceFile, rules) {
   return `## 当前规则层：${relative}\n\n${lines.join("\n")}`;
 }
 
-function traceRule(rule) {
+function traceRule(rule, context = {}) {
   return {
     ruleId: rule.ruleId,
     topicKey: rule.topicKey,
     conflictKey: rule.conflictKey,
     capability: rule.capability,
     sourceEventIds: Array.isArray(rule.sourceEventIds) ? rule.sourceEventIds : [],
-    content: rule.content,
+    sourceFile: context.sourceFile || "",
+    version: Number(context.version || 0),
   };
 }
 

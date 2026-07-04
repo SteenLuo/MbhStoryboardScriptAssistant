@@ -19,16 +19,30 @@ function extractFunction(name) {
 }
 
 test("canvas storyboard generation loads the local storyboard skill context", () => {
+  const contextSource = extractFunction("canvasStoryboardSkillContext");
   const promptSource = extractFunction("canvasStoryboardSkillPrompt");
   const generateSource = extractFunction("generateCanvasStoryboards");
 
-  assert.match(promptSource, /loadLocalSkillContext\(ROOT,\s*findLocalSkillRoute\("storyboard-generate"\)/);
-  assert.match(promptSource, /skillContext\.prompt/);
-  assert.match(promptSource, /findLocalSkillRoute\("storyboard-generate"\)/);
-  assert.match(promptSource, /routeLocalSkill\("分镜"\)/);
-  assert.match(promptSource, /分镜标准格式\.md/);
-  assert.match(generateSource, /canvasStoryboardSkillPrompt\(\)/);
-  assert.match(generateSource, /storyboardSkillPrompt/);
+  assert.match(contextSource, /loadLocalSkillContext\(ROOT,\s*findLocalSkillRoute\("storyboard-generate"\)/);
+  assert.match(contextSource, /skillContext\.prompt/);
+  assert.match(contextSource, /findLocalSkillRoute\("storyboard-generate"\)/);
+  assert.match(contextSource, /routeLocalSkill\("分镜"\)/);
+  assert.match(contextSource, /分镜标准格式\.md/);
+  assert.match(promptSource, /canvasStoryboardSkillContext\(\)/);
+  assert.match(generateSource, /canvasStoryboardSkillContext\(\)/);
+  assert.match(generateSource, /storyboardSkillContext/);
+});
+
+test("canvas storyboard nodes retain current rules trace refs", () => {
+  const contextSource = extractFunction("canvasStoryboardSkillContext");
+  const promptSource = extractFunction("canvasStoryboardSkillPrompt");
+  const generateSource = extractFunction("generateCanvasStoryboards");
+
+  assert.match(contextSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
+  assert.match(promptSource, /canvasStoryboardSkillContext\(\)/);
+  assert.match(generateSource, /const storyboardSkillContext = await canvasStoryboardSkillContext\(\)/);
+  assert.match(generateSource, /skillPrompt:\s*storyboardSkillContext\.prompt/);
+  assert.match(generateSource, /currentRulesUsed:\s*storyboardSkillContext\.currentRulesUsed/);
 });
 
 test("first-pass storyboard generation paths load the local storyboard skill", () => {

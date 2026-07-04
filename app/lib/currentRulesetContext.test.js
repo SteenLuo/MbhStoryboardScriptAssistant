@@ -105,6 +105,54 @@ test("buildCurrentRulesetContext falls back to last-good snapshot when current r
   assert.deepStrictEqual(context.currentRulesUsed.map((item) => item.ruleId), ["rule-storyboard"]);
 });
 
+test("buildCurrentRulesetContext treats bad version as invalid and falls back", async () => {
+  const root = await tempRoot();
+  await writeJson(path.join(root, "learning/current-ruleset.json"), {
+    version: "not-a-number",
+    lastGoodVersion: 2,
+    updatedAt: "2026-07-01T10:00:00.000Z",
+    rules: [rule({ content: "BAD_CURRENT_RULE_SHOULD_NOT_LOAD" })],
+  });
+  await writeJson(path.join(root, "learning/ruleset-history/v2.json"), {
+    version: 2,
+    lastGoodVersion: 2,
+    createdAt: "2026-07-01T10:00:00.000Z",
+    sourceEventIds: ["event-storyboard"],
+    rules: [rule({ content: "GOOD_FALLBACK_RULE" })],
+  });
+
+  const context = await buildCurrentRulesetContext(root, { capability: "storyboard" });
+
+  assert.strictEqual(context.ok, true);
+  assert.match(context.loadError, /version/);
+  assert.match(context.promptText, /GOOD_FALLBACK_RULE/);
+  assert.doesNotMatch(context.promptText, /BAD_CURRENT_RULE_SHOULD_NOT_LOAD/);
+  assert.deepStrictEqual(context.currentRulesUsed.map((item) => item.ruleId), ["rule-storyboard"]);
+});
+
+test("buildCurrentRulesetContext rejects current rules missing conflictKey before prompt use", async () => {
+  const root = await tempRoot();
+  const ruleWithoutConflict = rule({ content: "BAD_CURRENT_RULE_SHOULD_NOT_LOAD" });
+  delete ruleWithoutConflict.conflictKey;
+  await writeJson(path.join(root, "learning/current-ruleset.json"), ruleset(3, [ruleWithoutConflict], {
+    lastGoodVersion: 2,
+  }));
+  await writeJson(path.join(root, "learning/ruleset-history/v2.json"), {
+    version: 2,
+    lastGoodVersion: 2,
+    createdAt: "2026-07-01T10:00:00.000Z",
+    sourceEventIds: ["event-storyboard"],
+    rules: [rule({ content: "GOOD_FALLBACK_RULE" })],
+  });
+
+  const context = await buildCurrentRulesetContext(root, { capability: "storyboard" });
+
+  assert.strictEqual(context.ok, true);
+  assert.match(context.loadError, /conflictKey/);
+  assert.match(context.promptText, /GOOD_FALLBACK_RULE/);
+  assert.doesNotMatch(context.promptText, /BAD_CURRENT_RULE_SHOULD_NOT_LOAD/);
+});
+
 test("buildCurrentRulesetContext reports ok=false when current ruleset is invalid and no fallback exists", async () => {
   const root = await tempRoot();
   await fsp.mkdir(path.join(root, "learning"), { recursive: true });

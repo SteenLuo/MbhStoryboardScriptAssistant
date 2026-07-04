@@ -8,6 +8,7 @@ const ACTIVE_STATUS = "active";
 const DISABLED_STATUS = "disabled";
 const COVERED_STATUS = "covered";
 const RULE_STATUSES = new Set([ACTIVE_STATUS, DISABLED_STATUS, COVERED_STATUS]);
+const rulesetPublishLocks = new Map();
 
 function learningDir(root) {
   return path.join(root, "learning");
@@ -27,6 +28,26 @@ function rulesetHistoryDir(root) {
 
 function rulesetSnapshotFile(root, version) {
   return path.join(rulesetHistoryDir(root), `v${Number(version || 0)}.json`);
+}
+
+async function withRulesetPublishLock(root, task) {
+  const key = path.resolve(root);
+  const previous = rulesetPublishLocks.get(key) || Promise.resolve();
+  let releaseCurrent;
+  const current = new Promise((resolve) => {
+    releaseCurrent = resolve;
+  });
+  const waiting = previous.catch(() => {}).then(() => current);
+  rulesetPublishLocks.set(key, waiting);
+  await previous.catch(() => {});
+  try {
+    return await task();
+  } finally {
+    releaseCurrent();
+    if (rulesetPublishLocks.get(key) === waiting) {
+      rulesetPublishLocks.delete(key);
+    }
+  }
 }
 
 async function learnExplicitRule(root, input = {}, options = {}) {
@@ -70,71 +91,75 @@ async function learnExplicitRule(root, input = {}, options = {}) {
     if (!content) throw new Error("规则内容为空，无法发布到当前规则层");
     if (!conflictKey) throw new Error("conflictKey 不能为空，无法发布到当前规则层");
 
-    const ruleset = await readCurrentRulesetStrict(root);
     const expectedVersion = normalizeOptionalVersion(
       Object.hasOwn(input, "expectedVersion") ? input.expectedVersion : options.expectedVersion,
     );
-    if (expectedVersion !== null && expectedVersion !== Number(ruleset.version || 0)) {
-      throw new Error(`expectedVersion 不匹配：当前版本 ${Number(ruleset.version || 0)}，收到 ${expectedVersion}`);
-    }
-    const existingEvents = await listLearningEvents(root, { includeCovered: true });
-    const publishTime = now();
     const newRuleId = `rule-${eventId}`;
-    const nextRules = (ruleset.rules || []).map((rule) =>
-      isSameTopicOrConflict(rule, topicKey, conflictKey) && [ACTIVE_STATUS, DISABLED_STATUS].includes(rule.status)
-        ? { ...rule, status: COVERED_STATUS, coveredByRuleId: newRuleId, updatedAt: publishTime }
-        : rule
-    );
-    const coveredEvents = existingEvents.filter((event) =>
-      event.eventId !== eventId &&
-      isSameTopicOrConflict(event, topicKey, conflictKey) &&
-      event.internalStatus !== "covered" &&
-      event.internalStatus !== "failed"
-    );
+    const { writtenRuleset, publishTime } = await withRulesetPublishLock(root, async () => {
+      const ruleset = await readCurrentRulesetStrict(root);
+      if (expectedVersion !== null && expectedVersion !== Number(ruleset.version || 0)) {
+        throw new Error(`expectedVersion 不匹配：当前版本 ${Number(ruleset.version || 0)}，收到 ${expectedVersion}`);
+      }
+      const existingEvents = await listLearningEvents(root, { includeCovered: true });
+      const publishTime = now();
+      const nextRules = (ruleset.rules || []).map((rule) =>
+        isSameTopicOrConflict(rule, topicKey, conflictKey) && [ACTIVE_STATUS, DISABLED_STATUS].includes(rule.status)
+          ? { ...rule, status: COVERED_STATUS, coveredByRuleId: newRuleId, updatedAt: publishTime }
+          : rule
+      );
+      const coveredEvents = existingEvents.filter((event) =>
+        event.eventId !== eventId &&
+        isSameTopicOrConflict(event, topicKey, conflictKey) &&
+        event.internalStatus !== "covered" &&
+        event.internalStatus !== "failed"
+      );
 
-    for (const event of [
-      ...coveredEvents,
-      ...existingEvents.filter((item) =>
-        item.eventId !== eventId &&
-        isSameTopicOrConflict(item, topicKey, conflictKey) &&
-        item.internalStatus === "failed" &&
-        !coveredEvents.some((covered) => covered.eventId === item.eventId)
-      ),
-    ]) {
-      await appendLearningEvent(root, {
-        ...event,
-        internalStatus: "covered",
-        jobStatus: "completed",
-        coveredByEventId: eventId,
+      const nextRuleset = {
+        version: Number(ruleset.version || 0) + 1,
+        lastGoodVersion: Number(ruleset.version || 0) + 1,
         updatedAt: publishTime,
-      });
-      await withdrawNotificationsForSource(root, "learning-event", event.eventId, {
-        handledAt: publishTime,
-      });
-    }
+        rules: [
+          ...nextRules,
+          {
+            ruleId: newRuleId,
+            topicKey,
+            conflictKey,
+            capability: baseEvent.capability,
+            content,
+            priority: Number(input.priority || 50),
+            sourceEventIds: [eventId],
+            status: ACTIVE_STATUS,
+            createdAt: publishTime,
+            updatedAt: publishTime,
+          },
+        ],
+      };
+      validateRuleset(nextRuleset);
+      const writtenRuleset = await writeCurrentRuleset(root, nextRuleset);
 
-    const nextRuleset = {
-      version: Number(ruleset.version || 0) + 1,
-      lastGoodVersion: Number(ruleset.version || 0) + 1,
-      updatedAt: publishTime,
-      rules: [
-        ...nextRules,
-        {
-          ruleId: newRuleId,
-          topicKey,
-          conflictKey,
-          capability: baseEvent.capability,
-          content,
-          priority: Number(input.priority || 50),
-          sourceEventIds: [eventId],
-          status: ACTIVE_STATUS,
-          createdAt: publishTime,
+      for (const event of [
+        ...coveredEvents,
+        ...existingEvents.filter((item) =>
+          item.eventId !== eventId &&
+          isSameTopicOrConflict(item, topicKey, conflictKey) &&
+          item.internalStatus === "failed" &&
+          !coveredEvents.some((covered) => covered.eventId === item.eventId)
+        ),
+      ]) {
+        await appendLearningEvent(root, {
+          ...event,
+          internalStatus: "covered",
+          jobStatus: "completed",
+          coveredByEventId: eventId,
           updatedAt: publishTime,
-        },
-      ],
-    };
-    validateRuleset(nextRuleset);
-    const writtenRuleset = await writeCurrentRuleset(root, nextRuleset);
+        });
+        await withdrawNotificationsForSource(root, "learning-event", event.eventId, {
+          handledAt: publishTime,
+        });
+      }
+
+      return { writtenRuleset, publishTime };
+    });
 
     const event = normalizeEvent({
       ...baseEvent,

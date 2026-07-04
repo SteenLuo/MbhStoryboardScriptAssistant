@@ -271,6 +271,113 @@ test("learnExplicitRule removes official snapshot when current ruleset write fai
   }
 });
 
+test("learnExplicitRule does not cover old events when replacement publish fails", async () => {
+  const root = await tempRoot();
+  await learnExplicitRule(root, {
+    rawTrigger: "dialogue max 20 chars",
+    summary: "dialogue max 20 chars",
+    capability: "storyboard",
+    conflictKey: "storyboard.dialogue.length",
+    sourceType: "conversation",
+  }, {
+    now: () => "2026-07-01T10:00:00.000Z",
+    idSource: () => "event-good",
+  });
+  await learnExplicitRule(root, {
+    rawTrigger: "dialogue max failed",
+    summary: "",
+    capability: "storyboard",
+    conflictKey: "storyboard.dialogue.length",
+    sourceType: "conversation",
+  }, {
+    now: () => "2026-07-01T10:02:00.000Z",
+    idSource: () => "event-stale-failed",
+    notifyOnFailure: true,
+  });
+
+  const originalRename = fsp.rename;
+  fsp.rename = async (from, to) => {
+    if (path.basename(String(to)) === "current-ruleset.json") {
+      throw new Error("simulated current ruleset rename failure");
+    }
+    return originalRename.call(fsp, from, to);
+  };
+
+  try {
+    const failedReplacement = await learnExplicitRule(root, {
+      rawTrigger: "dialogue max 18 chars",
+      summary: "dialogue max 18 chars",
+      capability: "storyboard",
+      conflictKey: "storyboard.dialogue.length",
+      sourceType: "conversation",
+    }, {
+      now: () => "2026-07-01T10:05:00.000Z",
+      idSource: () => "event-failed-replacement",
+    });
+
+    const ruleset = await readCurrentRuleset(root);
+    const events = await listLearningEvents(root, { includeCovered: true });
+    const notifications = await listNotifications(root, { includeHandled: true });
+    const oldEvent = events.find((event) => event.eventId === "event-good");
+    const staleFailedEvent = events.find((event) => event.eventId === "event-stale-failed");
+    const failedEvent = events.find((event) => event.eventId === "event-failed-replacement");
+    const staleNotification = notifications.find((notification) => notification.sourceId === "event-stale-failed");
+
+    assert.strictEqual(failedReplacement.event.internalStatus, "failed");
+    assert.strictEqual(failedEvent.internalStatus, "failed");
+    assert.notStrictEqual(oldEvent.internalStatus, "covered");
+    assert.strictEqual(staleFailedEvent.internalStatus, "failed");
+    assert.strictEqual(staleNotification.status, "unread");
+    assert.strictEqual(ruleset.version, 1);
+    assert.strictEqual(ruleset.lastGoodVersion, 1);
+    assert.strictEqual(ruleset.rules.filter((rule) => rule.status === "active").length, 1);
+    assert.strictEqual(ruleset.rules.find((rule) => rule.status === "active").ruleId, "rule-event-good");
+    assert.strictEqual(fs.existsSync(path.join(root, "learning/ruleset-history/v2.json")), false);
+  } finally {
+    fsp.rename = originalRename;
+  }
+});
+
+test("concurrent learnExplicitRule publishes serialize current ruleset updates", async () => {
+  const root = await tempRoot();
+  let index = 0;
+  const ids = ["event-concurrent-a", "event-concurrent-b"];
+  const times = ["2026-07-01T10:00:00.000Z", "2026-07-01T10:00:01.000Z"];
+  const options = {
+    now: () => times[Math.min(index, times.length - 1)],
+    idSource: () => ids[index++],
+  };
+
+  const [first, second] = await Promise.all([
+    learnExplicitRule(root, {
+      rawTrigger: "dialogue max 20 chars",
+      summary: "dialogue max 20 chars",
+      capability: "storyboard",
+      conflictKey: "storyboard.dialogue.length",
+      sourceType: "conversation",
+    }, options),
+    learnExplicitRule(root, {
+      rawTrigger: "dialogue max 18 chars",
+      summary: "dialogue max 18 chars",
+      capability: "storyboard",
+      conflictKey: "storyboard.dialogue.length",
+      sourceType: "conversation",
+    }, options),
+  ]);
+
+  const ruleset = await readCurrentRuleset(root);
+  const snapshot = JSON.parse(await fsp.readFile(path.join(root, "learning/ruleset-history/v2.json"), "utf8"));
+  const activeRules = ruleset.rules.filter((rule) => rule.status === "active");
+  const activeConflictKeys = activeRules.map((rule) => rule.conflictKey);
+
+  assert.deepStrictEqual([first.event.internalStatus, second.event.internalStatus].sort(), ["landed", "landed"]);
+  assert.strictEqual(ruleset.version, 2);
+  assert.strictEqual(ruleset.lastGoodVersion, 2);
+  assert.strictEqual(snapshot.version, 2);
+  assert.strictEqual(activeRules.length, 1);
+  assert.strictEqual(new Set(activeConflictKeys).size, activeConflictKeys.length);
+});
+
 test("learnExplicitRule validates overall mode conflictKey and expectedVersion before publishing", async () => {
   const root = await tempRoot();
 

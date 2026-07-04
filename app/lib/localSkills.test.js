@@ -126,6 +126,7 @@ test("loadLocalSkillContext includes current rules context and exposes currentRu
     conflictKey: "storyboard.dialogue.length",
     capability: "storyboard",
     sourceEventIds: ["event-storyboard"],
-    content: "分镜台词每句 20 字以内。",
+    sourceFile: "learning/current-ruleset.json",
+    version: 1,
   }]);
 });

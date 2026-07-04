@@ -1237,15 +1237,23 @@ async function taskSkillPrompt(task) {
 }
 
 async function canvasStoryboardSkillPrompt() {
+  return (await canvasStoryboardSkillContext()).prompt;
+}
+
+async function canvasStoryboardSkillContext() {
   const skillContext = await loadLocalSkillContext(ROOT, findLocalSkillRoute("storyboard-generate") || routeLocalSkill("分镜"));
   const standardPath = "docs/分镜标准格式.md";
   const standardText = await fsp.readFile(path.join(ROOT, standardPath), "utf8");
-  return [
+  const prompt = [
     skillContext.prompt,
     "【画布分镜生成补充要求】",
     "每次调用只生成当前分集的分镜脚本，不要合并其他集数，不要输出表格。",
     `## 分镜标准文档：${standardPath}\n\n${standardText}`,
   ].join("\n\n");
+  return {
+    prompt,
+    currentRulesUsed: skillContext.currentRulesUsed || [],
+  };
 }
 
 function findCanvasNode(canvas, nodeId) {
@@ -1328,7 +1336,7 @@ async function generateCanvasStoryboards(body) {
   const generatedNodes = [];
   const usages = [];
   let lastModel = "";
-  const storyboardSkillPrompt = await canvasStoryboardSkillPrompt();
+  const storyboardSkillContext = await canvasStoryboardSkillContext();
 
   for (let index = 0; index < selectedEpisodes.length; index += 1) {
     const episode = selectedEpisodes[index];
@@ -1342,7 +1350,7 @@ async function generateCanvasStoryboards(body) {
       ].join("\n"),
       model: body.model,
       apiKey: body.apiKey,
-      skillPrompt: storyboardSkillPrompt,
+      skillPrompt: storyboardSkillContext.prompt,
     });
     usages.push(result.usage);
     lastModel = result.model || lastModel;
@@ -1357,6 +1365,7 @@ async function generateCanvasStoryboards(body) {
         model: result.model,
         usage: result.usage,
         generatedAt: new Date().toISOString(),
+        currentRulesUsed: storyboardSkillContext.currentRulesUsed || [],
         validation,
       },
     });
