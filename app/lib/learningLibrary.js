@@ -29,7 +29,7 @@ function publicLearningRecord(event) {
   const displayRecord = mapLearningDisplayRecord(event);
   return {
     ...displayRecord,
-    status: displayRecord.displayStatus,
+    status: displayRecord.status || displayRecord.displayStatus,
     createdAt: event.createdAt,
     updatedAt: event.updatedAt,
   };

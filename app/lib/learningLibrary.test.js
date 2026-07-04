@@ -4,9 +4,84 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { learnExplicitRule, updateCurrentRuleStatus } = require("./autonomousLearning");
+const { appendSampleInsufficientLearningEvent, learnExplicitRule, updateCurrentRuleStatus } = require("./autonomousLearning");
 const { buildLearningLibrary } = require("./learningLibrary");
 const { writeLearningEvidence, writeLearningSample } = require("./learningEvidence");
+
+test("buildLearningLibrary shows sample-insufficient next steps and trace fields", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-sample-insufficient-"));
+  await appendSampleInsufficientLearningEvent(root, {
+    eventId: "event-need-samples",
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length",
+    neededSampleType: "dialogue-length-failure",
+    neededCount: 2,
+    relatedRecordIds: ["record-a"],
+    sourceEventIds: ["event-a"],
+    summary: "Need more samples before L1 evaluation.",
+  }, {
+    now: () => "2026-07-04T08:00:00.000Z",
+  });
+
+  const library = await buildLearningLibrary(root);
+  const record = library.records.find((item) => item.recordId === "event-need-samples");
+
+  assert.ok(record);
+  assert.strictEqual(record.displayStatus, "待确认");
+  assert.strictEqual(record.status, "待确认 / 待补样例");
+  assert.strictEqual(record.actionLabel, "待补样例");
+  assert.match(record.nextStepText, /dialogue-length-failure/);
+  assert.match(record.nextStepText, /2/);
+  assert.strictEqual(record.advanced.neededSampleType, "dialogue-length-failure");
+  assert.strictEqual(record.advanced.neededCount, 2);
+  assert.deepStrictEqual(record.advanced.relatedRecordIds, ["record-a"]);
+  assert.deepStrictEqual(record.advanced.sourceEventIds, ["event-a"]);
+});
+
+test("writeLearningSample marks related sample-insufficient eval tasks traceable when count is satisfied", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-reeval-"));
+  await appendSampleInsufficientLearningEvent(root, {
+    eventId: "event-need-samples",
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length",
+    neededSampleType: "dialogue-length-failure",
+    neededCount: 2,
+    relatedRecordIds: ["record-a"],
+    sourceEventIds: ["event-a"],
+    summary: "Need more samples before L1 evaluation.",
+  }, {
+    now: () => "2026-07-04T08:00:00.000Z",
+  });
+
+  await writeLearningSample(root, {
+    summary: "sample 1",
+    content: "example 1",
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length",
+    sourceEventIds: ["event-sample-1"],
+    createdAt: "2026-07-04T08:10:00.000Z",
+  });
+  let library = await buildLearningLibrary(root);
+  let waiting = library.records.find((item) => item.recordId === "event-need-samples");
+  assert.strictEqual(waiting.status, "待确认 / 待补样例");
+
+  await writeLearningSample(root, {
+    summary: "sample 2",
+    content: "example 2",
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length",
+    sourceEventIds: ["event-sample-2"],
+    createdAt: "2026-07-04T08:20:00.000Z",
+  });
+  library = await buildLearningLibrary(root);
+  const updated = library.records.find((item) => item.recordId === "event-need-samples");
+
+  assert.strictEqual(updated.displayStatus, "已保存");
+  assert.strictEqual(updated.affectsGeneration, false);
+  assert.strictEqual(updated.advanced.landingType, "eval");
+  assert.strictEqual(updated.advanced.sampleCount, 2);
+  assert.ok(updated.advanced.reevaluationTaskId);
+});
 
 test("buildLearningLibrary exposes records current rules and readonly skill groups", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-"));

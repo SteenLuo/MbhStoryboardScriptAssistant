@@ -1,7 +1,7 @@
 const crypto = require("node:crypto");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
-const { appendLearningEvent } = require("./autonomousLearning");
+const { appendLearningEvent, listLearningEvents } = require("./autonomousLearning");
 
 async function writeLearningEvidence(root, input = {}) {
   const canvas = input.canvas && typeof input.canvas === "object" ? input.canvas : {};
@@ -35,6 +35,8 @@ async function writeLearningEvidence(root, input = {}) {
       archivedAt,
     },
     sourceEventIds,
+    topicKey: normalizeString(input.topicKey),
+    conflictKey: normalizeString(input.conflictKey || input.topicKey),
     location: {
       canvasId,
       outputId,
@@ -44,6 +46,7 @@ async function writeLearningEvidence(root, input = {}) {
 
   const filePath = path.join(root, "learning", "evidence", `${evidenceId}.json`);
   await writeJson(filePath, record);
+  await safeRefreshSampleInsufficientTasks(root, { ...record, recordId: `evidence:${evidenceId}`, materialKind: "evidence" });
   return { evidenceId, path: filePath, sourceEventIds, canvasId, outputId };
 }
 
@@ -68,6 +71,8 @@ async function writeLearningSample(root, input = {}) {
     sourceEventIds,
     createdAt,
     affectsGeneration: false,
+    topicKey: normalizeString(input.topicKey),
+    conflictKey: normalizeString(input.conflictKey || input.topicKey),
     canvasId,
     outputId,
     location: {
@@ -79,6 +84,7 @@ async function writeLearningSample(root, input = {}) {
 
   const filePath = path.join(root, "learning", "samples", `${sampleId}.json`);
   await writeJson(filePath, record);
+  await safeRefreshSampleInsufficientTasks(root, { ...record, recordId: `sample:${sampleId}`, materialKind: "sample" });
   return { sampleId, path: filePath, sourceEventIds };
 }
 
@@ -196,6 +202,108 @@ function publicVersionInfo(version = {}) {
     createdAt: normalizeString(version.createdAt),
     isPrimary: Boolean(version.isPrimary),
   });
+}
+
+async function safeRefreshSampleInsufficientTasks(root, material = {}) {
+  try {
+    await refreshSampleInsufficientTasks(root, material);
+  } catch {
+    // Evidence/sample writes are primary. Re-eval bookkeeping must not block them.
+  }
+}
+
+async function refreshSampleInsufficientTasks(root, material = {}) {
+  const topicKey = normalizeString(material.topicKey);
+  const conflictKey = normalizeString(material.conflictKey || topicKey);
+  if (!topicKey && !conflictKey) return [];
+  const events = await listLearningEvents(root, { includeCovered: true });
+  const tasks = events.filter((event) =>
+    event?.landingType === "sample-insufficient" &&
+    event.internalStatus !== "failed" &&
+    event.internalStatus !== "covered" &&
+    event.jobStatus === "waiting" &&
+    isSameTopicOrConflict(event, topicKey, conflictKey)
+  );
+  if (!tasks.length) return [];
+
+  const materialRecords = await listLearningMaterialRecords(root);
+  const updates = [];
+  for (const task of tasks) {
+    const matched = materialRecords.filter((record) =>
+      isSameTopicOrConflict(record, task.topicKey, task.conflictKey)
+    );
+    const neededCount = Number(task.neededCount || 0);
+    if (!neededCount || matched.length < neededCount) continue;
+    const sampleRecordIds = matched.filter((record) => record.materialKind === "sample").map((record) => record.recordId);
+    const evidenceRecordIds = matched.filter((record) => record.materialKind === "evidence").map((record) => record.recordId);
+    const updatedAt = new Date().toISOString();
+    const update = {
+      ...task,
+      internalStatus: "landed",
+      jobStatus: "completed",
+      learningMode: "evidence",
+      landingType: "eval",
+      affectsGeneration: false,
+      sampleCount: matched.length,
+      sampleRecordIds,
+      evidenceRecordIds,
+      reevaluationTaskId: `reeval-${task.eventId}`,
+      summary: task.summary || "Sample count satisfied; re-evaluation task is ready.",
+      generationProof: {
+        proofStatus: "not_applicable",
+        claimText: "样例已补齐并生成可追溯评测状态，不会直接影响生成。",
+      },
+      updatedAt,
+    };
+    await appendLearningEvent(root, update);
+    updates.push(update);
+  }
+  return updates;
+}
+
+async function listLearningMaterialRecords(root) {
+  const [samples, evidence] = await Promise.all([
+    readMaterialRecords(path.join(root, "learning", "samples"), "sampleId", "sample"),
+    readMaterialRecords(path.join(root, "learning", "evidence"), "evidenceId", "evidence"),
+  ]);
+  return [...samples, ...evidence];
+}
+
+async function readMaterialRecords(dir, idField, materialKind) {
+  try {
+    const entries = await fsp.readdir(dir, { withFileTypes: true });
+    const records = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== ".json") continue;
+      try {
+        const parsed = JSON.parse(await fsp.readFile(path.join(dir, entry.name), "utf8"));
+        const id = normalizeString(parsed[idField]);
+        if (!id) continue;
+        records.push({
+          ...parsed,
+          materialKind,
+          recordId: `${materialKind}:${id}`,
+          topicKey: normalizeString(parsed.topicKey),
+          conflictKey: normalizeString(parsed.conflictKey || parsed.topicKey),
+        });
+      } catch {
+        continue;
+      }
+    }
+    return records;
+  } catch {
+    return [];
+  }
+}
+
+function isSameTopicOrConflict(item, topicKey, conflictKey) {
+  if (!item || typeof item !== "object") return false;
+  const itemTopic = normalizeString(item.topicKey);
+  const itemConflict = normalizeString(item.conflictKey || itemTopic);
+  return Boolean(
+    (topicKey && itemTopic === topicKey) ||
+    (conflictKey && itemConflict === conflictKey)
+  );
 }
 
 function buildStableId(prefix, payload) {

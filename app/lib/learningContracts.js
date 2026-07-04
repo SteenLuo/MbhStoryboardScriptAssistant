@@ -76,9 +76,24 @@ function normalizeLearningEvent(input = {}) {
     coveredByEventId: normalizeString(input.coveredByEventId),
     error: input.error && typeof input.error === "object" ? input.error : null,
     generationProof: normalizeGenerationProof(input.generationProof),
+    neededSampleType: normalizeString(input.neededSampleType),
+    neededCount: normalizeNonNegativeInteger(input.neededCount),
+    relatedRecordIds: normalizeStringArray(input.relatedRecordIds),
+    currentRulesUsedRefs: normalizeStringArray(input.currentRulesUsedRefs),
+    sampleCount: normalizeNonNegativeInteger(input.sampleCount),
+    sampleRecordIds: normalizeStringArray(input.sampleRecordIds),
+    evidenceRecordIds: normalizeStringArray(input.evidenceRecordIds),
+    reevaluationTaskId: normalizeString(input.reevaluationTaskId),
     createdAt,
     updatedAt: normalizeString(input.updatedAt || input.createdAt || createdAt),
   };
+}
+
+function normalizeNonNegativeInteger(value) {
+  if (value === undefined || value === null || value === "") return 0;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return 0;
+  return Math.floor(number);
 }
 
 function normalizeGenerationProof(proof) {

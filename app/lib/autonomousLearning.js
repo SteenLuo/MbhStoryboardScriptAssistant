@@ -478,6 +478,31 @@ async function appendLearningEvent(root, event) {
   if (!normalized) throw new Error("learning event requires eventId");
   await fsp.mkdir(path.dirname(file), { recursive: true });
   await fsp.appendFile(file, `${JSON.stringify(normalized)}\n`, "utf8");
+  return normalized;
+}
+
+async function appendSampleInsufficientLearningEvent(root, input = {}, options = {}) {
+  const now = options.now || (() => new Date().toISOString());
+  const createdAt = String(input.createdAt || now());
+  const eventId = String(input.eventId || `sample-insufficient-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`).trim();
+  if (!eventId) throw new Error("learning event requires eventId");
+  const topicKey = String(input.topicKey || "general").trim() || "general";
+  const event = normalizeEvent({
+    ...input,
+    eventId,
+    topicKey,
+    conflictKey: String(input.conflictKey || topicKey).trim() || topicKey,
+    learningMode: input.learningMode || "uncertain",
+    internalStatus: input.internalStatus || "received",
+    jobStatus: input.jobStatus || "waiting",
+    landingType: input.landingType || "sample-insufficient",
+    sourceType: input.sourceType || "eval",
+    summary: String(input.summary || `Need ${Number(input.neededCount || 0)} more ${input.neededSampleType || "sample"} samples.`).trim(),
+    createdAt,
+    updatedAt: String(input.updatedAt || createdAt),
+  });
+  await appendLearningEvent(root, event);
+  return event;
 }
 
 function validateRuleset(ruleset) {
@@ -605,6 +630,7 @@ function normalizeUsage(usage) {
 }
 
 module.exports = {
+  appendSampleInsufficientLearningEvent,
   appendLearningEvent,
   learnExplicitRule,
   listLearningEvents,

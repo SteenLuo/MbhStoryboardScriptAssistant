@@ -6,6 +6,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const {
+  appendSampleInsufficientLearningEvent,
   learnExplicitRule,
   listLearningEvents,
   readCurrentRuleset,
@@ -774,4 +775,36 @@ test("learnExplicitRule covers disabled same-topic rules when a newer rule succe
   assert.strictEqual(disabledOldRule.status, "covered");
   assert.strictEqual(disabledOldRule.coveredByRuleId, "rule-event-new");
   assert.strictEqual(activeNewRule.status, "active");
+});
+
+test("appendSampleInsufficientLearningEvent preserves eval sample request fields", async () => {
+  const root = await tempRoot();
+
+  const event = await appendSampleInsufficientLearningEvent(root, {
+    eventId: "event-need-samples",
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length",
+    neededSampleType: "dialogue-length-failure",
+    neededCount: 2,
+    relatedRecordIds: ["record-a", "record-b"],
+    sourceEventIds: ["event-a"],
+    summary: "Need more comparable samples before L1 evaluation.",
+    canvasId: "canvas-1",
+    outputId: "output-1",
+  }, {
+    now: () => "2026-07-04T08:00:00.000Z",
+  });
+
+  const events = await listLearningEvents(root);
+  const saved = events.find((item) => item.eventId === "event-need-samples");
+
+  assert.strictEqual(event.internalStatus, "received");
+  assert.strictEqual(event.jobStatus, "waiting");
+  assert.strictEqual(event.landingType, "sample-insufficient");
+  assert.strictEqual(saved.neededSampleType, "dialogue-length-failure");
+  assert.strictEqual(saved.neededCount, 2);
+  assert.deepStrictEqual(saved.relatedRecordIds, ["record-a", "record-b"]);
+  assert.deepStrictEqual(saved.sourceEventIds, ["event-a"]);
+  assert.strictEqual(saved.canvasId, "canvas-1");
+  assert.strictEqual(saved.outputId, "output-1");
 });

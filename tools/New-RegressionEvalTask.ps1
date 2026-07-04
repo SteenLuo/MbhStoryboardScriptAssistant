@@ -53,13 +53,20 @@ try {
   $items = @()
   foreach ($file in $reports) {
     $text = Get-Content -LiteralPath $file.FullName -Encoding UTF8 -Raw
+    $source = Get-RelativePath $file.FullName
     $items += [pscustomobject]@{
+      Id = ""
       Title = Get-TableValue $text "标题"
       Stage = Get-TableValue $text "发生环节"
       Symptom = Get-TableValue $text "表现"
       SuspectedRule = Get-TableValue $text "可疑规则 / 技能"
       Action = Get-TableValue $text "初步动作"
-      Source = Get-RelativePath $file.FullName
+      Source = $source
+      neededSampleType = "regression-evidence"
+      neededCount = 1
+      relatedRecordIds = @($source)
+      sourceEventIds = @($source)
+      status = "pending_review"
     }
   }
 
@@ -72,17 +79,18 @@ try {
   $lines.Add("")
   $lines.Add("## 一、任务清单")
   $lines.Add("")
-  $lines.Add("| 编号 | 标题 | 环节 | 表现 | 可疑规则 / 技能 | 状态 |")
-  $lines.Add("| --- | --- | --- | --- | --- | --- |")
+  $lines.Add("| 编号 | 标题 | 环节 | 表现 | 可疑规则 / 技能 | neededSampleType | neededCount | relatedRecordIds | sourceEventIds | status |")
+  $lines.Add("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
   $index = 1
   foreach ($item in $items) {
     $id = "RG-{0:000}" -f $index
+    $item.Id = $id
     $title = if ($item.Title) { $item.Title } else { "未命名降质" }
-    $lines.Add("| $id | $title | $($item.Stage) | $($item.Symptom) | $($item.SuspectedRule) | 待复核 |")
+    $lines.Add("| $id | $title | $($item.Stage) | $($item.Symptom) | $($item.SuspectedRule) | $($item.neededSampleType) | $($item.neededCount) | $($item.relatedRecordIds -join ', ') | $($item.sourceEventIds -join ', ') | $($item.status) |")
     $index += 1
   }
   if ($items.Count -eq 0) {
-    $lines.Add("| - | 暂无降质记录 | - | - | - | 无需执行 |")
+    $lines.Add("| - | 暂无降质记录 | - | - | - | none | 0 | - | - | no_action |")
   }
   $lines.Add("")
 
@@ -118,6 +126,7 @@ try {
     TaskPath = (Resolve-Path -LiteralPath $outPath).Path
     RegressionReportCount = $reports.Count
     TaskCount = $items.Count
+    Tasks = @($items)
   }
 } finally {
   Pop-Location

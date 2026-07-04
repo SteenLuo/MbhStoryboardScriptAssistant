@@ -45,6 +45,19 @@ test("canvas storyboard nodes retain current rules trace refs", () => {
   assert.match(generateSource, /currentRulesUsed:\s*storyboardSkillContext\.currentRulesUsed/);
 });
 
+test("canvas storyboard generation applies hard-rule validation repair and failure feedback", () => {
+  const generateSource = extractFunction("generateCanvasStoryboards");
+  const reviseSource = extractFunction("reviseCanvasNode");
+
+  assert.match(serverSource, /applyStoryboardHardRuleValidation/);
+  assert.match(serverSource, /recordStoryboardHardRuleFailure/);
+  assert.match(generateSource, /applyStoryboardHardRuleValidation\(result\.content/);
+  assert.match(generateSource, /hardRuleValidation/);
+  assert.match(generateSource, /recordStoryboardHardRuleFailure/);
+  assert.match(reviseSource, /applyStoryboardHardRuleValidation\(result\.content/);
+  assert.match(reviseSource, /hardRuleValidation/);
+});
+
 test("first-pass storyboard generation paths load the local storyboard skill", () => {
   const taskPromptSource = extractFunction("taskSkillPrompt");
   const workflowSource = extractFunction("runWorkflowTask");
@@ -111,7 +124,8 @@ test("canvas revision endpoint only updates revision nodes once", () => {
   assert.match(reviseSource, /chatLocked/);
   assert.match(reviseSource, /formatStoryboardRevisionIssues\(storyboardRevisionIssuesForPrompt\(parentNode\)\)/);
   assert.match(reviseSource, /storyboardIssueContext \? `\\n\$\{storyboardIssueContext\}` : ""/);
-  assert.match(reviseSource, /const revisedValidation = node\.type === "storyboard" \? validateStoryboardContent\(result\.content\) : null/);
+  assert.match(reviseSource, /const hardRuleResult = node\.type === "storyboard"/);
+  assert.match(reviseSource, /const revisedValidation = hardRuleResult\?\.validation \|\| null/);
   assert.match(reviseSource, /validation: revisedValidation/);
   assert.match(reviseSource, /deepseekChat/);
   assert.match(reviseSource, /chatPrompt/);

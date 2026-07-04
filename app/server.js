@@ -18,10 +18,10 @@ const { DEFAULT_PROJECT_ID, createProject, groupConversationsByProject, normaliz
 const { normalizeModelSettings, publicModelSettings, resolveActiveModelSettings, updateModelSettings } = require("./lib/modelSettings");
 const { handleNotification, listNotifications } = require("./lib/notifications");
 const { buildLearningLibrary } = require("./lib/learningLibrary");
-const { learnExplicitRule, updateCurrentRuleStatus } = require("./lib/autonomousLearning");
+const { appendLearningEvent, learnExplicitRule, updateCurrentRuleStatus } = require("./lib/autonomousLearning");
 const { recordArchiveLearningEvidence } = require("./lib/learningEvidence");
 const { analyzeCanvasArchiveReadiness } = require("./lib/canvasArchive");
-const { isStoryboardValidationResolved, validateStoryboardContent } = require("./lib/storyboardValidation");
+const { applyStoryboardHardRuleValidation, isStoryboardValidationResolved, validateStoryboardContent } = require("./lib/storyboardValidation");
 
 const ROOT = path.resolve(__dirname, "..");
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -1364,18 +1364,30 @@ async function generateCanvasStoryboards(body) {
     usages.push(result.usage);
     lastModel = result.model || lastModel;
     const titleScope = { nodes: [...(canvas.nodes || []), ...generatedNodes] };
-    const validation = validateStoryboardContent(result.content);
+    const hardRuleResult = applyStoryboardHardRuleValidation(result.content, {
+      currentRulesUsed: storyboardSkillContext.currentRulesUsed || [],
+    });
+    if (hardRuleResult.hardRuleValidation.checked && !hardRuleResult.hardRuleValidation.finalOk) {
+      await recordStoryboardHardRuleFailure({
+        canvasId: canvas.id,
+        outputId: plannedNode.id,
+        currentRulesUsed: storyboardSkillContext.currentRulesUsed || [],
+        hardRuleValidation: hardRuleResult.hardRuleValidation,
+      });
+      throw new Error("分镜输出违反已命中的硬规则，自动拆分修复后仍未通过，已写入学习失败事件。");
+    }
     generatedNodes.push({
       ...plannedNode,
       title: uniqueCanvasNodeTitle(titleScope, plannedNode.title),
-      content: result.content,
+      content: hardRuleResult.content,
       meta: {
         ...plannedNode.meta,
         model: result.model,
         usage: result.usage,
         generatedAt: new Date().toISOString(),
         currentRulesUsed: storyboardSkillContext.currentRulesUsed || [],
-        validation,
+        validation: hardRuleResult.validation,
+        hardRuleValidation: hardRuleResult.hardRuleValidation,
       },
     });
   }
@@ -1388,6 +1400,55 @@ async function generateCanvasStoryboards(body) {
   }
   canvas = await saveCanvas(canvas);
   return { canvas, nodes: generatedNodes, model: lastModel, usage: aggregateUsage(usages) };
+}
+
+async function recordStoryboardHardRuleFailure(input = {}) {
+  const currentRulesUsed = Array.isArray(input.currentRulesUsed) ? input.currentRulesUsed : [];
+  const appliedRules = Array.isArray(input.hardRuleValidation?.appliedRules)
+    ? input.hardRuleValidation.appliedRules
+    : [];
+  const ruleRefs = appliedRules.map((rule) => rule.ruleId).filter(Boolean);
+  const sourceEventIds = Array.from(new Set(appliedRules.flatMap((rule) =>
+    Array.isArray(rule.sourceEventIds) ? rule.sourceEventIds : []
+  ).map(String).filter(Boolean)));
+  const firstRule = appliedRules[0] || currentRulesUsed[0] || {};
+  const failedAt = new Date().toISOString();
+  await appendLearningEvent(ROOT, {
+    eventId: `hard-rule-validation-failed-${safeEventSegment(input.canvasId)}-${safeEventSegment(input.outputId)}-${Date.now()}`,
+    internalStatus: "failed",
+    jobStatus: "failed",
+    learningMode: "evidence",
+    landingType: "eval",
+    sourceType: "generation",
+    topicKey: firstRule.topicKey || "storyboard.dialogue.length",
+    conflictKey: firstRule.conflictKey || firstRule.topicKey || "storyboard.dialogue.length",
+    canvasId: input.canvasId,
+    outputId: input.outputId,
+    sourceEventIds,
+    currentRulesUsedRefs: ruleRefs,
+    summary: "分镜输出违反已影响生成的硬规则，自动修正后仍失败。",
+    error: {
+      stage: "storyboard-hard-rule-post-validation",
+      code: "STORYBOARD_HARD_RULE_VALIDATION_FAILED",
+      message: "自动台词拆分后仍存在硬规则违规。",
+      issues: input.hardRuleValidation?.finalIssues || input.hardRuleValidation?.initialIssues || [],
+    },
+    generationProof: {
+      proofStatus: "failed",
+      currentRulesUsedRefs: ruleRefs,
+      validationResultRefs: [String(input.outputId || "").trim()].filter(Boolean),
+      failureEventIds: sourceEventIds,
+    },
+    createdAt: failedAt,
+    updatedAt: failedAt,
+  });
+}
+
+function safeEventSegment(value) {
+  return String(value || "output")
+    .replace(/[^0-9A-Za-z_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "output";
 }
 
 function storyboardRevisionIssuesForPrompt(parentNode) {
@@ -1436,7 +1497,8 @@ async function reviseCanvasNode(body) {
     throw new Error("该节点类型暂不支持修改对话");
   }
 
-  const skillPrompt = node.type === "storyboard" ? await canvasStoryboardSkillPrompt() : "";
+  const storyboardSkillContext = node.type === "storyboard" ? await canvasStoryboardSkillContext() : null;
+  const skillPrompt = storyboardSkillContext?.prompt || "";
   const storyboardIssueContext = formatStoryboardRevisionIssues(storyboardRevisionIssuesForPrompt(parentNode));
   const messages = [
     {
@@ -1473,7 +1535,22 @@ async function reviseCanvasNode(body) {
     temperature: 0.55,
     messages,
   });
-  const revisedValidation = node.type === "storyboard" ? validateStoryboardContent(result.content) : null;
+  const hardRuleResult = node.type === "storyboard"
+    ? applyStoryboardHardRuleValidation(result.content, {
+        currentRulesUsed: storyboardSkillContext?.currentRulesUsed || [],
+      })
+    : null;
+  if (hardRuleResult?.hardRuleValidation?.checked && !hardRuleResult.hardRuleValidation.finalOk) {
+    await recordStoryboardHardRuleFailure({
+      canvasId: canvas.id,
+      outputId: node.id,
+      currentRulesUsed: storyboardSkillContext?.currentRulesUsed || [],
+      hardRuleValidation: hardRuleResult.hardRuleValidation,
+    });
+    throw new Error("分镜修改结果违反已命中的硬规则，自动拆分修复后仍未通过，已写入学习失败事件。");
+  }
+  const revisedValidation = hardRuleResult?.validation || null;
+  const revisedContent = hardRuleResult?.content || result.content;
   const revisedAt = new Date().toISOString();
   const latestCanvas = await getCanvas(body.canvasId);
   const latestNode = findCanvasNode(latestCanvas, node.id);
@@ -1487,18 +1564,20 @@ async function reviseCanvasNode(body) {
   latestCanvas.nodes = (latestCanvas.nodes || []).map((item) => item.id === node.id
       ? {
           ...item,
-          content: result.content,
+          content: revisedContent,
           meta: {
             ...(item.meta || {}),
             variantKind: "revision",
             parentNodeId,
             parentTitleSnapshot: latestParentNode.title || parentNode.title || item.meta?.parentTitleSnapshot || "",
             chatPrompt: prompt,
-            chatResponse: result.content,
+            chatResponse: revisedContent,
             chatLocked: true,
             revisedAt,
             model: result.model,
             usage: result.usage,
+            currentRulesUsed: storyboardSkillContext?.currentRulesUsed || item.meta?.currentRulesUsed || [],
+            ...(hardRuleResult ? { hardRuleValidation: hardRuleResult.hardRuleValidation } : {}),
             ...(revisedValidation ? { validation: revisedValidation } : {}),
           },
         }

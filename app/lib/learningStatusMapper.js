@@ -32,6 +32,7 @@ function mapLearningDisplayRecord(event = {}, context = {}) {
   return {
     recordId: normalizeString(event.eventId || event.recordId || event.ruleId) || "learning-record",
     displayStatus,
+    status: displayStatus === "待确认" && actionLabel === "待补样例" ? "待确认 / 待补样例" : displayStatus,
     actionLabel,
     affectsGeneration,
     generationImpactText: resolveGenerationImpactText(event, displayStatus, affectsGeneration),
@@ -202,7 +203,13 @@ function resolveNextStepText(event, displayStatus, actionLabel) {
   if (displayStatus === "已影响生成") return "等待下一次生成命中后补充验证证据。";
   if (displayStatus === "已被覆盖") return "无需处理，查看覆盖它的新学习即可。";
   if (displayStatus === "已保存") return "无需处理，可在需要时作为资料回看。";
-  if (landingType === "sample-insufficient") return "补充更多同类样例后，再确认是否沉淀成长期规则。";
+  if (landingType === "sample-insufficient") {
+    const neededSampleType = normalizeString(event.neededSampleType) || "同类样例";
+    const neededCount = Number(event.neededCount || 0);
+    const relatedRecordIds = normalizeStringArray(event.relatedRecordIds);
+    const relatedText = relatedRecordIds.length ? `；关联记录：${relatedRecordIds.join("、")}` : "";
+    return `待补样例：${neededSampleType}，还需要补充 ${neededCount} 条${relatedText}。补齐后重新生成评测任务，不会直接影响生成。`;
+  }
   if (actionLabel === "待纠正") return "请补充正确的纠正位置或重新发起学习。";
   if (actionLabel === "待归档") return "确认资料价值后归档到合适位置。";
   return "确认它是否应成为长期规则、样例或仅归档资料。";
@@ -232,6 +239,14 @@ function buildAdvanced(event, context) {
     coveredByEventId: normalizeString(event.coveredByEventId),
     error: event.error && typeof event.error === "object" ? event.error : null,
     tokenUsage: event.tokenUsage && typeof event.tokenUsage === "object" ? event.tokenUsage : null,
+    neededSampleType: normalizeString(event.neededSampleType),
+    neededCount: Number(event.neededCount || 0),
+    relatedRecordIds: normalizeStringArray(event.relatedRecordIds),
+    currentRulesUsedRefs: normalizeStringArray(event.currentRulesUsedRefs),
+    sampleCount: Number(event.sampleCount || 0),
+    sampleRecordIds: normalizeStringArray(event.sampleRecordIds),
+    evidenceRecordIds: normalizeStringArray(event.evidenceRecordIds),
+    reevaluationTaskId: normalizeString(event.reevaluationTaskId),
     createdAt: normalizeString(event.createdAt),
     updatedAt: normalizeString(event.updatedAt),
   };

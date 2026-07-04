@@ -2,9 +2,12 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  getApplicableStoryboardHardRules,
   isStoryboardValidationResolved,
+  repairStoryboardDialogueIssues,
   storyboardContentFingerprint,
   splitDialogueLine,
+  validateStoryboardHardRules,
   validateStoryboardContent,
 } = require("./storyboardValidation");
 
@@ -100,4 +103,65 @@ test("splitDialogueLine keeps short dialogue unchanged", () => {
   const lines = splitDialogueLine("赵小满：那就这么定了。");
 
   assert.deepStrictEqual(lines, [{ text: "赵小满：那就这么定了。" }]);
+});
+test("validateStoryboardHardRules flags long dialogue only when a dialogue length rule was used", () => {
+  const content = [
+    "shot: 1",
+    "dialogue: Lin: The system will become more complete and the team will keep improving together",
+  ].join("\n");
+  const currentRulesUsed = [{
+    ruleId: "rule-dialogue-length",
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length",
+    sourceEventIds: ["event-dialogue-length"],
+    status: "active",
+  }];
+
+  const result = validateStoryboardHardRules(content, { currentRulesUsed });
+
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.appliedRules.length, 1);
+  assert.strictEqual(result.appliedRules[0].ruleId, "rule-dialogue-length");
+  assert.strictEqual(result.issues[0].type, "dialogue-too-long");
+  assert.strictEqual(result.issues[0].hardRuleId, "storyboard.dialogue.length");
+});
+
+test("repairStoryboardDialogueIssues splits long dialogue into lines within the hard limit", () => {
+  const content = [
+    "shot: 1",
+    "dialogue: Lin: The system will become more complete and the team will keep improving together",
+    "duration: 3s",
+  ].join("\n");
+  const validation = validateStoryboardHardRules(content, {
+    currentRulesUsed: [{
+      ruleId: "rule-dialogue-length",
+      topicKey: "storyboard.dialogue.length",
+      conflictKey: "storyboard.dialogue.length",
+    }],
+  });
+
+  const repaired = repairStoryboardDialogueIssues(content, validation.issues);
+  const repairedValidation = validateStoryboardContent(repaired.content);
+
+  assert.strictEqual(repaired.repaired, true);
+  assert.strictEqual(repairedValidation.ok, true);
+});
+
+test("getApplicableStoryboardHardRules ignores style preferences that are not programmatically checkable", () => {
+  const rules = getApplicableStoryboardHardRules([
+    {
+      ruleId: "rule-style",
+      topicKey: "storyboard.style.preference",
+      conflictKey: "storyboard.style.preference",
+      status: "active",
+    },
+    {
+      ruleId: "rule-disabled-dialogue",
+      topicKey: "storyboard.dialogue.length",
+      conflictKey: "storyboard.dialogue.length",
+      status: "disabled",
+    },
+  ]);
+
+  assert.deepStrictEqual(rules, []);
 });

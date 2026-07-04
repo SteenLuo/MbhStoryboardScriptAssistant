@@ -37,6 +37,7 @@ if (Test-Path -LiteralPath $conversationRecordDir) {
   M4TaskDraft = $taskDraft.DraftPath
   ConversationCandidateDraft = $conversationCandidates.DraftPath
   RegressionEvalTask = $regressionTask.TaskPath
+  RegressionEvalTasks = @($regressionTask.Tasks)
   LearningSnapshot = $snapshot.ReportPath
   SkillEvolutionDraft = $evolutionDraft.DraftPath
   TaskCount = $taskDraft.TaskCount
