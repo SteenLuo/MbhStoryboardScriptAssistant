@@ -10,8 +10,8 @@ async function buildLearningLibrary(root) {
   const [events, ruleset, evidenceRecords, sampleRecords] = await Promise.all([
     listLearningEvents(root, { includeCovered: true }),
     readCurrentRuleset(root),
-    readMaterialRecords(path.join(root, "learning", "evidence")),
-    readMaterialRecords(path.join(root, "learning", "samples")),
+    readMaterialRecords(path.join(root, "learning", "evidence"), "evidenceId"),
+    readMaterialRecords(path.join(root, "learning", "samples"), "sampleId"),
   ]);
   return {
     records: [
@@ -172,19 +172,29 @@ function normalizeSkillPath(value) {
   return String(value || "").replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
-async function readMaterialRecords(dir) {
+async function readMaterialRecords(dir, idField) {
   if (!fs.existsSync(dir)) return [];
   const entries = await fsp.readdir(dir, { withFileTypes: true });
   const records = [];
   for (const entry of entries) {
     if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== ".json") continue;
     try {
-      records.push(JSON.parse(await fsp.readFile(path.join(dir, entry.name), "utf8")));
+      const parsed = JSON.parse(await fsp.readFile(path.join(dir, entry.name), "utf8"));
+      if (isValidMaterialRecord(parsed, idField)) records.push(parsed);
     } catch {
       continue;
     }
   }
   return records;
+}
+
+function isValidMaterialRecord(record, idField) {
+  return Boolean(
+    record &&
+    typeof record === "object" &&
+    !Array.isArray(record) &&
+    normalizeString(record[idField]),
+  );
 }
 
 function publicSkill(root, route) {

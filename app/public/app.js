@@ -2309,7 +2309,11 @@ async function archiveCurrentCanvas(canvasId = state.currentCanvasId) {
     state.currentCanvas = data.canvas;
     await loadCanvases();
     renderCanvas();
-    canvasStatus("画布已归档，仅保留查看。");
+    if (data.learningEvidence?.status === "failed") {
+      canvasStatus("画布已归档，但学习证据生成失败，可在学习资料库查看。", { lockMs: 6000 });
+    } else {
+      canvasStatus("画布已归档，仅保留查看。");
+    }
     return data;
   } catch (error) {
     const message = error.message || "归档失败，请稍后重试。";

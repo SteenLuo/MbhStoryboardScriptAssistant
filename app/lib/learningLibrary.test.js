@@ -302,6 +302,44 @@ test("buildLearningLibrary aggregates evidence and samples as saved non-generati
   assert.deepStrictEqual(sampleRecord.advanced.sourceEventIds, ["event-sample"]);
 });
 
+test("buildLearningLibrary skips malformed evidence and sample records without empty material ids", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-malformed-materials-"));
+  const evidenceDir = path.join(root, "learning", "evidence");
+  const sampleDir = path.join(root, "learning", "samples");
+  await fsp.mkdir(evidenceDir, { recursive: true });
+  await fsp.mkdir(sampleDir, { recursive: true });
+  await fsp.writeFile(path.join(evidenceDir, "bad-json.json"), "{", "utf8");
+  await fsp.writeFile(path.join(evidenceDir, "null.json"), "null", "utf8");
+  await fsp.writeFile(path.join(evidenceDir, "array.json"), "[]", "utf8");
+  await fsp.writeFile(path.join(evidenceDir, "empty.json"), "{}", "utf8");
+  await fsp.writeFile(path.join(evidenceDir, "good.json"), JSON.stringify({
+    evidenceId: "evidence-good",
+    canvasId: "canvas-good",
+    sourceEventIds: ["event-good"],
+    createdAt: "2026-07-04T12:00:00.000Z",
+  }), "utf8");
+  await fsp.writeFile(path.join(sampleDir, "bad-json.json"), "{", "utf8");
+  await fsp.writeFile(path.join(sampleDir, "null.json"), "null", "utf8");
+  await fsp.writeFile(path.join(sampleDir, "array.json"), "[]", "utf8");
+  await fsp.writeFile(path.join(sampleDir, "empty.json"), "{}", "utf8");
+  await fsp.writeFile(path.join(sampleDir, "good.json"), JSON.stringify({
+    sampleId: "sample-good",
+    summary: "有效样例",
+    sourceEventIds: ["event-sample-good"],
+    createdAt: "2026-07-04T12:01:00.000Z",
+  }), "utf8");
+
+  const library = await buildLearningLibrary(root);
+  const recordIds = library.records.map((record) => record.recordId);
+
+  assert.ok(recordIds.includes("evidence:evidence-good"));
+  assert.ok(recordIds.includes("sample:sample-good"));
+  assert.equal(recordIds.includes("evidence:"), false);
+  assert.equal(recordIds.includes("sample:"), false);
+  assert.strictEqual(recordIds.filter((id) => id.startsWith("evidence:")).length, 1);
+  assert.strictEqual(recordIds.filter((id) => id.startsWith("sample:")).length, 1);
+});
+
 test("buildLearningLibrary keeps archive evidence failure visible without marking it saved", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-evidence-failure-"));
   await fsp.mkdir(path.join(root, "learning"), { recursive: true });
