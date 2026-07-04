@@ -13,6 +13,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $ScenarioIds = @('A1','A2','A3','A4','A5','A6','A7','A8','A9','A10')
+$Utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
 
 function Get-IsoNow {
   return (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -27,7 +28,20 @@ function Write-JsonFile {
   if ($parent) {
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
   }
-  $Value | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $Path -Encoding UTF8
+  $json = ConvertTo-Json -InputObject $Value -Depth 30
+  [System.IO.File]::WriteAllText($Path, $json, $Utf8NoBomEncoding)
+}
+
+function Write-TextFile {
+  param(
+    [Parameter(Mandatory=$true)][string]$Path,
+    [Parameter(Mandatory=$true)][AllowEmptyString()][string[]]$Lines
+  )
+  $parent = Split-Path -Parent $Path
+  if ($parent) {
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+  }
+  [System.IO.File]::WriteAllLines($Path, $Lines, $Utf8NoBomEncoding)
 }
 
 function Read-JsonFile {
@@ -50,8 +64,8 @@ function Add-JsonLine {
   if ($parent) {
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
   }
-  $line = $Value | ConvertTo-Json -Depth 30 -Compress
-  Add-Content -LiteralPath $Path -Encoding UTF8 -Value $line
+  $line = ConvertTo-Json -InputObject $Value -Depth 30 -Compress
+  [System.IO.File]::AppendAllText($Path, $line + [Environment]::NewLine, $Utf8NoBomEncoding)
 }
 
 function Get-CommitHash {
@@ -300,15 +314,89 @@ function Get-ScenarioEvidenceRoot {
   return $dir
 }
 
+function Test-Property {
+  param(
+    [Parameter(Mandatory=$true)]$Value,
+    [Parameter(Mandatory=$true)][string]$Name
+  )
+  if ($Value -is [System.Collections.IDictionary]) {
+    return $Value.Contains($Name)
+  }
+  return $null -ne $Value.PSObject.Properties[$Name]
+}
+
+function Add-ResultCandidate {
+  param(
+    [Parameter(Mandatory=$true)]$Candidates,
+    $Value
+  )
+  if ($null -eq $Value) {
+    return
+  }
+  if ($Value -is [System.Array]) {
+    foreach ($item in $Value) {
+      Add-ResultCandidate -Candidates $Candidates -Value $item
+    }
+    return
+  }
+  if ((Test-Property -Value $Value -Name 'scenario') -and ($ScenarioIds -contains ([string]$Value.scenario))) {
+    [void]$Candidates.Add($Value)
+    return
+  }
+  if (Test-Property -Value $Value -Name 'value') {
+    Add-ResultCandidate -Candidates $Candidates -Value $Value.value
+  }
+}
+
+function Get-FlatResults {
+  param([Parameter(Mandatory=$true)][string]$Path)
+  $candidates = New-Object System.Collections.Generic.List[object]
+  Add-ResultCandidate -Candidates $candidates -Value (Read-JsonFile -Path $Path -Default @())
+
+  $byScenario = @{}
+  foreach ($result in $candidates) {
+    $scenario = [string]$result.scenario
+    $byScenario[$scenario] = $result
+  }
+
+  $flat = @()
+  foreach ($id in $ScenarioIds) {
+    if ($byScenario.ContainsKey($id)) {
+      $flat += $byScenario[$id]
+    }
+  }
+  return $flat
+}
+
+function Assert-CompleteResults {
+  param([Parameter(Mandatory=$true)][array]$Results)
+  $present = @{}
+  foreach ($result in $Results) {
+    if (Test-Property -Value $result -Name 'scenario') {
+      $present[[string]$result.scenario] = $true
+    }
+  }
+  $missing = @($ScenarioIds | Where-Object { !$present.ContainsKey($_) })
+  if ($missing.Count -gt 0) {
+    throw "Missing A1-A10 result scenarios: $($missing -join ', ')"
+  }
+}
+
 function Save-Result {
   param(
     [Parameter(Mandatory=$true)][string]$Root,
     [Parameter(Mandatory=$true)]$Result
   )
+  if (!(Test-Property -Value $Result -Name 'scenario') -or !($ScenarioIds -contains ([string]$Result.scenario))) {
+    throw "Unknown result scenario: $($Result.scenario)"
+  }
   $path = Join-Path $Root 'results.json'
-  $existing = @(Read-JsonFile -Path $path -Default @())
+  $existing = Get-FlatResults -Path $path
   $next = @($existing | Where-Object { $_.scenario -ne $Result.scenario }) + @($Result)
-  $next = @($next | Sort-Object scenario)
+  $next = @($ScenarioIds | ForEach-Object {
+    $id = $_
+    $next | Where-Object { $_.scenario -eq $id } | Select-Object -First 1
+  })
   Write-JsonFile -Path $path -Value $next
 
   $manifestPath = Join-Path $Root 'manifest.json'
@@ -590,6 +678,45 @@ function Invoke-Scenario {
   }
 }
 
+function Test-RecordIdInList {
+  param(
+    $List,
+    [Parameter(Mandatory=$true)][string]$RecordId
+  )
+  return @($List | Where-Object { $_.recordId -eq $RecordId }).Count -gt 0
+}
+
+function Assert-ServiceLearningLibrary {
+  param([Parameter(Mandatory=$true)]$Library)
+
+  if (!(Test-Property -Value $Library -Name 'accessIssues')) {
+    throw 'Service learning library response is missing accessIssues.'
+  }
+  $accessIssues = @($Library.accessIssues)
+  if ($accessIssues.Count -gt 0) {
+    $summary = @($accessIssues | Select-Object -First 3 | ForEach-Object { "$($_.area): $($_.message)" }) -join '; '
+    throw "Service learning library has accessIssues: $summary"
+  }
+
+  $required = @(
+    @{ list = 'records'; id = 'rule:rule-accept-A1-overall-rule' },
+    @{ list = 'impactItems'; id = 'rule:rule-accept-A1-overall-rule' },
+    @{ list = 'sampleItems'; id = 'sample:sample-A3-style-reference' },
+    @{ list = 'evalItems'; id = 'eval:eval-A5-need-more-samples' },
+    @{ list = 'records'; id = 'event:accept-A6-conflict' },
+    @{ list = 'records'; id = 'event:accept-A10-page-boundary' }
+  )
+  foreach ($item in $required) {
+    $listName = $item.list
+    if (!(Test-Property -Value $Library -Name $listName)) {
+      throw "Service learning library response is missing $listName."
+    }
+    if (!(Test-RecordIdInList -List $Library.$listName -RecordId $item.id)) {
+      throw "Service learning library did not aggregate fixture record $($item.id) in $listName."
+    }
+  }
+}
+
 function Invoke-ServiceMode {
   param(
     [Parameter(Mandatory=$true)][string]$Root,
@@ -631,6 +758,7 @@ function Invoke-ServiceMode {
     $library = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/learning-library" -TimeoutSec 5
     Write-JsonFile -Path (Join-Path $logDir 'status.json') -Value $status
     Write-JsonFile -Path (Join-Path $logDir 'learning-library.json') -Value $library
+    Assert-ServiceLearningLibrary -Library $library
 
     $manifestPath = Join-Path $Root 'manifest.json'
     $manifest = Read-JsonFile -Path $manifestPath -Default ([pscustomobject]@{})
@@ -663,7 +791,9 @@ function New-Report {
       Invoke-Scenario -Root $Root -Id $id | Out-Null
     }
   }
-  $results = @(Read-JsonFile -Path $resultsPath -Default @())
+  $results = @(Get-FlatResults -Path $resultsPath)
+  Assert-CompleteResults -Results $results
+  Write-JsonFile -Path $resultsPath -Value $results
   $manifest = Read-JsonFile -Path (Join-Path $Root 'manifest.json') -Default ([pscustomobject]@{})
   $date = Get-Date -Format 'yyyyMMdd'
   $reportPath = Join-Path $RepoRoot "docs/学习机制闭环验收记录_${date}_v1.md"
@@ -672,7 +802,7 @@ function New-Report {
   if ($manifest.serviceMode -and $manifest.serviceMode.port) {
     $servicePort = [int]$manifest.serviceMode.port
   }
-  $allPassed = ($results.Count -ge 10) -and (@($results | Where-Object { $_.passed -ne $true }).Count -eq 0)
+  $allPassed = ($results.Count -eq 10) -and (@($results | Where-Object { $_.passed -ne $true }).Count -eq 0)
   $conclusion = if ($allPassed) { '通过：A1-A10 夹具证据均已生成，服务夹具模式可按需复核。' } else { '未通过：存在失败或缺失场景，请先查看 results.json 和证据路径。' }
 
   $lines = New-Object System.Collections.Generic.List[string]
@@ -706,10 +836,10 @@ function New-Report {
   $lines.Add("")
   $lines.Add("## 隔离说明")
   $lines.Add("")
-  $lines.Add("- 本报告使用夹具目录的 `workspace/learning`、`workspace/app/data` 和 `workspace/runs`。")
-  $lines.Add("- `app/server.js`、`app/public/`、`app/config/` 未复制到夹具目录。")
-  $lines.Add("- 真实 `learning/` 不应因本脚本的 `-FixtureRoot` 场景执行而被写入。")
-  Set-Content -LiteralPath $reportPath -Encoding UTF8 -Value $lines
+  $lines.Add('- 本报告使用夹具目录的 `workspace/learning`、`workspace/app/data` 和 `workspace/runs`。')
+  $lines.Add('- `app/server.js`、`app/public/`、`app/config/` 未复制到夹具目录。')
+  $lines.Add('- 真实 `learning/` 不应因本脚本的 `-FixtureRoot` 场景执行而被写入。')
+  Write-TextFile -Path $reportPath -Lines ([string[]]$lines)
   "REPORT $reportPath"
 }
 
