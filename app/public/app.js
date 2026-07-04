@@ -571,7 +571,12 @@ function renderMessageAttachments(container, attachments = []) {
   container.appendChild(list);
 }
 
+function clearPendingLearningCorrection() {
+  state.pendingLearningCorrection = null;
+}
+
 function setComposeMode(mode) {
+  clearPendingLearningCorrection();
   state.composeMode = state.composeMode === mode ? "" : mode;
   document.querySelectorAll("[data-compose-mode]").forEach((button) => {
     const active = button.dataset.composeMode === state.composeMode;
@@ -1085,6 +1090,7 @@ function openNotificationTarget(target = {}) {
 }
 
 async function loadConversations() {
+  clearPendingLearningCorrection();
   const data = await api("/api/conversations");
   state.projects = data.projects || [];
   state.projectGroups = data.projectGroups || [];
@@ -1780,6 +1786,7 @@ function startRenameConversation(item, row) {
 }
 
 async function loadConversation(id) {
+  clearPendingLearningCorrection();
   const data = await api(`/api/conversation?id=${encodeURIComponent(id)}`);
   state.currentId = data.id;
   state.messages = data.messages || [];
@@ -1889,6 +1896,7 @@ async function createConversationFromModal() {
 }
 
 async function newConversation(options = {}) {
+  clearPendingLearningCorrection();
   const data = await api("/api/conversations", {
     method: "POST",
     body: JSON.stringify({
@@ -1947,6 +1955,7 @@ async function sendMessage(event) {
           message: outgoingText,
         }),
       });
+      clearPendingLearningCorrection();
       waiting.textContent = data.message || data.record?.nextStepText || "已记录纠正说明。";
       if (data.library) {
         state.learningLibrary = data.library;
@@ -1978,11 +1987,18 @@ async function sendMessage(event) {
     renderMessages();
     if (state.workbenchOpen) loadWorkbench();
   } catch (error) {
+    if (pendingCorrection) {
+      state.pendingLearningCorrection = pendingCorrection;
+      input.value = text;
+      autoGrowTextarea();
+      updateSendState();
+    }
     waiting.textContent = error.message;
   }
 }
 
-function setAppMode(mode) {
+function setAppMode(mode, options = {}) {
+  if (!options.keepPendingCorrection) clearPendingLearningCorrection();
   state.appMode = mode === "canvas" ? "canvas" : "chat";
   $("chatShell").hidden = state.appMode !== "chat";
   $("canvasShell").hidden = state.appMode !== "canvas";
@@ -6207,8 +6223,16 @@ function renderLearningRecordItem(record) {
   ].filter(Boolean);
   const localRecord = record.learningRecord ? `<p>本地记录：${escapeHtml(record.learningRecord)}</p>` : "";
   const correctionAction = record.correctionAction;
+  const correctionActions = (correctionAction?.actions || [])
+    .filter((option) => ["override", "temporary", "disable", "narrow"].includes(option.action));
+  const disabledReason = correctionAction?.disabledReason || "这条记录缺少可引用的位置。";
+  const disabledAttrs = correctionAction?.enabled === false
+    ? ` disabled aria-disabled="true" title="${escapeHtml(disabledReason)}"`
+    : "";
   const correctionButton = correctionAction
-    ? `<div class="learning-correction-actions"><button type="button" data-learning-correction="${escapeHtml(key)}">带引用去纠正</button></div>`
+    ? `<div class="learning-correction-actions" aria-label="带引用去纠正">${correctionActions.map((option) => (
+      `<button type="button" data-learning-correction="${escapeHtml(key)}" data-learning-correction-action="${escapeHtml(option.action)}"${disabledAttrs || ` title="${escapeHtml(option.defaultText || "带引用去纠正")}"`}>${escapeHtml(option.label || option.action)}</button>`
+    )).join("")}</div>`
     : "";
   item.innerHTML = `
     <div class="learning-library-item-head">
@@ -6225,7 +6249,7 @@ function renderLearningRecordItem(record) {
   return item;
 }
 
-function beginLearningCorrection(recordKey) {
+function beginLearningCorrection(recordKey, actionType = "override") {
   const records = state.learningLibrary?.records || [];
   const record = records.find((item) => learningRecordKey(item) === recordKey);
   const correctionAction = record?.correctionAction;
@@ -6234,17 +6258,18 @@ function beginLearningCorrection(recordKey) {
     setTextIfPresent("learningStatus", correctionAction.disabledReason || "这条记录缺少可引用的位置。");
     return;
   }
+  const selectedAction = (correctionAction.actions || []).find((item) => item.action === actionType) || correctionAction;
 
   const input = $("chatInput");
   const reference = buildLearningCorrectionReference(record, correctionAction.payload);
-  input.value = `${correctionAction.defaultText}\n\n引用：${reference}\n补充说明：`;
+  input.value = `${selectedAction.defaultText || correctionAction.defaultText}\n\n引用：${reference}\n补充说明：`;
   state.pendingLearningCorrection = {
     payload: correctionAction.payload,
-    action: correctionAction.action || "override",
+    action: selectedAction.action || correctionAction.action || "override",
     recordKey,
   };
   closeLearningPage();
-  setAppMode("chat");
+  setAppMode("chat", { keepPendingCorrection: true });
   autoGrowTextarea();
   updateSendState();
   input.focus();
@@ -6735,7 +6760,14 @@ function bindEvents() {
   $("learningPage").addEventListener("click", (event) => {
     const correctionButton = event.target.closest("[data-learning-correction]");
     if (correctionButton) {
-      beginLearningCorrection(correctionButton.dataset.learningCorrection || "");
+      if (correctionButton.disabled) {
+        setTextIfPresent("learningStatus", correctionButton.title || "这条记录缺少可引用的位置。");
+        return;
+      }
+      beginLearningCorrection(
+        correctionButton.dataset.learningCorrection || "",
+        correctionButton.dataset.learningCorrectionAction || "override",
+      );
       return;
     }
     if (event.target === $("learningPage")) closeLearningPage();

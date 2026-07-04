@@ -33,3 +33,12 @@ test("sendMessage submits pending learning corrections through correction API", 
   assert.match(sendSource, /\/api\/learning-corrections/);
   assert.match(sendSource, /waiting\.textContent = "正在记录纠正说明\.\.\."/);
 });
+
+test("sendMessage preserves pending learning correction when correction API fails", () => {
+  const sendSource = extractFunction("sendMessage");
+
+  assert.match(sendSource, /state\.pendingLearningCorrection = pendingCorrection/);
+  assert.match(sendSource, /input\.value = text/);
+  assert.match(sendSource, /autoGrowTextarea\(\)/);
+  assert.match(sendSource, /updateSendState\(\)/);
+});

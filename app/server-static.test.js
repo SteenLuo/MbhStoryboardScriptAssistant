@@ -190,13 +190,11 @@ test("learning correction API writes referenced correction events without blind 
 
   assert.match(apiSource, /\/api\/learning-corrections/);
   assert.match(apiSource, /handleLearningCorrection\(body\)/);
-  assert.match(correctionSource, /buildLearningCorrectionEvent/);
-  assert.match(correctionSource, /appendLearningEvent\(ROOT,\s*correction\.event\)/);
-  assert.match(correctionSource, /learningMode:\s*"correction"/);
-  assert.match(correctionSource, /需要你补充是哪条记录/);
-  assert.match(correctionSource, /actionLabel:\s*"待纠正"/);
-  assert.match(correctionSource, /updateCurrentRuleStatus\(ROOT,\s*\{\s*ruleId,\s*status:\s*"disabled"\s*\}/s);
-  assert.match(correctionSource, /disableResult/);
+  assert.match(serverSource, /applyLearningCorrectionRequest/);
+  assert.match(correctionSource, /applyLearningCorrectionRequest\(ROOT,\s*body/);
+  assert.match(correctionSource, /appendLearningEvent/);
+  assert.match(correctionSource, /updateCurrentRuleStatus/);
+  assert.match(correctionSource, /buildLearningLibrary/);
 });
 
 test("chat flow applies explicit learning rules into the current ruleset", () => {

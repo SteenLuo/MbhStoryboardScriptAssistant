@@ -5209,6 +5209,8 @@ input.masked-key {
 .learning-rule-actions,
 .learning-correction-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: flex-end;
   margin-top: 10px;
 }
@@ -5230,6 +5232,11 @@ input.masked-key {
 .learning-correction-actions button:focus-visible {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 15%, var(--field-bg));
+}
+
+.learning-correction-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .learning-library-item.status-active .learning-rule-actions button {

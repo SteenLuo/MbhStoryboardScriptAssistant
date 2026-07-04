@@ -318,7 +318,14 @@ test("learning record renderer uses D2 display fields before raw legacy fields",
   assert.match(renderRecordSource, /record\.advanced\?\.coveredByEventId/);
   assert.match(renderRecordSource, /record\.correctionAction/);
   assert.match(renderRecordSource, /data-learning-correction/);
+  assert.match(renderRecordSource, /data-learning-correction-action/);
   assert.match(renderRecordSource, /带引用去纠正/);
+  assert.match(renderRecordSource, /override/);
+  assert.match(renderRecordSource, /temporary/);
+  assert.match(renderRecordSource, /disable/);
+  assert.match(renderRecordSource, /narrow/);
+  assert.match(renderRecordSource, /disabledReason/);
+  assert.match(renderRecordSource, /disabled/);
   assert.match(keySource, /record\?\.recordId/);
   assert.match(failedSource, /record\?\.displayStatus\s*\|\|\s*record\?\.status/);
   assert.doesNotMatch(renderRecordSource, /record\.summary \|\| record\.rawTrigger \|\| record\.topicKey/);
@@ -330,6 +337,10 @@ test("learning correction button fills composer and sends pending correction pay
   const beginSource = extractFunction("beginLearningCorrection");
   const sendSource = extractFunction("sendMessage");
   const bindSource = extractFunction("bindEvents");
+  const clearSource = extractFunction("clearPendingLearningCorrection");
+  const setComposeSource = extractFunction("setComposeMode");
+  const setAppModeSource = extractFunction("setAppMode");
+  const loadConversationSource = extractFunction("loadConversation");
 
   assert.match(appSource, /pendingLearningCorrection:\s*null/);
   assert.match(beginSource, /correctionAction\.disabledReason/);
@@ -337,12 +348,22 @@ test("learning correction button fills composer and sends pending correction pay
   assert.match(beginSource, /defaultText/);
   assert.match(beginSource, /引用/);
   assert.match(beginSource, /pendingLearningCorrection/);
+  assert.match(beginSource, /actionType/);
+  assert.match(beginSource, /selectedAction/);
+  assert.match(clearSource, /state\.pendingLearningCorrection = null/);
+  assert.match(setComposeSource, /clearPendingLearningCorrection\(\)/);
+  assert.match(setAppModeSource, /clearPendingLearningCorrection\(\)/);
+  assert.match(loadConversationSource, /clearPendingLearningCorrection\(\)/);
   assert.match(sendSource, /state\.pendingLearningCorrection/);
   assert.match(sendSource, /\/api\/learning-corrections/);
   assert.match(sendSource, /payload:\s*pendingCorrection\.payload/);
   assert.match(sendSource, /action:\s*pendingCorrection\.action/);
   assert.match(sendSource, /message:\s*outgoingText/);
+  assert.match(sendSource, /clearPendingLearningCorrection\(\)/);
+  assert.match(sendSource, /state\.pendingLearningCorrection = pendingCorrection/);
+  assert.match(sendSource, /input\.value = text/);
   assert.match(bindSource, /data-learning-correction/);
+  assert.match(bindSource, /learningCorrectionAction/);
   assert.match(bindSource, /beginLearningCorrection/);
 });
 

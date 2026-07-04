@@ -99,6 +99,60 @@ function buildLearningCorrectionEvent(input = {}) {
   };
 }
 
+async function applyLearningCorrectionRequest(root, body = {}, deps = {}) {
+  const correction = buildLearningCorrectionEvent({
+    record: body.record,
+    payload: body.payload,
+    action: body.action,
+    message: body.message,
+    now: deps.now,
+    idSource: deps.idSource,
+  });
+  await deps.appendLearningEvent(root, correction.event);
+
+  const response = {
+    ok: true,
+    correctionEvent: correction.event,
+    record: correction.record,
+    disabledReason: correction.disabledReason,
+    disableResult: null,
+    warning: "",
+  };
+
+  if (!correction.enabled) {
+    response.record = {
+      ...correction.record,
+      displayStatus: "待确认",
+      status: "待确认",
+      actionLabel: "待纠正",
+      nextStepText: correction.disabledReason || "需要你补充是哪条记录。",
+    };
+    response.message = "已记录纠正说明，但需要你补充是哪条记录，暂不覆盖或停用规则。";
+    response.library = await deps.buildLearningLibrary(root);
+    return response;
+  }
+
+  const ruleId = findCorrectionRuleId(correction.payload);
+  if (correction.action === "disable") {
+    if (ruleId) {
+      try {
+        response.disableResult = await deps.updateCurrentRuleStatus(root, { ruleId, status: "disabled" });
+        response.message = `已记录纠正说明，并停用当前规则：${ruleId}`;
+      } catch (error) {
+        response.warning = `已记录纠正，但没有停用规则：${error.message || String(error)}`;
+        response.message = response.warning;
+      }
+    } else {
+      response.warning = "已记录纠正，但没有停用规则：没有可安全停用的当前规则编号，未盲改规则。";
+      response.message = response.warning;
+    }
+  } else {
+    response.message = "已记录纠正说明，后续可按这条引用继续覆盖或收窄。";
+  }
+  response.library = await deps.buildLearningLibrary(root);
+  return response;
+}
+
 function mapCorrectionRecord(event, correctionAction) {
   const record = mapLearningDisplayRecord(event);
   if (!correctionAction.enabled) {
@@ -155,6 +209,7 @@ module.exports = {
   DEFAULT_CORRECTION_TEXTS,
   DISABLED_REASON,
   PRIMARY_LOCATOR_FIELDS,
+  applyLearningCorrectionRequest,
   buildCorrectionAction,
   buildCorrectionPayload,
   buildLearningCorrectionEvent,

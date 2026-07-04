@@ -1,8 +1,14 @@
 const assert = require("node:assert/strict");
+const fsp = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
 const test = require("node:test");
 
+const { appendLearningEvent, readLearningEventRecords, updateCurrentRuleStatus, writeCurrentRuleset } = require("./autonomousLearning");
+const { buildLearningLibrary } = require("./learningLibrary");
 const {
   DEFAULT_CORRECTION_TEXTS,
+  applyLearningCorrectionRequest,
   buildCorrectionAction,
   buildLearningCorrectionEvent,
 } = require("./learningCorrection");
@@ -87,4 +93,79 @@ test("correction event falls back to waiting correction when locator is missing"
   assert.strictEqual(result.record.displayStatus, "待确认");
   assert.strictEqual(result.record.actionLabel, "待纠正");
   assert.match(result.record.nextStepText, /补充正确的纠正位置|补充是哪条记录/);
+});
+
+test("disable correction records the event but does not throw for a missing rule", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-correction-missing-rule-"));
+  const result = await applyLearningCorrectionRequest(root, {
+    payload: {
+      recordId: "event-old",
+      landingIds: ["rule-missing"],
+      topicKey: "storyboard.general",
+      conflictKey: "storyboard.general",
+    },
+    action: "disable",
+    message: "这条先停用，后续我再补说明。",
+  }, {
+    appendLearningEvent,
+    updateCurrentRuleStatus,
+    buildLearningLibrary,
+    now: () => "2026-07-04T00:00:00.000Z",
+    idSource: () => "correction-missing-rule",
+  });
+
+  const events = await readLearningEventRecords(root);
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.disableResult, null);
+  assert.match(result.warning, /没有停用规则/);
+  assert.match(result.message, /已记录纠正/);
+  assert.ok(result.library);
+  assert.ok(events.some((event) => event.eventId === "correction-missing-rule" && event.learningMode === "correction"));
+});
+
+test("disable correction records the event but does not throw for a covered rule", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-correction-covered-rule-"));
+  await writeCurrentRuleset(root, {
+    version: 1,
+    lastGoodVersion: 1,
+    updatedAt: "2026-07-04T00:00:00.000Z",
+    rules: [{
+      ruleId: "rule-covered",
+      topicKey: "storyboard.general",
+      conflictKey: "storyboard.general",
+      capability: "storyboard",
+      content: "旧规则",
+      priority: 50,
+      sourceEventIds: ["event-old"],
+      status: "covered",
+      coveredByRuleId: "rule-new",
+      createdAt: "2026-07-04T00:00:00.000Z",
+      updatedAt: "2026-07-04T00:00:00.000Z",
+    }],
+  });
+
+  const result = await applyLearningCorrectionRequest(root, {
+    payload: {
+      recordId: "event-old",
+      landingIds: ["rule-covered"],
+      topicKey: "storyboard.general",
+      conflictKey: "storyboard.general",
+    },
+    action: "disable",
+    message: "这条先停用，后续我再补说明。",
+  }, {
+    appendLearningEvent,
+    updateCurrentRuleStatus,
+    buildLearningLibrary,
+    now: () => "2026-07-04T00:10:00.000Z",
+    idSource: () => "correction-covered-rule",
+  });
+
+  const events = await readLearningEventRecords(root);
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.disableResult, null);
+  assert.match(result.warning, /没有停用规则/);
+  assert.match(result.warning, /覆盖/);
+  assert.ok(result.library.currentRules.some((rule) => rule.ruleId === "rule-covered" && rule.status === "covered"));
+  assert.ok(events.some((event) => event.eventId === "correction-covered-rule" && event.learningMode === "correction"));
 });
