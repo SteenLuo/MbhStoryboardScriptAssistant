@@ -199,9 +199,9 @@ async function writeCurrentRuleset(root, ruleset) {
   const normalized = normalizeRuleset(ruleset);
   validateRuleset(normalized);
   const file = rulesetFile(root);
+  await writeRulesetSnapshot(root, normalized);
   await fsp.mkdir(path.dirname(file), { recursive: true });
   await fsp.writeFile(file, JSON.stringify(normalized, null, 2), "utf8");
-  await writeRulesetSnapshot(root, normalized);
   return normalized;
 }
 
