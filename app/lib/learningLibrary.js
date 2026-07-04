@@ -399,17 +399,16 @@ async function readSkillDraftRecords(dir, accessIssues) {
     if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== ".json") continue;
     const file = path.join(dir, entry.name);
     const draftLikeName = /^skill-evolution-draft-.*\.json$/i.test(entry.name);
+    if (!draftLikeName) continue;
     try {
       const parsed = JSON.parse(await fsp.readFile(file, "utf8"));
       if (isValidSkillDraftRecord(parsed)) {
         records.push(parsed);
-      } else if (draftLikeName) {
+      } else {
         accessIssues.push(accessIssue("skill-drafts", new Error("Skill draft JSON is missing draftId."), file, { count: 1 }));
       }
     } catch (error) {
-      if (draftLikeName) {
-        accessIssues.push(accessIssue("skill-drafts", error, file, { count: 1 }));
-      }
+      accessIssues.push(accessIssue("skill-drafts", error, file, { count: 1 }));
     }
   }
   return { records };

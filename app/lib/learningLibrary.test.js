@@ -325,6 +325,11 @@ test("buildLearningLibrary aggregates saved skill drafts without affecting gener
     generatedAt: "2026-07-04T12:00:00.000Z",
     affectsGeneration: false,
   }), "utf8");
+  await fsp.writeFile(path.join(root, "learning", "skill-evolution-reports", "misc-report.json"), JSON.stringify({
+    draftId: "not-a-skill-draft",
+    skillId: "storyboard-generate",
+    humanConfirmationStatus: "pending",
+  }), "utf8");
 
   const library = await buildLearningLibrary(root);
   const draft = library.skillItems.find((item) => item.recordId === "skill-draft:draft-a");
@@ -344,6 +349,8 @@ test("buildLearningLibrary aggregates saved skill drafts without affecting gener
   assert.strictEqual(draft.nextStepText, "等待人工确认；确认前不会写入正式技能或生成上下文。");
   assert.strictEqual(draft.affectsGeneration, false);
   assert.equal(library.impactItems.some((item) => item.recordId === "skill-draft:draft-a"), false);
+  assert.equal(library.skillItems.some((item) => item.recordId === "skill-draft:not-a-skill-draft"), false);
+  assert.equal(library.accessIssues.some((issue) => issue.path?.endsWith("misc-report.json")), false);
 });
 
 test("buildLearningLibrary reports malformed skill drafts as access issues while keeping skills visible", async () => {
