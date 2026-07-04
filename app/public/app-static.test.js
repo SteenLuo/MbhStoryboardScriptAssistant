@@ -202,6 +202,12 @@ test("cat notification queue renders actionable persistent prompts", () => {
 });
 
 test("learning library is reachable from sidebar and renders readonly tabs", () => {
+  const learningPageSource = indexSource.slice(
+    indexSource.indexOf('<aside id="learningPage"'),
+    indexSource.indexOf('<aside id="canvasArchivePage"'),
+  );
+  const nonLearningPageSource = `${indexSource.slice(0, indexSource.indexOf('<aside id="learningPage"'))}${indexSource.slice(indexSource.indexOf('<aside id="canvasArchivePage"'))}`;
+
   assert.match(indexSource, /openLearningLibrary/);
   assert.match(indexSource, /id="learningPage"/);
   assert.match(indexSource, /id="closeLearningPage"/);
@@ -214,7 +220,13 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(indexSource, /learningSkillsTabCount/);
   assert.match(indexSource, /learningRecordHelp/);
   assert.match(indexSource, /学习记录说明/);
-  assert.match(indexSource, /data-learning-library-tab="records"[\s\S]*learningRecordHelp[\s\S]*学习记录状态[\s\S]*处理中[\s\S]*已生效[\s\S]*已被覆盖[\s\S]*失败[\s\S]*<\/button>/);
+  assert.match(learningPageSource, /系统会把长期规则、满意样例、纠错和归档证据记到这里。每条记录都会说明是否影响生成。学错了可以点“带引用去纠正”回到对话处理。/);
+  assert.match(learningPageSource, /已保存/);
+  assert.match(learningPageSource, /已影响生成/);
+  assert.match(learningPageSource, /待确认/);
+  assert.match(learningPageSource, /学错了怎么改/);
+  assert.doesNotMatch(learningPageSource, /已生效/);
+  assert.match(indexSource, /data-learning-library-tab="records"[\s\S]*learningRecordHelp[\s\S]*学习记录状态[\s\S]*已保存[\s\S]*已影响生成[\s\S]*待确认[\s\S]*失败[\s\S]*<\/button>/);
   assert.match(indexSource, /learningSkillHelp/);
   assert.match(indexSource, /技能库说明/);
   assert.match(indexSource, /对话可以先影响当前规则层/);
@@ -223,30 +235,15 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.doesNotMatch(indexSource, /<\/div>\s*<div class="learning-help-wrap">[\s\S]*learningSkillHelp/);
   assert.match(indexSource, /learningFailureJump/);
   assert.match(indexSource, /learning-guide/);
-  assert.match(indexSource, /手动学习/);
-  assert.match(indexSource, /自动学习/);
-  assert.match(indexSource, /以后分镜台词超过20字就拆镜/);
-  assert.match(indexSource, /同一要求在同一对话里被再次强调/);
-  assert.match(indexSource, /同一镜号台词超过20字要拆镜头/);
-  assert.match(indexSource, /不会凭空猜/);
-  assert.match(indexSource, /默认剧本评审先看人物动机/);
-  assert.match(indexSource, /以后分镜不能连续三个同景别镜头/);
-  assert.match(indexSource, /不触发：只要求本轮修改、闲聊、一次性反馈/);
-  assert.match(indexSource, /落实到规则/);
-  assert.match(indexSource, /技能命中后叠加规则/);
-  assert.match(indexSource, /不会单独调用“当前规则”/);
-  assert.match(indexSource, /先命中一个本地技能/);
-  assert.match(indexSource, /同能力范围的当前规则追加到该技能上下文/);
-  assert.match(indexSource, /未命中对应技能的规则不会独立生效/);
+  assert.match(indexSource, /新手说明/);
+  assert.match(indexSource, /内部排查信息默认折叠/);
+  assert.doesNotMatch(learningPageSource, /topicKey|L0\/L1\/L2|skill-index|token|失败堆栈/);
+  assert.doesNotMatch(nonLearningPageSource, /学习记录状态|学错了怎么改|已影响生成|带引用去纠正/);
   assert.doesNotMatch(indexSource, /class="learning-status-guide"/);
   assert.match(indexSource, /学习记录状态/);
-  assert.match(indexSource, /处理中/);
   assert.doesNotMatch(indexSource, /<b>已记录<\/b>/);
-  assert.match(indexSource, /已生效/);
-  assert.match(indexSource, /已被覆盖/);
+  assert.doesNotMatch(indexSource, /<b>已生效<\/b>/);
   assert.match(indexSource, /失败/);
-  assert.match(indexSource, /current-ruleset|当前规则层/);
-  assert.match(indexSource, /SKILL\.md/);
   assert.match(indexSource, /learningLibraryRecords/);
   assert.match(indexSource, /learningLibraryRules/);
   assert.match(indexSource, /learningLibrarySkills/);
@@ -300,22 +297,27 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(stylesSource, /\.learning-rule-actions/);
   assert.match(stylesSource, /\.learning-library-item\.status-disabled/);
   assert.match(stylesSource, /\.learning-skill-detail/);
+  assert.match(stylesSource, /\.learning-record-advanced/);
+  assert.match(stylesSource, /\.learning-record-failure/);
   assert.match(stylesSource, /\.sidebar-icon-stack/);
 });
 
-test("learning record renderer uses D2 display fields before raw legacy fields", () => {
+test("learning record renderer keeps novice fields in the default card", () => {
   const renderRecordSource = extractFunction("renderLearningRecordItem");
+  const advancedSource = extractFunction("renderLearningAdvancedDetails");
+  const advancedPayloadSource = extractFunction("learningAdvancedPayload");
+  const failureSource = extractFunction("renderLearningFailureSummary");
   const keySource = extractFunction("learningRecordKey");
   const failedSource = extractFunction("isFailedLearningRecord");
 
   assert.match(renderRecordSource, /record\.learnedText/);
-  assert.match(renderRecordSource, /record\.displayStatus\s*\|\|\s*record\.status/);
+  assert.match(renderRecordSource, /record\.displayStatus\s*\|\|\s*"待确认"/);
+  assert.match(renderRecordSource, /record\.actionLabel/);
   assert.match(renderRecordSource, /record\.sourceText/);
   assert.match(renderRecordSource, /record\.usedWhereText/);
   assert.match(renderRecordSource, /record\.generationImpactText/);
   assert.match(renderRecordSource, /record\.generationProof\?\.claimText/);
-  assert.match(renderRecordSource, /record\.advanced\?\.error\?\.message/);
-  assert.match(renderRecordSource, /record\.advanced\?\.coveredByEventId/);
+  assert.match(renderRecordSource, /record\.nextStepText/);
   assert.match(renderRecordSource, /record\.correctionAction/);
   assert.match(renderRecordSource, /data-learning-correction/);
   assert.match(renderRecordSource, /data-learning-correction-action/);
@@ -326,11 +328,28 @@ test("learning record renderer uses D2 display fields before raw legacy fields",
   assert.match(renderRecordSource, /narrow/);
   assert.match(renderRecordSource, /disabledReason/);
   assert.match(renderRecordSource, /disabled/);
+  assert.match(renderRecordSource, /renderLearningFailureSummary\(record\)/);
+  assert.match(renderRecordSource, /renderLearningAdvancedDetails\(record\)/);
+  assert.match(advancedSource, /<summary>高级详情<\/summary>/);
+  assert.match(advancedSource, /<details class="learning-record-advanced">/);
+  assert.match(advancedPayloadSource, /record\.advanced/);
+  assert.match(advancedPayloadSource, /record\.topicKey/);
+  assert.match(advancedPayloadSource, /record\.tokenUsage/);
+  assert.match(failureSource, /失败阶段/);
+  assert.match(failureSource, /原因/);
+  assert.match(failureSource, /是否影响生成/);
+  assert.match(failureSource, /下一步/);
+  assert.match(failureSource, /record\.advanced\?\.error\?\.message/);
   assert.match(keySource, /record\?\.recordId/);
   assert.match(failedSource, /record\?\.displayStatus\s*\|\|\s*record\?\.status/);
+  assert.doesNotMatch(renderRecordSource, /record\.displayStatus\s*\|\|\s*record\.status/);
   assert.doesNotMatch(renderRecordSource, /record\.summary \|\| record\.rawTrigger \|\| record\.topicKey/);
+  assert.doesNotMatch(renderRecordSource, /record\.advanced\?\.topicKey/);
+  assert.doesNotMatch(renderRecordSource, /record\.tokenUsage/);
+  assert.doesNotMatch(renderRecordSource, /stack/);
   assert.doesNotMatch(renderRecordSource, /formatLearningSource\(record\.sourceType\)/);
   assert.doesNotMatch(renderRecordSource, /formatLearningTokenUsage\(record\.tokenUsage\)/);
+  assert.match(appSource, /还没有学习记录；当你说以后都这样、投喂样例或归档画布后，会出现在这里/);
 });
 
 test("learning correction button fills composer and sends pending correction payload", () => {

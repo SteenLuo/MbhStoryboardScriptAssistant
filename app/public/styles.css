@@ -5206,6 +5206,23 @@ input.masked-key {
   line-height: 1.45;
 }
 
+.learning-library-item p b {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.learning-record-action {
+  color: var(--ink) !important;
+}
+
+.learning-record-failure {
+  margin-top: 8px;
+  border-left: 3px solid #d92d20;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, #d92d20 7%, var(--field-bg));
+}
+
 .learning-rule-actions,
 .learning-correction-actions {
   display: flex;
@@ -5249,13 +5266,15 @@ input.masked-key {
   color: #f15f5f !important;
 }
 
-.learning-skill-detail {
+.learning-skill-detail,
+.learning-record-advanced {
   margin-top: 10px;
   border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
   padding-top: 10px;
 }
 
-.learning-skill-detail summary {
+.learning-skill-detail summary,
+.learning-record-advanced summary {
   width: fit-content;
   cursor: pointer;
   color: var(--accent-dark);
@@ -5265,11 +5284,14 @@ input.masked-key {
 }
 
 .learning-skill-detail summary:hover,
-.learning-skill-detail summary:focus-visible {
+.learning-skill-detail summary:focus-visible,
+.learning-record-advanced summary:hover,
+.learning-record-advanced summary:focus-visible {
   color: var(--accent);
 }
 
-.learning-skill-detail pre {
+.learning-skill-detail pre,
+.learning-record-advanced pre {
   max-height: 320px;
   margin: 10px 0 0;
   overflow: auto;

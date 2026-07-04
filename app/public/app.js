@@ -6147,7 +6147,7 @@ function renderLearningLibrary() {
   document.querySelectorAll("[data-learning-library-panel]").forEach((panel) => {
     panel.hidden = panel.dataset.learningLibraryPanel !== state.learningLibraryTab;
   });
-  renderLearningLibraryList("learningLibraryRecords", data.records || [], renderLearningRecordItem, "暂无学习记录");
+  renderLearningLibraryList("learningLibraryRecords", data.records || [], renderLearningRecordItem, "还没有学习记录；当你说以后都这样、投喂样例或归档画布后，会出现在这里");
   renderLearningLibraryList("learningLibraryRules", data.currentRules || [], renderCurrentRuleItem, "暂无当前规则");
   renderLearningLibraryList("learningLibrarySkills", data.skills || [], renderSkillLibraryItem, "暂无技能");
 }
@@ -6200,37 +6200,39 @@ function renderLearningRecordItem(record) {
   const item = document.createElement("article");
   const key = learningRecordKey(record);
   const failed = isFailedLearningRecord(record);
-  const displayStatus = record.displayStatus || record.status;
+  const displayStatus = record.displayStatus || "待确认";
   item.className = `learning-library-item status-${safeClassName(displayStatus)}`;
   item.dataset.learningRecordKey = key;
   item.classList.toggle("failed", failed);
   item.classList.toggle("failure-viewed", failed && state.viewedLearningFailureIds.has(key));
-  const title = record.learnedText || record.summary || record.rawTrigger || record.advanced?.topicKey || "学习事件";
-  const errorMessage = record.advanced?.error?.message || record.error?.message || "";
-  const error = errorMessage
-    ? `<p class="learning-library-error">失败原因：${escapeHtml(errorMessage)}</p>`
-    : "";
-  const coveredByEventId = record.advanced?.coveredByEventId || record.coveredByEventId || "";
-  const covered = coveredByEventId ? `<p>已被后续学习覆盖：${escapeHtml(coveredByEventId)}</p>` : "";
+  const title = record.learnedText || "学习记录";
+  const action = record.actionLabel ? `<p class="learning-record-action">${escapeHtml(record.actionLabel)}</p>` : "";
   const proof = record.generationProof?.claimText
-    ? `<p>${escapeHtml(record.generationProof.claimText)}</p>`
+    ? `<p><b>生成证明：</b>${escapeHtml(record.generationProof.claimText)}</p>`
     : "";
-  const detailParts = [
-    record.sourceText,
-    record.usedWhereText,
-    record.generationImpactText,
-    formatDateTime(record.updatedAt || record.createdAt),
-  ].filter(Boolean);
-  const localRecord = record.learningRecord ? `<p>本地记录：${escapeHtml(record.learningRecord)}</p>` : "";
+  const defaultRows = [
+    learningRecordLine("是否影响生成", record.generationImpactText),
+    learningRecordLine("学到的内容", record.learnedText),
+    learningRecordLine("来源", record.sourceText),
+    learningRecordLine("用在哪里", record.usedWhereText),
+    learningRecordLine("下一步", record.nextStepText),
+  ].filter(Boolean).join("");
+  const failure = failed ? renderLearningFailureSummary(record) : "";
+  const advancedDetails = renderLearningAdvancedDetails(record);
   const correctionAction = record.correctionAction;
   const correctionActions = (correctionAction?.actions || [])
     .filter((option) => ["override", "temporary", "disable", "narrow"].includes(option.action));
+  const correctionOptions = correctionActions.length
+    ? correctionActions
+    : correctionAction
+      ? [{ action: correctionAction.action || "override", label: correctionAction.label || "带引用去纠正", defaultText: correctionAction.defaultText }]
+      : [];
   const disabledReason = correctionAction?.disabledReason || "这条记录缺少可引用的位置。";
   const disabledAttrs = correctionAction?.enabled === false
     ? ` disabled aria-disabled="true" title="${escapeHtml(disabledReason)}"`
     : "";
   const correctionButton = correctionAction
-    ? `<div class="learning-correction-actions" aria-label="带引用去纠正">${correctionActions.map((option) => (
+    ? `<div class="learning-correction-actions" aria-label="带引用去纠正">${correctionOptions.map((option) => (
       `<button type="button" data-learning-correction="${escapeHtml(key)}" data-learning-correction-action="${escapeHtml(option.action)}"${disabledAttrs || ` title="${escapeHtml(option.defaultText || "带引用去纠正")}"`}>${escapeHtml(option.label || option.action)}</button>`
     )).join("")}</div>`
     : "";
@@ -6239,14 +6241,80 @@ function renderLearningRecordItem(record) {
       <strong>${escapeHtml(title)}</strong>
       <span>${escapeHtml(formatLearningStatus(displayStatus))}</span>
     </div>
-    <p>${escapeHtml(detailParts.join(" · "))}</p>
+    ${action}
+    ${defaultRows}
     ${proof}
-    ${localRecord}
-    ${error}
-    ${covered}
+    ${failure}
     ${correctionButton}
+    ${advancedDetails}
   `;
   return item;
+}
+
+function learningRecordLine(label, value) {
+  if (!value) return "";
+  return `<p><b>${escapeHtml(label)}：</b>${escapeHtml(value)}</p>`;
+}
+
+function renderLearningFailureSummary(record) {
+  const stage = readableLearningFailureValue(
+    record.failureStage || record.stage || record.advanced?.failureStage || record.advanced?.stage || record.advanced?.error?.stage,
+    "未返回明确阶段",
+  );
+  const reason = readableLearningFailureValue(
+    record.failureReason || record.reason || record.error?.userMessage || record.advanced?.error?.userMessage || record.error?.message || record.advanced?.error?.message,
+    "未返回明确原因",
+  );
+  return `
+    <div class="learning-record-failure" role="note" aria-label="失败状态">
+      ${learningRecordLine("失败阶段", stage)}
+      ${learningRecordLine("原因", reason)}
+      ${learningRecordLine("是否影响生成", record.generationImpactText || (record.affectsGeneration ? "可能影响生成" : "未影响生成"))}
+      ${learningRecordLine("下一步", record.nextStepText || "可以点“带引用去纠正”，回到对话里补充说明。")}
+    </div>
+  `;
+}
+
+function readableLearningFailureValue(value, fallback) {
+  const text = String(value || "").trim();
+  if (!text) return fallback;
+  const firstLine = text.split(/\r?\n/).find((line) => line.trim()) || "";
+  return firstLine
+    .replace(/\bBearer\s+[A-Za-z0-9._-]+/g, "已隐藏凭据")
+    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "已隐藏邮箱")
+    .replace(/\b(api[_-]?key|token|secret)\b\s*[:=]\s*\S+/gi, "$1 已隐藏");
+}
+
+function renderLearningAdvancedDetails(record) {
+  const advanced = learningAdvancedPayload(record);
+  if (!advanced) return "";
+  return `
+    <details class="learning-record-advanced">
+      <summary>高级详情</summary>
+      <pre>${escapeHtml(JSON.stringify(advanced, null, 2))}</pre>
+    </details>
+  `;
+}
+
+function learningAdvancedPayload(record) {
+  const payload = {};
+  if (record.recordId) payload.recordId = record.recordId;
+  if (record.eventId) payload.eventId = record.eventId;
+  if (record.status && record.status !== record.displayStatus) payload.rawStatus = record.status;
+  if (record.affectsGeneration !== undefined) payload.affectsGeneration = record.affectsGeneration;
+  if (record.summary) payload.summary = record.summary;
+  if (record.rawTrigger) payload.rawTrigger = record.rawTrigger;
+  if (record.sourceType) payload.sourceType = record.sourceType;
+  if (record.topicKey) payload.topicKey = record.topicKey;
+  if (record.capability) payload.capability = record.capability;
+  if (record.learningRecord) payload.learningRecord = record.learningRecord;
+  if (record.coveredByEventId) payload.coveredByEventId = record.coveredByEventId;
+  if (record.tokenUsage) payload.tokenUsage = record.tokenUsage;
+  if (record.error) payload.error = record.error;
+  if (record.advanced) payload.advanced = record.advanced;
+  if (record.createdAt) payload.createdAt = record.createdAt;
+  if (record.updatedAt) payload.updatedAt = record.updatedAt;
+  return Object.keys(payload).length ? payload : null;
 }
 
 function beginLearningCorrection(recordKey, actionType = "override") {
@@ -6418,11 +6486,11 @@ function setTextIfPresent(id, value) {
 function formatLearningStatus(status) {
   const value = String(status || "").trim();
   const labels = {
-    active: "已生效",
+    active: "已保存",
     disabled: "已停用",
     covered: "已被覆盖",
-    queued: "处理中",
-    failed_retrying: "处理中",
+    queued: "待确认",
+    failed_retrying: "待确认",
   };
   return labels[value] || value || "处理中";
 }

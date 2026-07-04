@@ -226,7 +226,7 @@
         <div class="learning-page-head">
           <div>
             <h2 id="learningPageTitle">学习资料库</h2>
-            <p>系统从对话、样例和归档画布中沉淀出的学习结果。这里只读查看，不在这里编辑规则。</p>
+            <p>系统会把长期规则、满意样例、纠错和归档证据记到这里。每条记录都会说明是否影响生成。学错了可以点“带引用去纠正”回到对话处理。</p>
           </div>
           <button id="closeLearningPage" class="ghost" type="button">关闭</button>
         </div>
@@ -234,28 +234,25 @@
           <div class="learning-panel">
             <section class="learning-guide" aria-label="学习逻辑说明">
               <div class="learning-guide-intro">
-                <strong>学习逻辑</strong>
-                <span>学习会先形成记录；识别为可执行规则后发布到当前规则层，并在命中对应技能时随技能说明一起进入模型上下文。</span>
+                <strong>新手说明</strong>
+                <span>默认只看这三件事：已保存了什么、是否已影响生成、下一步要不要待确认。</span>
               </div>
               <div class="learning-guide-grid">
                 <article>
-                  <strong>手动学习</strong>
-                  <p>在对话框选择“技能学习”后发送长期规则、格式要求或流程约束；完成流程后也可通过手动归档学习沉淀采纳版本。</p>
+                  <strong>已保存</strong>
+                  <p>长期规则、满意样例、纠错和归档证据会先保存成学习记录，卡片会写清楚学到了什么和来源。</p>
                 </article>
                 <article>
-                  <strong>自动学习</strong>
-                  <p>会触发：普通对话里出现可复用约束，或同一要求在同一对话里被再次强调。例如“以后分镜台词超过20字就拆镜”“默认剧本评审先看人物动机”“以后分镜不能连续三个同景别镜头”。</p>
-                  <p>重复强调也要带具体规则，例如再次说“同一镜号台词超过20字要拆镜头”会触发；只说“我说过很多次了”不会凭空猜。</p>
-                  <p>不触发：只要求本轮修改、闲聊、一次性反馈，或没有明确长期规则含义的内容。</p>
+                  <strong>已影响生成</strong>
+                  <p>如果记录会进入后续生成，卡片会直接写明影响范围；还在判断中的内容会标成待确认。</p>
                 </article>
                 <article>
-                  <strong>落实到规则</strong>
-                  <p>“学习记录”保留证据和状态；“当前规则”代表已生效规则。同一主题的新规则会覆盖旧规则，失败记录会显示原因。</p>
+                  <strong>学错了怎么改</strong>
+                  <p>点“带引用去纠正”会带着这条学习记录回到对话框，你可以说明要覆盖、临时忽略、停用或缩小范围。</p>
                 </article>
                 <article>
-                  <strong>技能命中后叠加规则</strong>
-                  <p>系统不会单独调用“当前规则”。对话按钮、自然语言任务、画布生成或自动处理入口会先命中一个本地技能（SKILL.md）。</p>
-                  <p>技能命中后，再把同能力范围的当前规则追加到该技能上下文；未命中对应技能的规则不会独立生效。</p>
+                  <strong>高级详情</strong>
+                  <p>内部排查信息默认折叠，只在需要定位问题时展开查看。</p>
                 </article>
               </div>
             </section>
@@ -269,12 +266,12 @@
                       <span id="learningRecordHelp" class="learning-help-button" aria-label="学习记录说明" aria-describedby="learningRecordHelpText">?</span>
                       <span id="learningRecordHelpText" class="learning-help-popover" role="tooltip">
                         <strong>学习记录说明</strong>
-                        <span>这里记录系统从对话、样例和归档画布里学到了什么，以及这些内容有没有真正生效。</span>
+                        <span>这里记录系统从对话、样例和归档画布里学到了什么，以及这些内容是否已经影响生成。</span>
                         <strong>学习记录状态</strong>
-                        <span><b>处理中</b>正在识别或发布规则</span>
-                        <span><b>已生效</b>已写入当前规则，命中技能后会读取</span>
-                        <span><b>已被覆盖</b>同主题新规则已替代</span>
-                        <span><b>失败</b>未写入当前规则，点失败数字查看原因</span>
+                        <span><b>已保存</b>已经形成学习记录</span>
+                        <span><b>已影响生成</b>后续生成会参考这条记录</span>
+                        <span><b>待确认</b>还需要继续判断或补充证据</span>
+                        <span><b>失败</b>会显示失败阶段、原因、是否影响生成和下一步</span>
                       </span>
                     </span>
                     <strong id="learningRecordsTabCount" class="learning-tab-count">0</strong>
