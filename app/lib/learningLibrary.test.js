@@ -58,6 +58,7 @@ test("writeLearningSample marks related sample-insufficient eval tasks traceable
     content: "example 1",
     topicKey: "storyboard.dialogue.length",
     conflictKey: "storyboard.dialogue.length",
+    sampleType: "dialogue-length-failure",
     sourceEventIds: ["event-sample-1"],
     createdAt: "2026-07-04T08:10:00.000Z",
   });
@@ -70,6 +71,7 @@ test("writeLearningSample marks related sample-insufficient eval tasks traceable
     content: "example 2",
     topicKey: "storyboard.dialogue.length",
     conflictKey: "storyboard.dialogue.length",
+    sampleType: "dialogue-length-failure",
     sourceEventIds: ["event-sample-2"],
     createdAt: "2026-07-04T08:20:00.000Z",
   });
@@ -81,6 +83,49 @@ test("writeLearningSample marks related sample-insufficient eval tasks traceable
   assert.strictEqual(updated.advanced.landingType, "eval");
   assert.strictEqual(updated.advanced.sampleCount, 2);
   assert.ok(updated.advanced.reevaluationTaskId);
+});
+
+test("writeLearningSample only satisfies sample-insufficient tasks with matching neededSampleType", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-reeval-type-"));
+  await appendSampleInsufficientLearningEvent(root, {
+    eventId: "event-dialogue-samples",
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length",
+    neededSampleType: "dialogue-length-failure",
+    neededCount: 1,
+    summary: "Need dialogue samples.",
+  }, {
+    now: () => "2026-07-04T08:00:00.000Z",
+  });
+  await appendSampleInsufficientLearningEvent(root, {
+    eventId: "event-tone-samples",
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length",
+    neededSampleType: "tone-drift",
+    neededCount: 1,
+    summary: "Need tone samples.",
+  }, {
+    now: () => "2026-07-04T08:01:00.000Z",
+  });
+
+  await writeLearningSample(root, {
+    summary: "dialogue sample",
+    content: "example",
+    topicKey: "storyboard.dialogue.length",
+    conflictKey: "storyboard.dialogue.length",
+    sampleType: "dialogue-length-failure",
+    createdAt: "2026-07-04T08:10:00.000Z",
+  });
+
+  const library = await buildLearningLibrary(root);
+  const dialogue = library.records.find((item) => item.recordId === "event-dialogue-samples");
+  const tone = library.records.find((item) => item.recordId === "event-tone-samples");
+
+  assert.strictEqual(dialogue.displayStatus, "已保存");
+  assert.strictEqual(dialogue.advanced.landingType, "eval");
+  assert.strictEqual(dialogue.advanced.sampleCount, 1);
+  assert.strictEqual(tone.status, "待确认 / 待补样例");
+  assert.strictEqual(tone.advanced.landingType, "sample-insufficient");
 });
 
 test("buildLearningLibrary exposes records current rules and readonly skill groups", async () => {

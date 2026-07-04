@@ -129,21 +129,42 @@ function repairStoryboardDialogueIssues(content, issues = [], options = {}) {
       nextLines.push(line);
       return;
     }
-    const splitLines = splitDialogueLine(issue.dialogue || line, maxChars);
+    const parsedLine = parseDialogueLine(line);
+    const dialogueBody = parsedLine?.body || issue.dialogue || line;
+    const splitLines = splitDialogueLine(dialogueBody, maxChars);
     if (splitLines.length <= 1) {
       nextLines.push(line);
       return;
     }
     repaired = true;
-    const prefixMatch = line.match(/^(\s*(?:台词|对白|dialogue)\s*[:：]\s*)/i);
-    const prefix = prefixMatch ? prefixMatch[1] : "台词：";
+    const fieldPrefix = parsedLine?.fieldPrefix || "台词：";
+    const speakerMarker = parsedLine?.speakerMarker || "";
     for (const splitLine of splitLines) {
-      nextLines.push(`${prefix}${splitLine.text || splitLine}`);
+      nextLines.push(`${fieldPrefix}${speakerMarker}${splitLine.text || splitLine}`);
     }
   });
   return {
     content: nextLines.join("\n"),
     repaired,
+  };
+}
+
+function parseDialogueLine(line) {
+  const match = String(line || "").match(/^(\s*(?:台词|对白|dialogue)\s*[:：]\s*)(.+)$/i);
+  if (!match) return null;
+  const rawDialogue = String(match[2] || "").trim();
+  const markerMatch = rawDialogue.match(/^((?:旁白VO|角色OS|画外音|[A-Za-z][A-Za-z0-9_-]*)\s*[:：])\s*(.+)$/);
+  if (!markerMatch) {
+    return {
+      fieldPrefix: match[1],
+      speakerMarker: "",
+      body: rawDialogue,
+    };
+  }
+  return {
+    fieldPrefix: match[1],
+    speakerMarker: markerMatch[1],
+    body: markerMatch[2],
   };
 }
 

@@ -147,6 +147,37 @@ test("repairStoryboardDialogueIssues splits long dialogue into lines within the 
   assert.strictEqual(repairedValidation.ok, true);
 });
 
+test("repairStoryboardDialogueIssues preserves voice and speaker markers when splitting", () => {
+  const cases = [
+    { marker: "\u65c1\u767dVO\uff1a", expected: "\u53f0\u8bcd\uff1a\u65c1\u767dVO\uff1a" },
+    { marker: "\u89d2\u8272OS\uff1a", expected: "\u53f0\u8bcd\uff1a\u89d2\u8272OS\uff1a" },
+    { marker: "\u753b\u5916\u97f3\uff1a", expected: "\u53f0\u8bcd\uff1a\u753b\u5916\u97f3\uff1a" },
+    { marker: "Lin:", expected: "\u53f0\u8bcd\uff1aLin:" },
+  ];
+
+  for (const item of cases) {
+    const content = [
+      "shot: 1",
+      `\u53f0\u8bcd\uff1a${item.marker}The system will become more complete and the team will keep improving together`,
+      "duration: 3s",
+    ].join("\n");
+    const validation = validateStoryboardHardRules(content, {
+      currentRulesUsed: [{
+        ruleId: "rule-dialogue-length",
+        topicKey: "storyboard.dialogue.length",
+        conflictKey: "storyboard.dialogue.length",
+      }],
+    });
+
+    const repaired = repairStoryboardDialogueIssues(content, validation.issues);
+
+    assert.strictEqual(repaired.repaired, true, item.marker);
+    const repairedDialogueLines = repaired.content.split(/\r?\n/).filter((line) => line.startsWith("\u53f0\u8bcd"));
+    assert.ok(repairedDialogueLines.length > 1, item.marker);
+    assert.ok(repairedDialogueLines.every((line) => line.startsWith(item.expected)), item.marker);
+  }
+});
+
 test("getApplicableStoryboardHardRules ignores style preferences that are not programmatically checkable", () => {
   const rules = getApplicableStoryboardHardRules([
     {

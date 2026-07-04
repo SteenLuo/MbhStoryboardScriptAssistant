@@ -808,3 +808,34 @@ test("appendSampleInsufficientLearningEvent preserves eval sample request fields
   assert.strictEqual(saved.canvasId, "canvas-1");
   assert.strictEqual(saved.outputId, "output-1");
 });
+
+test("learnExplicitRule writes sample-insufficient event instead of publishing when evaluation needs more samples", async () => {
+  const root = await tempRoot();
+
+  const result = await learnExplicitRule(root, {
+    rawTrigger: "dialogue max 20 chars needs L1 evaluation",
+    summary: "dialogue max 20 chars",
+    capability: "storyboard",
+    conflictKey: "storyboard.dialogue.length",
+    sourceType: "conversation",
+    requiresEvaluation: true,
+    neededSampleType: "dialogue-length-failure",
+    neededCount: 2,
+    relatedRecordIds: ["record-a"],
+    sourceEventIds: ["event-a"],
+  }, {
+    now: () => "2026-07-04T09:00:00.000Z",
+    idSource: () => "event-needs-eval",
+  });
+
+  const ruleset = await readCurrentRuleset(root);
+  const events = await listLearningEvents(root);
+  const event = events.find((item) => item.eventId === "event-needs-eval");
+
+  assert.strictEqual(result.event.landingType, "sample-insufficient");
+  assert.strictEqual(event.jobStatus, "waiting");
+  assert.strictEqual(event.neededSampleType, "dialogue-length-failure");
+  assert.strictEqual(event.neededCount, 2);
+  assert.deepStrictEqual(event.relatedRecordIds, ["record-a"]);
+  assert.deepStrictEqual(ruleset.rules, []);
+});

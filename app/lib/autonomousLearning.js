@@ -59,6 +59,23 @@ async function learnExplicitRule(root, input = {}, options = {}) {
   const conflictKey = Object.hasOwn(input, "conflictKey")
     ? String(input.conflictKey || "").trim()
     : topicKey;
+  if (shouldWaitForEvaluationSamples(input)) {
+    const event = await appendSampleInsufficientLearningEvent(root, {
+      ...input,
+      eventId,
+      topicKey,
+      conflictKey,
+      sourceType: input.sourceType || "conversation",
+      capability: String(input.capability || "").trim() || capabilityFromTopic(topicKey),
+      summary: String(input.summary || input.rawTrigger || "").trim(),
+      createdAt,
+      updatedAt: createdAt,
+    }, { now });
+    return {
+      event,
+      ruleset: await readCurrentRuleset(root),
+    };
+  }
   const baseEvent = normalizeEvent({
     eventId,
     topicKey,
@@ -208,6 +225,14 @@ async function learnExplicitRule(root, input = {}, options = {}) {
   }
 
   return { event: durablePublish.event, ruleset: durablePublish.writtenRuleset };
+}
+
+function shouldWaitForEvaluationSamples(input = {}) {
+  return Boolean(
+    input.requiresEvaluation === true &&
+    String(input.neededSampleType || "").trim() &&
+    Number(input.neededCount || 0) > 0
+  );
 }
 
 async function runPostCommitBookkeeping(root, input = {}) {

@@ -58,6 +58,24 @@ test("canvas storyboard generation applies hard-rule validation repair and failu
   assert.match(reviseSource, /hardRuleValidation/);
 });
 
+test("workflow storyboard generation applies hard-rule validation and keeps current rule trace refs", () => {
+  const workflowSource = extractFunction("runWorkflowTask");
+
+  assert.match(workflowSource, /taskSkillContext\(task\)/);
+  assert.match(workflowSource, /applyStoryboardHardRuleValidation\(result\.content/);
+  assert.match(workflowSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
+  assert.match(workflowSource, /recordStoryboardHardRuleFailure/);
+});
+
+test("hard-rule failure event records its own event id in generation proof", () => {
+  const failureSource = extractFunction("recordStoryboardHardRuleFailure");
+
+  assert.match(failureSource, /const eventId = `hard-rule-validation-failed-/);
+  assert.match(failureSource, /eventId,/);
+  assert.match(failureSource, /failureEventIds:\s*\[eventId\]/);
+  assert.match(failureSource, /sourceEventIds,/);
+});
+
 test("first-pass storyboard generation paths load the local storyboard skill", () => {
   const taskPromptSource = extractFunction("taskSkillPrompt");
   const workflowSource = extractFunction("runWorkflowTask");
@@ -65,7 +83,7 @@ test("first-pass storyboard generation paths load the local storyboard skill", (
 
   assert.match(taskPromptSource, /storyboard-generate/);
   assert.match(taskPromptSource, /canvasStoryboardSkillPrompt\(\)/);
-  assert.match(workflowSource, /taskSkillPrompt\(task\)/);
+  assert.match(workflowSource, /taskSkillContext\(task\)/);
   assert.match(workflowSource, /skillPrompt/);
   assert.match(workbenchSource, /taskSkillPrompt\(body\.task\)/);
   assert.match(workbenchSource, /skillPrompt/);

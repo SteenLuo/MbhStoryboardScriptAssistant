@@ -1177,7 +1177,8 @@ async function runWorkflowTask({ runDir, task, model, apiKey, force = false }) {
     return { ...config, content: existing, usage: null, model: "", reused: true };
   }
   const artifacts = await collectRunContext(runDir);
-  const skillPrompt = await taskSkillPrompt(task);
+  const skillContext = await taskSkillContext(task);
+  const skillPrompt = skillContext.prompt;
   const userContent = [
     `任务：${config.title}`,
     "",
@@ -1197,10 +1198,46 @@ async function runWorkflowTask({ runDir, task, model, apiKey, force = false }) {
       { role: "user", content: userContent },
     ],
   });
-  const output = `# ${config.title}\n\n生成时间：${new Date().toISOString()}\n\n模型：${result.model}\n\n---\n\n${result.content}\n`;
+  let finalContent = result.content;
+  let hardRuleValidation = null;
+  if (task === "storyboard-generate") {
+    const hardRuleResult = applyStoryboardHardRuleValidation(result.content, {
+      currentRulesUsed: skillContext.currentRulesUsed || [],
+    });
+    hardRuleValidation = hardRuleResult.hardRuleValidation;
+    if (hardRuleValidation.checked && !hardRuleValidation.finalOk) {
+      await recordStoryboardHardRuleFailure({
+        canvasId: path.basename(runDir),
+        outputId: config.file,
+        currentRulesUsed: skillContext.currentRulesUsed || [],
+        hardRuleValidation,
+      });
+      throw new Error("标准工作流分镜产物违反已命中的硬规则，自动拆分修复后仍未通过，已写入学习失败事件。");
+    }
+    finalContent = hardRuleResult.content;
+  }
+  const output = `# ${config.title}\n\n生成时间：${new Date().toISOString()}\n\n模型：${result.model}\n\n---\n\n${finalContent}\n`;
   await fsp.writeFile(target, output, "utf8");
-  await appendManifest(runDir, { lastGenerated: config.file, lastModel: result.model, updatedAt: new Date().toISOString() });
-  return { ...config, content: result.content, usage: result.usage, model: result.model, reused: false };
+  await appendManifest(runDir, {
+    lastGenerated: config.file,
+    lastModel: result.model,
+    updatedAt: new Date().toISOString(),
+    ...(task === "storyboard-generate" ? {
+      currentRulesUsed: skillContext.currentRulesUsed || [],
+      hardRuleValidation,
+    } : {}),
+  });
+  return {
+    ...config,
+    content: finalContent,
+    usage: result.usage,
+    model: result.model,
+    reused: false,
+    ...(task === "storyboard-generate" ? {
+      currentRulesUsed: skillContext.currentRulesUsed || [],
+      hardRuleValidation,
+    } : {}),
+  };
 }
 
 async function runCanvasTask({ task, input, model, apiKey, skillPrompt = "" }) {
@@ -1243,6 +1280,16 @@ async function taskSkillPrompt(task) {
     return canvasStoryboardSkillPrompt();
   }
   return "";
+}
+
+async function taskSkillContext(task) {
+  if (task === "storyboard-generate") {
+    return canvasStoryboardSkillContext();
+  }
+  return {
+    prompt: await taskSkillPrompt(task),
+    currentRulesUsed: [],
+  };
 }
 
 async function canvasStoryboardSkillPrompt() {
@@ -1413,8 +1460,9 @@ async function recordStoryboardHardRuleFailure(input = {}) {
   ).map(String).filter(Boolean)));
   const firstRule = appliedRules[0] || currentRulesUsed[0] || {};
   const failedAt = new Date().toISOString();
+  const eventId = `hard-rule-validation-failed-${safeEventSegment(input.canvasId)}-${safeEventSegment(input.outputId)}-${Date.now()}`;
   await appendLearningEvent(ROOT, {
-    eventId: `hard-rule-validation-failed-${safeEventSegment(input.canvasId)}-${safeEventSegment(input.outputId)}-${Date.now()}`,
+    eventId,
     internalStatus: "failed",
     jobStatus: "failed",
     learningMode: "evidence",
@@ -1437,7 +1485,7 @@ async function recordStoryboardHardRuleFailure(input = {}) {
       proofStatus: "failed",
       currentRulesUsedRefs: ruleRefs,
       validationResultRefs: [String(input.outputId || "").trim()].filter(Boolean),
-      failureEventIds: sourceEventIds,
+      failureEventIds: [eventId],
     },
     createdAt: failedAt,
     updatedAt: failedAt,

@@ -37,6 +37,9 @@ async function writeLearningEvidence(root, input = {}) {
     sourceEventIds,
     topicKey: normalizeString(input.topicKey),
     conflictKey: normalizeString(input.conflictKey || input.topicKey),
+    evidenceType: normalizeString(input.evidenceType || input.neededSampleType),
+    relatedTaskId: normalizeString(input.relatedTaskId),
+    relatedRecordIds: normalizeStringArray(input.relatedRecordIds),
     location: {
       canvasId,
       outputId,
@@ -73,6 +76,9 @@ async function writeLearningSample(root, input = {}) {
     affectsGeneration: false,
     topicKey: normalizeString(input.topicKey),
     conflictKey: normalizeString(input.conflictKey || input.topicKey),
+    sampleType: normalizeString(input.sampleType || input.neededSampleType),
+    relatedTaskId: normalizeString(input.relatedTaskId),
+    relatedRecordIds: normalizeStringArray(input.relatedRecordIds),
     canvasId,
     outputId,
     location: {
@@ -230,7 +236,8 @@ async function refreshSampleInsufficientTasks(root, material = {}) {
   const updates = [];
   for (const task of tasks) {
     const matched = materialRecords.filter((record) =>
-      isSameTopicOrConflict(record, task.topicKey, task.conflictKey)
+      isSameTopicOrConflict(record, task.topicKey, task.conflictKey) &&
+      matchesSampleNeed(task, record)
     );
     const neededCount = Number(task.neededCount || 0);
     if (!neededCount || matched.length < neededCount) continue;
@@ -285,6 +292,10 @@ async function readMaterialRecords(dir, idField, materialKind) {
           recordId: `${materialKind}:${id}`,
           topicKey: normalizeString(parsed.topicKey),
           conflictKey: normalizeString(parsed.conflictKey || parsed.topicKey),
+          sampleType: normalizeString(parsed.sampleType),
+          evidenceType: normalizeString(parsed.evidenceType),
+          relatedTaskId: normalizeString(parsed.relatedTaskId),
+          relatedRecordIds: normalizeStringArray(parsed.relatedRecordIds),
         });
       } catch {
         continue;
@@ -294,6 +305,23 @@ async function readMaterialRecords(dir, idField, materialKind) {
   } catch {
     return [];
   }
+}
+
+function matchesSampleNeed(task = {}, record = {}) {
+  const taskId = normalizeString(task.eventId);
+  const neededSampleType = normalizeString(task.neededSampleType);
+  const recordType = normalizeString(record.sampleType || record.evidenceType);
+  const relatedRecordIds = new Set(normalizeStringArray(task.relatedRecordIds));
+  if (normalizeString(record.relatedTaskId) && normalizeString(record.relatedTaskId) === taskId) return true;
+  if (
+    relatedRecordIds.has(normalizeString(record.recordId)) ||
+    relatedRecordIds.has(normalizeString(record.sampleId)) ||
+    relatedRecordIds.has(normalizeString(record.evidenceId))
+  ) {
+    return true;
+  }
+  if (!neededSampleType) return true;
+  return recordType === neededSampleType;
 }
 
 function isSameTopicOrConflict(item, topicKey, conflictKey) {
