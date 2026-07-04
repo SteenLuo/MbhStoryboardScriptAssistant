@@ -22,18 +22,9 @@ function publicLearningRecord(event) {
   const displayRecord = mapLearningDisplayRecord(event);
   return {
     ...displayRecord,
-    eventId: displayRecord.recordId,
     status: displayRecord.displayStatus,
-    summary: event.summary,
-    rawTrigger: event.rawTrigger,
     createdAt: event.createdAt,
     updatedAt: event.updatedAt,
-    ruleId: event.ruleId,
-    coveredByEventId: event.coveredByEventId,
-    error: displayRecord.displayStatus === "失败" ? event.error : null,
-    sourceType: event.sourceType,
-    topicKey: event.topicKey,
-    tokenUsage: event.tokenUsage,
   };
 }
 

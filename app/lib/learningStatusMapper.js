@@ -52,6 +52,9 @@ function resolveDisplayStatus(event) {
   if (internalStatus === "covered" || normalizeString(event.coveredByEventId)) return "已被覆盖";
   if (internalStatus === "failed" || jobStatus === "failed") return "失败";
   if (GENERATION_LANDING_TYPES.has(landingType) || internalStatus === "validated") return "已影响生成";
+  if (SAVED_LANDING_TYPES.has(landingType) && (internalStatus === "landed" || jobStatus === "completed")) {
+    return "已保存";
+  }
   if (
     jobStatus === "waiting" ||
     WAITING_LANDING_TYPES.has(landingType) ||

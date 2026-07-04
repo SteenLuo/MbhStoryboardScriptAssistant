@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { USER_DISPLAY_STATUSES } = require("./learningContracts");
+const { USER_DISPLAY_STATUSES, normalizeLearningEvent } = require("./learningContracts");
 const { mapLearningDisplayRecord } = require("./learningStatusMapper");
 
 function assertKnownDisplayStatus(record) {
@@ -50,6 +50,24 @@ test("evidence landing is saved as source material", () => {
   assert.match(record.generationImpactText, /不会直接改变生成/);
   assert.match(record.sourceText, /对话/);
   assert.equal(record.generationProof.proofStatus, "not_applicable");
+});
+
+test("normalized minimal sample and evidence landings stay saved despite default uncertain mode", () => {
+  for (const landingType of ["sample", "evidence"]) {
+    const event = normalizeLearningEvent({
+      eventId: `event-${landingType}`,
+      landingType,
+      internalStatus: "landed",
+      jobStatus: "completed",
+      summary: landingType === "sample" ? "满意样例" : "用户确认的证据",
+    });
+    const record = mapLearningDisplayRecord(event);
+
+    assert.equal(event.learningMode, "uncertain");
+    assert.equal(record.displayStatus, "已保存");
+    assert.equal(record.affectsGeneration, false);
+    assert.equal(record.generationProof.proofStatus, "not_applicable");
+  }
 });
 
 test("current rule landing affects generation but can be pending first hit", () => {

@@ -46,6 +46,11 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
     capability: "storyboard",
     sourceType: "conversation",
     conversationId: "chat-1",
+    tokenUsage: {
+      prompt_tokens: 11,
+      completion_tokens: 7,
+      total_tokens: 18,
+    },
   }, {
     now: () => "2026-07-01T10:00:00.000Z",
     idSource: () => "event-1",
@@ -89,8 +94,8 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   assert.ok(Array.isArray(library.currentRules));
   assert.ok(Array.isArray(library.skills));
   assert.strictEqual(library.records.length, 1);
-  assert.ok(library.records.some((record) => record.eventId === "event-1"));
-  const eventRecord = library.records.find((record) => record.eventId === "event-1");
+  assert.ok(library.records.some((record) => record.recordId === "event-1"));
+  const eventRecord = library.records.find((record) => record.recordId === "event-1");
   assert.strictEqual(eventRecord.displayStatus, "已影响生成");
   assert.strictEqual(eventRecord.status, "已影响生成");
   assert.strictEqual(eventRecord.actionLabel, "不用管");
@@ -100,7 +105,13 @@ test("buildLearningLibrary exposes records current rules and readonly skill grou
   assert.strictEqual(eventRecord.advanced.jobStatus, "completed");
   assert.strictEqual(eventRecord.advanced.learningMode, "overall");
   assert.strictEqual(eventRecord.advanced.landingType, "current-rule");
-  assert.ok(!library.records.some((record) => record.sourceType === "conversation_record"));
+  for (const internalField of ["topicKey", "tokenUsage", "sourceType", "ruleId", "coveredByEventId", "error"]) {
+    assert.equal(Object.hasOwn(eventRecord, internalField), false);
+  }
+  assert.strictEqual(eventRecord.advanced.topicKey, "storyboard.dialogue.length");
+  assert.strictEqual(eventRecord.advanced.sourceType, "conversation");
+  assert.strictEqual(eventRecord.advanced.ruleId, "rule-event-1");
+  assert.strictEqual(eventRecord.advanced.tokenUsage.total_tokens, 18);
   assert.strictEqual(library.currentRules[0].topicKey, "storyboard.dialogue.length");
   assert.strictEqual(library.currentRules[0].status, "disabled");
   const storyboardSkill = library.skills.find((skill) => skill.id === "storyboard-generate");
@@ -141,8 +152,8 @@ test("buildLearningLibrary maps normalized legacy events into D2 display statuse
   );
 
   const library = await buildLearningLibrary(root);
-  const waiting = library.records.find((record) => record.eventId === "event-waiting");
-  const validated = library.records.find((record) => record.eventId === "event-validated");
+  const waiting = library.records.find((record) => record.recordId === "event-waiting");
+  const validated = library.records.find((record) => record.recordId === "event-validated");
 
   assert.strictEqual(waiting.advanced.internalStatus, "received");
   assert.strictEqual(waiting.advanced.jobStatus, "waiting");
@@ -153,4 +164,54 @@ test("buildLearningLibrary maps normalized legacy events into D2 display statuse
   assert.strictEqual(validated.displayStatus, "已影响生成");
   assert.strictEqual(validated.status, "已影响生成");
   assert.strictEqual(validated.affectsGeneration, true);
+});
+
+test("buildLearningLibrary keeps raw failure and coverage fields in advanced only", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-boundary-"));
+  const learningDir = path.join(root, "learning");
+  await fsp.mkdir(learningDir, { recursive: true });
+  await fsp.writeFile(
+    path.join(learningDir, "events.jsonl"),
+    JSON.stringify({
+      eventId: "event-covered",
+      topicKey: "storyboard.dialogue.length",
+      sourceType: "conversation",
+      internalStatus: "covered",
+      jobStatus: "completed",
+      learningMode: "overall",
+      landingType: "current-rule",
+      summary: "旧规则",
+      rawTrigger: "旧规则原文",
+      ruleId: "rule-event-covered",
+      coveredByEventId: "event-new",
+      tokenUsage: {
+        prompt_tokens: 5,
+        completion_tokens: 3,
+        total_tokens: 8,
+      },
+      error: {
+        stage: "publish-current-ruleset",
+        message: "旧失败信息",
+      },
+      createdAt: "2026-07-04T00:00:00.000Z",
+      updatedAt: "2026-07-04T00:01:00.000Z",
+    }) + "\n",
+    "utf8",
+  );
+
+  const library = await buildLearningLibrary(root);
+  const record = library.records[0];
+
+  assert.strictEqual(record.displayStatus, "已被覆盖");
+  assert.strictEqual(record.status, "已被覆盖");
+  assert.strictEqual(record.updatedAt, "2026-07-04T00:01:00.000Z");
+  for (const internalField of ["topicKey", "tokenUsage", "sourceType", "ruleId", "coveredByEventId", "error"]) {
+    assert.equal(Object.hasOwn(record, internalField), false);
+  }
+  assert.strictEqual(record.advanced.topicKey, "storyboard.dialogue.length");
+  assert.strictEqual(record.advanced.sourceType, "conversation");
+  assert.strictEqual(record.advanced.ruleId, "rule-event-covered");
+  assert.strictEqual(record.advanced.coveredByEventId, "event-new");
+  assert.strictEqual(record.advanced.tokenUsage.total_tokens, 8);
+  assert.strictEqual(record.advanced.error.message, "旧失败信息");
 });
