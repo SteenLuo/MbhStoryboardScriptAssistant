@@ -190,6 +190,16 @@ test("canvas archive endpoints validate storyboard issues and freeze archived ca
   assert.match(archiveSource, /allowArchived:\s*true/);
 });
 
+test("canvas archive writes learning evidence after save and records evidence failures", () => {
+  const archiveSource = extractFunction("archiveCanvasRecord");
+
+  assert.match(serverSource, /require\("\.\/lib\/learningEvidence"\)/);
+  assert.match(archiveSource, /const archived = await saveCanvas/);
+  assert.match(archiveSource, /recordArchiveLearningEvidence\(ROOT/);
+  assert.match(archiveSource, /learningEvidence/);
+  assert.match(archiveSource, /ok:\s*true/);
+});
+
 test("canvas delete and restore are soft-delete endpoints for trash", () => {
   const apiSource = extractFunction("handleApi");
   const listSource = extractFunction("listCanvases");

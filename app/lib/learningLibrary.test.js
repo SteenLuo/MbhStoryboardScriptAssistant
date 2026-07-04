@@ -6,6 +6,7 @@ const test = require("node:test");
 
 const { learnExplicitRule, updateCurrentRuleStatus } = require("./autonomousLearning");
 const { buildLearningLibrary } = require("./learningLibrary");
+const { writeLearningEvidence, writeLearningSample } = require("./learningEvidence");
 
 test("buildLearningLibrary exposes records current rules and readonly skill groups", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-"));
@@ -250,4 +251,87 @@ test("buildLearningLibrary maps persisted generation proof from normalized JSONL
   assert.strictEqual(record.generationProof.claimText, "已在生成 output-1 中验证");
   assert.deepEqual(record.generationProof.validationResultRefs, ["run-1"]);
   assert.equal(Object.hasOwn(record.generationProof, "stack"), false);
+});
+
+test("buildLearningLibrary aggregates evidence and samples as saved non-generation records", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-materials-"));
+  const evidence = await writeLearningEvidence(root, {
+    canvas: {
+      id: "canvas-1",
+      title: "归档画布",
+      archivedAt: "2026-07-04T10:00:00.000Z",
+      nodes: [
+        { id: "script-1", type: "script", title: "最终剧本", content: "剧本", meta: {} },
+      ],
+      archiveReadiness: {
+        readiness: { finalNodeIds: { script: ["script-1"] } },
+      },
+    },
+    outputId: "output-1",
+    sourceEventIds: ["event-archive"],
+    createdAt: "2026-07-04T10:01:00.000Z",
+  });
+  const sample = await writeLearningSample(root, {
+    summary: "可复用样例",
+    content: "样例正文",
+    canvasId: "canvas-2",
+    sourceEventIds: ["event-sample"],
+    createdAt: "2026-07-04T10:02:00.000Z",
+  });
+
+  const library = await buildLearningLibrary(root);
+  const evidenceRecord = library.records.find((record) => record.recordId === `evidence:${evidence.evidenceId}`);
+  const sampleRecord = library.records.find((record) => record.recordId === `sample:${sample.sampleId}`);
+
+  assert.ok(evidenceRecord);
+  assert.strictEqual(evidenceRecord.displayStatus, "已保存");
+  assert.strictEqual(evidenceRecord.status, "已保存");
+  assert.strictEqual(evidenceRecord.affectsGeneration, false);
+  assert.strictEqual(evidenceRecord.generationProof.proofStatus, "not_applicable");
+  assert.match(evidenceRecord.sourceText, /归档/);
+  assert.match(evidenceRecord.usedWhereText, /学习资料库/);
+  assert.match(evidenceRecord.nextStepText, /回看/);
+  assert.strictEqual(evidenceRecord.advanced.evidenceId, evidence.evidenceId);
+  assert.strictEqual(evidenceRecord.advanced.canvasId, "canvas-1");
+
+  assert.ok(sampleRecord);
+  assert.strictEqual(sampleRecord.displayStatus, "已保存");
+  assert.strictEqual(sampleRecord.affectsGeneration, false);
+  assert.strictEqual(sampleRecord.generationProof.proofStatus, "not_applicable");
+  assert.strictEqual(sampleRecord.advanced.sampleId, sample.sampleId);
+  assert.deepStrictEqual(sampleRecord.advanced.sourceEventIds, ["event-sample"]);
+});
+
+test("buildLearningLibrary keeps archive evidence failure visible without marking it saved", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-evidence-failure-"));
+  await fsp.mkdir(path.join(root, "learning"), { recursive: true });
+  await fsp.writeFile(
+    path.join(root, "learning/events.jsonl"),
+    JSON.stringify({
+      eventId: "archive-evidence-failed-canvas-1",
+      internalStatus: "failed",
+      jobStatus: "failed",
+      learningMode: "evidence",
+      sourceType: "archive",
+      canvasId: "canvas-1",
+      summary: "画布已归档，学习证据生成失败",
+      error: {
+        stage: "write-learning-evidence",
+        message: "disk full",
+      },
+      createdAt: "2026-07-04T11:00:00.000Z",
+      updatedAt: "2026-07-04T11:00:00.000Z",
+    }) + "\n",
+    "utf8",
+  );
+
+  const library = await buildLearningLibrary(root);
+  const record = library.records.find((item) => item.recordId === "archive-evidence-failed-canvas-1");
+
+  assert.ok(record);
+  assert.strictEqual(record.displayStatus, "失败");
+  assert.strictEqual(record.affectsGeneration, false);
+  assert.strictEqual(record.generationProof.proofStatus, "failed");
+  assert.strictEqual(record.learnedText, "画布已归档，学习证据生成失败");
+  assert.strictEqual(record.advanced.error.stage, "write-learning-evidence");
 });

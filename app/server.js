@@ -19,6 +19,7 @@ const { normalizeModelSettings, publicModelSettings, resolveActiveModelSettings,
 const { handleNotification, listNotifications } = require("./lib/notifications");
 const { buildLearningLibrary } = require("./lib/learningLibrary");
 const { learnExplicitRule, updateCurrentRuleStatus } = require("./lib/autonomousLearning");
+const { recordArchiveLearningEvidence } = require("./lib/learningEvidence");
 const { analyzeCanvasArchiveReadiness } = require("./lib/canvasArchive");
 const { isStoryboardValidationResolved, validateStoryboardContent } = require("./lib/storyboardValidation");
 
@@ -453,7 +454,15 @@ async function archiveCanvasRecord(body) {
     archivedAt,
     archiveReadiness: archiveCheck,
   }, { allowArchived: true });
-  return { ok: true, canvas: archived, archiveCheck };
+  const learningEvidence = await recordArchiveLearningEvidence(ROOT, {
+    canvas: archived,
+    archiveCheck,
+    outputId: body.outputId || "",
+    sourceEventIds: body.sourceEventIds,
+    archivedAt,
+    createdAt: archivedAt,
+  });
+  return { ok: true, canvas: archived, archiveCheck, learningEvidence };
 }
 
 async function deleteCanvasRecord(body) {
