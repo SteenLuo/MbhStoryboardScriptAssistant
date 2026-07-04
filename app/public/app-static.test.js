@@ -303,6 +303,26 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(stylesSource, /\.sidebar-icon-stack/);
 });
 
+test("learning record renderer uses D2 display fields before raw legacy fields", () => {
+  const renderRecordSource = extractFunction("renderLearningRecordItem");
+  const keySource = extractFunction("learningRecordKey");
+  const failedSource = extractFunction("isFailedLearningRecord");
+
+  assert.match(renderRecordSource, /record\.learnedText/);
+  assert.match(renderRecordSource, /record\.displayStatus\s*\|\|\s*record\.status/);
+  assert.match(renderRecordSource, /record\.sourceText/);
+  assert.match(renderRecordSource, /record\.usedWhereText/);
+  assert.match(renderRecordSource, /record\.generationImpactText/);
+  assert.match(renderRecordSource, /record\.generationProof\?\.claimText/);
+  assert.match(renderRecordSource, /record\.advanced\?\.error\?\.message/);
+  assert.match(renderRecordSource, /record\.advanced\?\.coveredByEventId/);
+  assert.match(keySource, /record\?\.recordId/);
+  assert.match(failedSource, /record\?\.displayStatus\s*\|\|\s*record\?\.status/);
+  assert.doesNotMatch(renderRecordSource, /record\.summary \|\| record\.rawTrigger \|\| record\.topicKey/);
+  assert.doesNotMatch(renderRecordSource, /formatLearningSource\(record\.sourceType\)/);
+  assert.doesNotMatch(renderRecordSource, /formatLearningTokenUsage\(record\.tokenUsage\)/);
+});
+
 test("chat no longer renders legacy long-memory confirmation cards", () => {
   assert.doesNotMatch(appSource, /function renderLearningSuggestion/);
   assert.doesNotMatch(appSource, /function confirmLearningSuggestion/);

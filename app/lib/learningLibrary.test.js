@@ -215,3 +215,39 @@ test("buildLearningLibrary keeps raw failure and coverage fields in advanced onl
   assert.strictEqual(record.advanced.tokenUsage.total_tokens, 8);
   assert.strictEqual(record.advanced.error.message, "旧失败信息");
 });
+
+test("buildLearningLibrary maps persisted generation proof from normalized JSONL events", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-proof-"));
+  const learningDir = path.join(root, "learning");
+  await fsp.mkdir(learningDir, { recursive: true });
+  await fsp.writeFile(
+    path.join(learningDir, "events.jsonl"),
+    JSON.stringify({
+      eventId: "event-proof",
+      internalStatus: "landed",
+      jobStatus: "completed",
+      learningMode: "overall",
+      landingType: "current-rule",
+      summary: "分镜台词每句 20 字以内",
+      ruleId: "rule-event-proof",
+      generationProof: {
+        proofStatus: "validated",
+        claimText: "已在生成 output-1 中验证",
+        validationResultRefs: ["run-1"],
+        stack: "must not leak",
+      },
+      createdAt: "2026-07-04T00:00:00.000Z",
+      updatedAt: "2026-07-04T00:01:00.000Z",
+    }) + "\n",
+    "utf8",
+  );
+
+  const library = await buildLearningLibrary(root);
+  const record = library.records[0];
+
+  assert.strictEqual(record.displayStatus, "已影响生成");
+  assert.strictEqual(record.generationProof.proofStatus, "validated");
+  assert.strictEqual(record.generationProof.claimText, "已在生成 output-1 中验证");
+  assert.deepEqual(record.generationProof.validationResultRefs, ["run-1"]);
+  assert.equal(Object.hasOwn(record.generationProof, "stack"), false);
+});

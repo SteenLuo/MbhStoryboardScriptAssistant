@@ -63,6 +63,35 @@ test("normalizeLearningEvent maps legacy status values into internal and job sta
   assert.equal(covered.jobStatus, "completed");
 });
 
+test("normalizeLearningEvent preserves only public generation proof fields", () => {
+  const event = normalizeLearningEvent({
+    eventId: "event-proof",
+    generationProof: {
+      proofStatus: "validated",
+      claimText: "已在生成中验证",
+      currentRulesUsedRefs: ["rule-a", " ", 42],
+      validationResultRefs: ["run-a", null, "run-b"],
+      lastCheckedOutputId: 123,
+      lastCheckedAt: "2026-07-04T00:00:00.000Z",
+      failureEventIds: ["event-failed"],
+      stack: "debug stack",
+      debug: { raw: true },
+    },
+  });
+
+  assert.deepEqual(event.generationProof, {
+    proofStatus: "validated",
+    claimText: "已在生成中验证",
+    currentRulesUsedRefs: ["rule-a", "42"],
+    validationResultRefs: ["run-a", "run-b"],
+    lastCheckedOutputId: "123",
+    lastCheckedAt: "2026-07-04T00:00:00.000Z",
+    failureEventIds: ["event-failed"],
+  });
+  assert.equal(Object.hasOwn(event.generationProof, "stack"), false);
+  assert.equal(Object.hasOwn(event.generationProof, "debug"), false);
+});
+
 test("validateGenerationProofCombination accepts valid proof and display status pairs", () => {
   assert.doesNotThrow(() => validateGenerationProofCombination({
     displayStatus: "已保存",

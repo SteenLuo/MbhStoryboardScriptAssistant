@@ -1,5 +1,6 @@
 const {
   GENERATION_PROOF_STATUSES,
+  normalizeGenerationProof,
   validateGenerationProofCombination,
 } = require("./learningContracts");
 
@@ -51,7 +52,21 @@ function resolveDisplayStatus(event) {
 
   if (internalStatus === "covered" || normalizeString(event.coveredByEventId)) return "已被覆盖";
   if (internalStatus === "failed" || jobStatus === "failed") return "失败";
-  if (GENERATION_LANDING_TYPES.has(landingType) || internalStatus === "validated") return "已影响生成";
+  if (
+    jobStatus === "queued" ||
+    jobStatus === "running" ||
+    jobStatus === "waiting" ||
+    internalStatus === "received" ||
+    internalStatus === "classified"
+  ) {
+    return "待确认";
+  }
+  if (
+    internalStatus === "validated" ||
+    (GENERATION_LANDING_TYPES.has(landingType) && (internalStatus === "landed" || jobStatus === "completed"))
+  ) {
+    return "已影响生成";
+  }
   if (SAVED_LANDING_TYPES.has(landingType) && (internalStatus === "landed" || jobStatus === "completed")) {
     return "已保存";
   }
@@ -86,9 +101,7 @@ function resolveActionLabel(event, displayStatus) {
 }
 
 function resolveGenerationProof(event, state) {
-  const suppliedProof = event.generationProof && typeof event.generationProof === "object"
-    ? event.generationProof
-    : {};
+  const suppliedProof = normalizeGenerationProof(event.generationProof) || {};
   const suppliedProofStatus = normalizeString(suppliedProof.proofStatus);
   const proofStatus = GENERATION_PROOF_STATUSES.has(suppliedProofStatus)
     ? suppliedProofStatus

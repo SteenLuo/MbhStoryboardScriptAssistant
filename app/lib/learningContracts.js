@@ -11,6 +11,17 @@ const GENERATION_PROOF_STATUSES = new Set([
   "unknown",
 ]);
 const GENERATION_PASS_PROOF_STATUSES = new Set(["pending_first_hit", "participated", "validated"]);
+const GENERATION_PROOF_STRING_FIELDS = [
+  "proofStatus",
+  "claimText",
+  "lastCheckedOutputId",
+  "lastCheckedAt",
+];
+const GENERATION_PROOF_ARRAY_FIELDS = [
+  "currentRulesUsedRefs",
+  "validationResultRefs",
+  "failureEventIds",
+];
 
 const LEGACY_STATUS_DEFAULTS = {
   处理中: { internalStatus: "received", jobStatus: "running" },
@@ -27,7 +38,12 @@ function normalizeString(value) {
 }
 
 function normalizeStringArray(value) {
-  return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
+  return Array.isArray(value)
+    ? value
+      .filter((item) => item !== null && item !== undefined)
+      .map((item) => String(item).trim())
+      .filter(Boolean)
+    : [];
 }
 
 function normalizeLearningEvent(input = {}) {
@@ -59,9 +75,26 @@ function normalizeLearningEvent(input = {}) {
     ruleId: normalizeString(input.ruleId),
     coveredByEventId: normalizeString(input.coveredByEventId),
     error: input.error && typeof input.error === "object" ? input.error : null,
+    generationProof: normalizeGenerationProof(input.generationProof),
     createdAt,
     updatedAt: normalizeString(input.updatedAt || input.createdAt || createdAt),
   };
+}
+
+function normalizeGenerationProof(proof) {
+  if (!proof || typeof proof !== "object") return null;
+  const normalized = {};
+
+  for (const field of GENERATION_PROOF_STRING_FIELDS) {
+    const value = normalizeString(proof[field]);
+    if (value) normalized[field] = value;
+  }
+  for (const field of GENERATION_PROOF_ARRAY_FIELDS) {
+    if (!Object.hasOwn(proof, field)) continue;
+    normalized[field] = normalizeStringArray(proof[field]);
+  }
+
+  return Object.keys(normalized).length ? normalized : null;
 }
 
 function validateGenerationProofCombination(input = {}) {
@@ -102,6 +135,7 @@ module.exports = {
   INTERNAL_STATUSES,
   LEARNING_MODES,
   USER_DISPLAY_STATUSES,
+  normalizeGenerationProof,
   normalizeLearningEvent,
   validateGenerationProofCombination,
 };

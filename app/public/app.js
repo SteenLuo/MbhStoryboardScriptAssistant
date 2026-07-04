@@ -6159,22 +6159,35 @@ function renderLearningRecordItem(record) {
   const item = document.createElement("article");
   const key = learningRecordKey(record);
   const failed = isFailedLearningRecord(record);
-  item.className = `learning-library-item status-${safeClassName(record.status)}`;
+  const displayStatus = record.displayStatus || record.status;
+  item.className = `learning-library-item status-${safeClassName(displayStatus)}`;
   item.dataset.learningRecordKey = key;
   item.classList.toggle("failed", failed);
   item.classList.toggle("failure-viewed", failed && state.viewedLearningFailureIds.has(key));
-  const error = record.error?.message
-    ? `<p class="learning-library-error">失败原因：${escapeHtml(record.error.message)}</p>`
+  const title = record.learnedText || record.summary || record.rawTrigger || record.advanced?.topicKey || "学习事件";
+  const errorMessage = record.advanced?.error?.message || record.error?.message || "";
+  const error = errorMessage
+    ? `<p class="learning-library-error">失败原因：${escapeHtml(errorMessage)}</p>`
     : "";
-  const covered = record.coveredByEventId ? `<p>已被后续学习覆盖：${escapeHtml(record.coveredByEventId)}</p>` : "";
+  const coveredByEventId = record.advanced?.coveredByEventId || record.coveredByEventId || "";
+  const covered = coveredByEventId ? `<p>已被后续学习覆盖：${escapeHtml(coveredByEventId)}</p>` : "";
+  const proof = record.generationProof?.claimText
+    ? `<p>${escapeHtml(record.generationProof.claimText)}</p>`
+    : "";
+  const detailParts = [
+    record.sourceText,
+    record.usedWhereText,
+    record.generationImpactText,
+    formatDateTime(record.updatedAt || record.createdAt),
+  ].filter(Boolean);
   const localRecord = record.learningRecord ? `<p>本地记录：${escapeHtml(record.learningRecord)}</p>` : "";
   item.innerHTML = `
     <div class="learning-library-item-head">
-      <strong>${escapeHtml(record.summary || record.rawTrigger || record.topicKey || "学习事件")}</strong>
-      <span>${escapeHtml(formatLearningStatus(record.status))}</span>
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(formatLearningStatus(displayStatus))}</span>
     </div>
-    <p>${escapeHtml(formatLearningSource(record.sourceType))} · ${escapeHtml(formatLearningTopic(record.topicKey))} · ${escapeHtml(formatDateTime(record.updatedAt || record.createdAt))}</p>
-    <p>${escapeHtml(formatLearningTokenUsage(record.tokenUsage))}</p>
+    <p>${escapeHtml(detailParts.join(" · "))}</p>
+    ${proof}
     ${localRecord}
     ${error}
     ${covered}
@@ -6183,17 +6196,17 @@ function renderLearningRecordItem(record) {
 }
 
 function learningRecordKey(record) {
-  return String(record?.eventId || record?.ruleId || [
+  return String(record?.recordId || record?.eventId || record?.advanced?.eventId || record?.advanced?.ruleId || [
     record?.summary,
     record?.rawTrigger,
-    record?.topicKey,
+    record?.advanced?.topicKey,
     record?.createdAt,
   ].filter(Boolean).join("|") || "learning-record");
 }
 
 function isFailedLearningRecord(record) {
-  const status = String(record?.status || "").trim().toLowerCase();
-  return Boolean(record?.error) || status === "失败" || status.includes("failed");
+  const status = String(record?.displayStatus || record?.status || "").trim().toLowerCase();
+  return Boolean(record?.advanced?.error || record?.error) || status === "失败" || status.includes("failed");
 }
 
 function jumpToNextLearningFailure() {

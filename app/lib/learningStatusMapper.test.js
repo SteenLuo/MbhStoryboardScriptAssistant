@@ -89,6 +89,28 @@ test("current rule landing affects generation but can be pending first hit", () 
   assert.equal(record.generationProof.proofStatus, "pending_first_hit");
 });
 
+test("unfinished generation landings wait for confirmation before affecting generation", () => {
+  const cases = [
+    { eventId: "event-current-queued", landingType: "current-rule", internalStatus: "received", jobStatus: "queued" },
+    { eventId: "event-current-running", landingType: "current-rule", internalStatus: "landed", jobStatus: "running" },
+    { eventId: "event-current-waiting", landingType: "current-rule", internalStatus: "landed", jobStatus: "waiting" },
+    { eventId: "event-formal-received", landingType: "formal-skill", internalStatus: "received", jobStatus: "completed" },
+    { eventId: "event-formal-classified", landingType: "formal-skill", internalStatus: "classified", jobStatus: "completed" },
+  ];
+
+  for (const event of cases) {
+    const record = mapLearningDisplayRecord({
+      ...event,
+      learningMode: "overall",
+      summary: "生成落点还在处理",
+    });
+
+    assert.equal(record.displayStatus, "待确认", event.eventId);
+    assert.equal(record.affectsGeneration, false, event.eventId);
+    assert.equal(record.generationProof.proofStatus, "not_applicable", event.eventId);
+  }
+});
+
 test("sample-insufficient learning waits for confirmation", () => {
   const record = mapLearningDisplayRecord({
     eventId: "event-insufficient",
@@ -161,4 +183,27 @@ test("unknown proof affecting generation explains incomplete evidence", () => {
   assert.equal(record.generationProof.proofStatus, "unknown");
   assert.match(record.generationProof.claimText, /仍会影响生成/);
   assert.match(record.generationProof.claimText, /证据不完整/);
+});
+
+test("mapper exposes only public generation proof fields", () => {
+  const record = mapLearningDisplayRecord({
+    eventId: "event-proof-public",
+    landingType: "current-rule",
+    learningMode: "overall",
+    internalStatus: "landed",
+    jobStatus: "completed",
+    summary: "分镜台词每句 20 字以内",
+    generationProof: {
+      proofStatus: "validated",
+      claimText: "已验证",
+      currentRulesUsedRefs: ["rule-a"],
+      stack: "debug stack",
+      traceToken: "secret",
+    },
+  });
+
+  assert.equal(record.generationProof.proofStatus, "validated");
+  assert.deepEqual(record.generationProof.currentRulesUsedRefs, ["rule-a"]);
+  assert.equal(Object.hasOwn(record.generationProof, "stack"), false);
+  assert.equal(Object.hasOwn(record.generationProof, "traceToken"), false);
 });
