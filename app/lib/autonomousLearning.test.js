@@ -9,6 +9,7 @@ const {
   learnExplicitRule,
   listLearningEvents,
   readCurrentRuleset,
+  readLearningEventRecords,
   updateCurrentRuleStatus,
   writeCurrentRuleset,
 } = require("./autonomousLearning");
@@ -338,6 +339,50 @@ test("learnExplicitRule does not cover old events when replacement publish fails
   }
 });
 
+test("learnExplicitRule keeps landed publish when post-commit bookkeeping fails", async () => {
+  const root = await tempRoot();
+  await learnExplicitRule(root, {
+    rawTrigger: "dialogue max 20 chars",
+    summary: "dialogue max 20 chars",
+    capability: "storyboard",
+    conflictKey: "storyboard.dialogue.length",
+    sourceType: "conversation",
+  }, {
+    now: () => "2026-07-01T10:00:00.000Z",
+    idSource: () => "event-postcommit-old",
+  });
+
+  const result = await learnExplicitRule(root, {
+    rawTrigger: "dialogue max 18 chars",
+    summary: "dialogue max 18 chars",
+    capability: "storyboard",
+    conflictKey: "storyboard.dialogue.length",
+    sourceType: "conversation",
+  }, {
+    now: () => "2026-07-01T10:05:00.000Z",
+    idSource: () => "event-postcommit-new",
+    failPostPublishBookkeeping: "append-covered-event",
+  });
+
+  const ruleset = await readCurrentRuleset(root);
+  const records = await readLearningEventRecords(root);
+  const newEvent = records.find((event) => event.eventId === "event-postcommit-new" && event.internalStatus === "landed");
+  const oldRule = ruleset.rules.find((rule) => rule.ruleId === "rule-event-postcommit-old");
+  const newRule = ruleset.rules.find((rule) => rule.ruleId === "rule-event-postcommit-new");
+
+  assert.strictEqual(result.event.internalStatus, "landed");
+  assert.strictEqual(result.event.jobStatus, "completed");
+  assert.strictEqual(result.event.landingType, "current-rule");
+  assert.ok(Array.isArray(result.event.postCommitWarnings));
+  assert.match(result.event.postCommitWarnings[0].stage, /append-covered-event/);
+  assert.strictEqual(ruleset.version, 2);
+  assert.strictEqual(ruleset.lastGoodVersion, 2);
+  assert.strictEqual(oldRule.status, "covered");
+  assert.strictEqual(newRule.status, "active");
+  assert.ok(newEvent);
+  assert.strictEqual(records.some((event) => event.eventId === "event-postcommit-new" && event.internalStatus === "failed"), false);
+});
+
 test("concurrent learnExplicitRule publishes serialize current ruleset updates", async () => {
   const root = await tempRoot();
   let index = 0;
@@ -376,6 +421,79 @@ test("concurrent learnExplicitRule publishes serialize current ruleset updates",
   assert.strictEqual(snapshot.version, 2);
   assert.strictEqual(activeRules.length, 1);
   assert.strictEqual(new Set(activeConflictKeys).size, activeConflictKeys.length);
+});
+
+test("updateCurrentRuleStatus serializes with concurrent current-ruleset publish", async () => {
+  const root = await tempRoot();
+  await learnExplicitRule(root, {
+    rawTrigger: "dialogue max 20 chars",
+    summary: "dialogue max 20 chars",
+    capability: "storyboard",
+    conflictKey: "storyboard.dialogue.length",
+    sourceType: "conversation",
+  }, {
+    now: () => "2026-07-01T10:00:00.000Z",
+    idSource: () => "event-serial-old",
+  });
+
+  const originalRename = fsp.rename;
+  fsp.rename = async (from, to) => {
+    if (path.basename(String(to)) === "current-ruleset.json") {
+      let text = "";
+      try {
+        text = await fsp.readFile(from, "utf8");
+      } catch {
+        text = "";
+      }
+      if (
+        text.includes('"ruleId": "rule-event-serial-old"') &&
+        text.includes('"status": "disabled"') &&
+        !text.includes('"ruleId": "rule-event-serial-new"')
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+    return originalRename.call(fsp, from, to);
+  };
+
+  try {
+    const statusPromise = updateCurrentRuleStatus(root, {
+      ruleId: "rule-event-serial-old",
+      status: "disabled",
+    }, {
+      now: () => "2026-07-01T10:05:00.000Z",
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    const publishPromise = learnExplicitRule(root, {
+      rawTrigger: "dialogue max 18 chars",
+      summary: "dialogue max 18 chars",
+      capability: "storyboard",
+      conflictKey: "storyboard.dialogue.length",
+      sourceType: "conversation",
+    }, {
+      now: () => "2026-07-01T10:10:00.000Z",
+      idSource: () => "event-serial-new",
+    });
+
+    const [statusResult, publishResult] = await Promise.all([statusPromise, publishPromise]);
+    const ruleset = await readCurrentRuleset(root);
+    const snapshot = JSON.parse(await fsp.readFile(path.join(root, "learning/ruleset-history/v3.json"), "utf8"));
+    const oldRule = ruleset.rules.find((rule) => rule.ruleId === "rule-event-serial-old");
+    const activeRules = ruleset.rules.filter((rule) => rule.status === "active");
+
+    assert.strictEqual(statusResult.rule.status, "disabled");
+    assert.strictEqual(publishResult.event.internalStatus, "landed");
+    assert.strictEqual(ruleset.version, 3);
+    assert.strictEqual(ruleset.lastGoodVersion, 3);
+    assert.strictEqual(snapshot.version, 3);
+    assert.strictEqual(snapshot.lastGoodVersion, 3);
+    assert.strictEqual(activeRules.length, 1);
+    assert.strictEqual(activeRules[0].ruleId, "rule-event-serial-new");
+    assert.strictEqual(oldRule.status, "covered");
+    assert.strictEqual(oldRule.coveredByRuleId, "rule-event-serial-new");
+  } finally {
+    fsp.rename = originalRename;
+  }
 });
 
 test("learnExplicitRule validates overall mode conflictKey and expectedVersion before publishing", async () => {

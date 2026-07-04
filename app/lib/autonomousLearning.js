@@ -83,6 +83,8 @@ async function learnExplicitRule(root, input = {}, options = {}) {
   });
   await appendLearningEvent(root, baseEvent);
 
+  const newRuleId = `rule-${eventId}`;
+  let durablePublish;
   try {
     const content = String(input.content || baseEvent.summary).trim();
     if (baseEvent.learningMode !== "overall") {
@@ -94,8 +96,7 @@ async function learnExplicitRule(root, input = {}, options = {}) {
     const expectedVersion = normalizeOptionalVersion(
       Object.hasOwn(input, "expectedVersion") ? input.expectedVersion : options.expectedVersion,
     );
-    const newRuleId = `rule-${eventId}`;
-    const { writtenRuleset, publishTime } = await withRulesetPublishLock(root, async () => {
+    durablePublish = await withRulesetPublishLock(root, async () => {
       const ruleset = await readCurrentRulesetStrict(root);
       if (expectedVersion !== null && expectedVersion !== Number(ruleset.version || 0)) {
         throw new Error(`expectedVersion 不匹配：当前版本 ${Number(ruleset.version || 0)}，收到 ${expectedVersion}`);
@@ -136,8 +137,7 @@ async function learnExplicitRule(root, input = {}, options = {}) {
       };
       validateRuleset(nextRuleset);
       const writtenRuleset = await writeCurrentRuleset(root, nextRuleset);
-
-      for (const event of [
+      const bookkeepingEvents = [
         ...coveredEvents,
         ...existingEvents.filter((item) =>
           item.eventId !== eventId &&
@@ -145,33 +145,40 @@ async function learnExplicitRule(root, input = {}, options = {}) {
           item.internalStatus === "failed" &&
           !coveredEvents.some((covered) => covered.eventId === item.eventId)
         ),
-      ]) {
-        await appendLearningEvent(root, {
+      ];
+
+      const postCommitWarnings = await runPostCommitBookkeeping(root, {
+        events: bookkeepingEvents,
+        eventId,
+        publishTime,
+        options,
+      });
+
+      let event = normalizeEvent({
+        ...baseEvent,
+        internalStatus: "landed",
+        jobStatus: "completed",
+        landingType: "current-rule",
+        landingIds: [newRuleId],
+        ruleId: newRuleId,
+        updatedAt: publishTime,
+        postCommitWarnings,
+      });
+      try {
+        await appendLearningEvent(root, event);
+      } catch (error) {
+        event = {
           ...event,
-          internalStatus: "covered",
-          jobStatus: "completed",
-          coveredByEventId: eventId,
-          updatedAt: publishTime,
-        });
-        await withdrawNotificationsForSource(root, "learning-event", event.eventId, {
-          handledAt: publishTime,
-        });
+          postCommitWarnings: normalizePostCommitWarnings([
+            ...(event.postCommitWarnings || []),
+            buildPostCommitWarning("append-landed-event", { eventId }, error),
+          ]),
+        };
       }
 
-      return { writtenRuleset, publishTime };
+      return { writtenRuleset, event };
     });
 
-    const event = normalizeEvent({
-      ...baseEvent,
-      internalStatus: "landed",
-      jobStatus: "completed",
-      landingType: "current-rule",
-      landingIds: [newRuleId],
-      ruleId: newRuleId,
-      updatedAt: publishTime,
-    });
-    await appendLearningEvent(root, event);
-    return { event, ruleset: writtenRuleset };
   } catch (error) {
     const failedAt = now();
     const event = normalizeEvent({
@@ -199,6 +206,56 @@ async function learnExplicitRule(root, input = {}, options = {}) {
     }
     return { event, ruleset: await readCurrentRuleset(root) };
   }
+
+  return { event: durablePublish.event, ruleset: durablePublish.writtenRuleset };
+}
+
+async function runPostCommitBookkeeping(root, input = {}) {
+  const warnings = [];
+  const events = Array.isArray(input.events) ? input.events : [];
+  const options = input.options || {};
+  for (const event of events) {
+    let coveredEventAppended = false;
+    try {
+      maybeFailPostPublishBookkeeping(options, "append-covered-event");
+      await appendLearningEvent(root, {
+        ...event,
+        internalStatus: "covered",
+        jobStatus: "completed",
+        coveredByEventId: input.eventId,
+        updatedAt: input.publishTime,
+      });
+      coveredEventAppended = true;
+    } catch (error) {
+      warnings.push(buildPostCommitWarning("append-covered-event", event, error));
+    }
+
+    if (!coveredEventAppended) continue;
+    try {
+      maybeFailPostPublishBookkeeping(options, "withdraw-notification");
+      await withdrawNotificationsForSource(root, "learning-event", event.eventId, {
+        handledAt: input.publishTime,
+      });
+    } catch (error) {
+      warnings.push(buildPostCommitWarning("withdraw-notification", event, error));
+    }
+  }
+  return normalizePostCommitWarnings(warnings);
+}
+
+function maybeFailPostPublishBookkeeping(options = {}, stage) {
+  const requested = options.failPostPublishBookkeeping;
+  if (requested === true || requested === stage) {
+    throw new Error(`simulated post-publish bookkeeping failure: ${stage}`);
+  }
+}
+
+function buildPostCommitWarning(stage, event, error) {
+  return {
+    stage,
+    eventId: String(event?.eventId || "").trim(),
+    message: error?.message || String(error),
+  };
 }
 
 async function readCurrentRuleset(root) {
@@ -341,46 +398,48 @@ async function updateCurrentRuleStatus(root, input = {}, options = {}) {
     throw new Error("当前规则只允许启用或停用");
   }
 
-  const ruleset = await readCurrentRulesetStrict(root);
-  const rule = (ruleset.rules || []).find((item) => item.ruleId === ruleId);
-  if (!rule) throw new Error(`当前规则不存在：${ruleId}`);
-  if (rule.status === COVERED_STATUS || rule.coveredByRuleId) {
-    throw new Error("已被覆盖的规则不能直接启用或停用");
-  }
-  if (![ACTIVE_STATUS, DISABLED_STATUS].includes(rule.status)) {
-    throw new Error(`当前规则状态不允许切换：${rule.status}`);
-  }
-
-  if (nextStatus === ACTIVE_STATUS) {
-    const activeSameRule = (ruleset.rules || []).find((item) =>
-      item.ruleId !== ruleId &&
-      item.status === ACTIVE_STATUS &&
-      isSameTopicOrConflict(item, rule.topicKey, rule.conflictKey)
-    );
-    if (activeSameRule) {
-      throw new Error(`同一主题已存在启用规则或同一冲突键已存在启用规则：${rule.topicKey} / ${rule.conflictKey}`);
+  return withRulesetPublishLock(root, async () => {
+    const ruleset = await readCurrentRulesetStrict(root);
+    const rule = (ruleset.rules || []).find((item) => item.ruleId === ruleId);
+    if (!rule) throw new Error(`当前规则不存在：${ruleId}`);
+    if (rule.status === COVERED_STATUS || rule.coveredByRuleId) {
+      throw new Error("已被覆盖的规则不能直接启用或停用");
     }
-  }
+    if (![ACTIVE_STATUS, DISABLED_STATUS].includes(rule.status)) {
+      throw new Error(`当前规则状态不允许切换：${rule.status}`);
+    }
 
-  const updatedAt = now();
-  const nextRuleset = {
-    ...ruleset,
-    version: Number(ruleset.version || 0) + 1,
-    lastGoodVersion: Number(ruleset.version || 0) + 1,
-    updatedAt,
-    rules: (ruleset.rules || []).map((item) =>
-      item.ruleId === ruleId
-        ? { ...item, status: nextStatus, coveredByRuleId: "", updatedAt }
-        : item
-    ),
-  };
-  validateRuleset(nextRuleset);
-  const writtenRuleset = await writeCurrentRuleset(root, nextRuleset);
+    if (nextStatus === ACTIVE_STATUS) {
+      const activeSameRule = (ruleset.rules || []).find((item) =>
+        item.ruleId !== ruleId &&
+        item.status === ACTIVE_STATUS &&
+        isSameTopicOrConflict(item, rule.topicKey, rule.conflictKey)
+      );
+      if (activeSameRule) {
+        throw new Error(`同一主题已存在启用规则或同一冲突键已存在启用规则：${rule.topicKey} / ${rule.conflictKey}`);
+      }
+    }
 
-  return {
-    rule: writtenRuleset.rules.find((item) => item.ruleId === ruleId),
-    ruleset: writtenRuleset,
-  };
+    const updatedAt = now();
+    const nextRuleset = {
+      ...ruleset,
+      version: Number(ruleset.version || 0) + 1,
+      lastGoodVersion: Number(ruleset.version || 0) + 1,
+      updatedAt,
+      rules: (ruleset.rules || []).map((item) =>
+        item.ruleId === ruleId
+          ? { ...item, status: nextStatus, coveredByRuleId: "", updatedAt }
+          : item
+      ),
+    };
+    validateRuleset(nextRuleset);
+    const writtenRuleset = await writeCurrentRuleset(root, nextRuleset);
+
+    return {
+      rule: writtenRuleset.rules.find((item) => item.ruleId === ruleId),
+      ruleset: writtenRuleset,
+    };
+  });
 }
 
 async function listLearningEvents(root, options = {}) {
@@ -453,12 +512,32 @@ function normalizeRuleset(ruleset = {}) {
   };
 }
 
+function normalizePostCommitWarnings(warnings) {
+  if (!Array.isArray(warnings)) return [];
+  return warnings
+    .map((warning) => {
+      if (!warning || typeof warning !== "object") return null;
+      const stage = String(warning.stage || "").trim();
+      const message = String(warning.message || "").trim();
+      const eventId = String(warning.eventId || "").trim();
+      if (!stage || !message) return null;
+      return {
+        stage,
+        eventId,
+        message,
+      };
+    })
+    .filter(Boolean);
+}
+
 function normalizeEvent(event) {
   if (!event || typeof event !== "object") return null;
   try {
+    const postCommitWarnings = normalizePostCommitWarnings(event.postCommitWarnings);
     return {
       ...normalizeLearningEvent(event),
       tokenUsage: normalizeUsage(event.tokenUsage),
+      ...(postCommitWarnings.length ? { postCommitWarnings } : {}),
     };
   } catch {
     return null;
