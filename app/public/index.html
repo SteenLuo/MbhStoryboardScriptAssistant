@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>猫主子漫剧剧本分镜小助手</title>
-    <link rel="stylesheet" href="/styles.css?v=0.5-learning-library-help" />
+    <link rel="stylesheet" href="/styles.css?v=0.5-learning-library-summary" />
   </head>
   <body>
     <div class="app-shell">
@@ -235,7 +235,16 @@
             <section class="learning-guide" aria-label="学习逻辑说明">
               <div class="learning-guide-intro">
                 <strong>新手说明</strong>
-                <span>默认只看这三件事：保存了什么、是否已经写入正式技能、下一步要不要处理。</span>
+                <span>先看当前学习功能总结，再看每条记录保存了什么、是否已经写入正式技能、下一步要不要处理。</span>
+              </div>
+              <div class="learning-capability-summary" aria-label="当前学习功能总结">
+                <strong>当前学习功能</strong>
+                <ul>
+                  <li>会保存：技能学习、满意样例、纠错说明和归档证据。</li>
+                  <li>会影响生成：只有写入正式技能后，后续对应生成才会读取。</li>
+                  <li>不会做：普通学习记录不会自动改生成，也没有独立当前规则层。</li>
+                  <li>学错处理：从学习记录点“带引用去纠正”，回到对话覆盖、停用或收窄。</li>
+                </ul>
               </div>
               <div class="learning-guide-grid">
                 <article>
@@ -505,6 +514,6 @@
     <script src="/markdown-format.js?v=20260611-markdown-v1"></script>
     <script src="/compose-validation.js?v=20260611-compose-validation-v1"></script>
     <script src="/project-tree.js?v=20260627-canvas-icons-paws-v1"></script>
-    <script src="/app.js?v=0.5-learning-library-help"></script>
+    <script src="/app.js?v=0.5-learning-library-summary"></script>
   </body>
 </html>

@@ -6136,6 +6136,11 @@ async function loadLearningLibrary() {
   }
 }
 
+function switchLearningLibraryTab(tab = "records") {
+  state.learningLibraryTab = tab === "skills" ? "skills" : "records";
+  renderLearningLibrary();
+}
+
 function renderLearningLibrary() {
   const data = state.learningLibrary || { records: [], skills: [] };
   const skills = data.skills || [];
@@ -6978,10 +6983,20 @@ function bindEvents() {
     button.addEventListener("click", () => switchSettingsTab(button.dataset.settingsTab));
   });
   document.querySelectorAll("[data-learning-library-tab]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.learningLibraryTab = button.dataset.learningLibraryTab || "records";
-      renderLearningLibrary();
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      switchLearningLibraryTab(button.dataset.learningLibraryTab || "records");
     });
+  });
+  document.querySelectorAll("[data-learning-library-tab-group]").forEach((group) => {
+    group.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest(".learning-help-wrap")) return;
+      switchLearningLibraryTab(group.dataset.learningLibraryTabGroup || "records");
+    });
+  });
+  document.querySelectorAll(".learning-help-button").forEach((button) => {
+    button.addEventListener("click", (event) => event.stopPropagation());
   });
   $("learningFailureJump").addEventListener("click", jumpToNextLearningFailure);
   $("configApiKey").addEventListener("pointerdown", prepareApiKeyEdit);

@@ -4913,6 +4913,34 @@ input.masked-key {
   line-height: 1.55;
 }
 
+.learning-capability-summary {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--line));
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--field-bg) 88%, var(--accent) 4%);
+}
+
+.learning-capability-summary strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.learning-capability-summary ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 16px;
+  margin: 7px 0 0;
+  padding-left: 18px;
+}
+
+.learning-capability-summary li {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .learning-guide-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -4977,6 +5005,7 @@ input.masked-key {
   gap: 6px;
   border-right: 1px solid var(--line);
   background: transparent;
+  cursor: pointer;
 }
 
 .learning-library-tab-group:last-child {
@@ -5377,6 +5406,10 @@ input.masked-key {
   .learning-guide-intro {
     display: grid;
     gap: 4px;
+  }
+
+  .learning-capability-summary ul {
+    grid-template-columns: 1fr;
   }
 
   .learning-guide-grid {
