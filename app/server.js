@@ -863,9 +863,10 @@ async function chatWithAssistant(body) {
     intent: body.intent || (forcedSkillRoute ? "script_analysis" : ""),
   });
   const explicitLearningMode = body.learningMode === true || String(body.intent || "").toLowerCase() === "learning";
+  const skillCreatorRoute = findLocalSkillRoute("skill-creator");
   const skillRoute = chatIntent.mode === "skill"
     ? explicitLearningMode
-      ? routeLocalSkill("样例 学习 入库 技能学习")
+      ? skillCreatorRoute || routeLocalSkill("创建技能 修改技能 skill-creator")
       : forcedSkillRoute || routeLocalSkill(skillRoutingText(message, attachments))
     : null;
   const userMessage = {
@@ -1025,6 +1026,9 @@ async function handleLearningCompose({ conversation, userMessage, chatIntent, sk
   }
 
   const lines = ["已记录为技能学习材料。"];
+  if (skillRoute?.id === "skill-creator") {
+    lines.push("本次由原版 skill-creator 路由承接；总控负责判断何时调用，学习资料库负责留痕和纠错。");
+  }
   if (assistantMessage.learningRecord) {
     lines.push(`本地记录：${assistantMessage.learningRecord}`);
   }

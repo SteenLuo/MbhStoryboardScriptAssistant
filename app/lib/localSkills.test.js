@@ -43,6 +43,26 @@ test("routeLocalSkill selects manju adaptation analysis for adaptation requests"
   assert.strictEqual(route.path, "skills/02-script/script-manju-adaptation-analysis");
 });
 
+test("routeLocalSkill selects bundled skill creator for skill creation and modification requests", async () => {
+  const createRoute = routeLocalSkill("请创建一个新的分镜质量检查 skill");
+  const updateRoute = routeLocalSkill("修改分镜生成 SKILL.md，并给它增加 references");
+  const directRoute = findLocalSkillRoute("skill-creator");
+
+  assert.strictEqual(createRoute.id, "skill-creator");
+  assert.strictEqual(updateRoute.id, "skill-creator");
+  assert.strictEqual(directRoute.name, "技能创建");
+  assert.strictEqual(directRoute.path, "skills/05-evolution/skill-creator");
+
+  const context = await loadLocalSkillContext(ROOT, directRoute);
+  assert.match(context.prompt, /# Skill Creator/);
+  assert.match(context.prompt, /Skill Creation Process/);
+  assert.match(context.prompt, /scripts\/init_skill\.py/);
+  assert.ok(context.files.includes("skills/05-evolution/skill-creator/SKILL.md"));
+  assert.ok(context.files.includes("skills/05-evolution/skill-creator/references/openai_yaml.md"));
+  await fsp.access(path.join(ROOT, "skills/05-evolution/skill-creator/scripts/init_skill.py"));
+  await fsp.access(path.join(ROOT, "skills/05-evolution/skill-creator/scripts/quick_validate.py"));
+});
+
 test("findLocalSkillRoute returns dedicated routes by id", () => {
   const reviewRoute = findLocalSkillRoute("script-hard-issue-review");
   const adaptationRoute = findLocalSkillRoute("script-manju-adaptation-analysis");

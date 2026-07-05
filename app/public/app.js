@@ -586,8 +586,8 @@ function setComposeMode(mode) {
     button.setAttribute("aria-pressed", String(active));
     button.setAttribute("aria-label", active ? `${label}，已选中，再次点击取消` : `${label}，点击选中`);
     const learningTitle = active
-      ? "已启用技能学习，本条消息会保存到本地学习资料库"
-      : "启用后，本条消息用于技能学习并沉淀到本地";
+      ? "已启用技能学习，本条消息会进入技能创建器流程并保存到学习资料库"
+      : "启用后，本条消息用于技能学习，由总控调用技能创建器处理";
     button.title = button.dataset.composeMode === "learning"
       ? learningTitle
       : active
@@ -1940,7 +1940,7 @@ async function sendMessage(event) {
   if (pendingCorrection) {
     waiting.textContent = "正在记录纠正说明...";
   } else if (learningMode) {
-    waiting.textContent = "正在保存到本地学习资料库...";
+    waiting.textContent = "正在进入技能创建器流程并保存到学习资料库...";
   } else if (forcedSkillRouteId) {
     waiting.textContent = `正在调用${composeModeLabel(state.composeMode)}技能...`;
   }
@@ -6673,7 +6673,7 @@ function formatSkillCategory(category) {
     "skills/02-script": "剧本能力",
     "skills/03-storyboard": "分镜能力",
     "skills/04-learning": "学习能力",
-    "skills/05-evolution": "技能进化",
+    "skills/05-evolution": "技能创建与进化",
   };
   if (!category) return "技能";
   return labels[category] || String(category).replace(/^skills\//, "技能 / ");

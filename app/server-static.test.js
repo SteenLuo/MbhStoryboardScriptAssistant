@@ -124,18 +124,20 @@ test("server prompts no longer apply script level rules", () => {
   assert.doesNotMatch(serverSource, /B级本|A级本/);
 });
 
-test("explicit skill learning mode is handled locally without model generation", () => {
+test("explicit skill learning mode is handled locally through the bundled skill creator route", () => {
   const chatSource = extractFunction("chatWithAssistant");
   const learningSource = extractFunction("handleLearningCompose");
 
   assert.match(chatSource, /const explicitLearningMode = body\.learningMode === true/);
-  assert.match(chatSource, /routeLocalSkill\("样例 学习 入库 技能学习"\)/);
+  assert.match(chatSource, /findLocalSkillRoute\("skill-creator"\)/);
+  assert.doesNotMatch(chatSource, /routeLocalSkill\("样例 学习 入库 技能学习"\)/);
   assert.match(chatSource, /if \(explicitLearningMode\)/);
   assert.match(chatSource, /handleLearningCompose/);
   assert.match(learningSource, /writeConversationLearningRecord/);
   assert.match(learningSource, /applyAutonomousConversationLearning/);
   assert.match(learningSource, /local-learning/);
   assert.match(learningSource, /已记录为技能学习材料/);
+  assert.match(learningSource, /原版 skill-creator/);
   assert.match(learningSource, /已保存到学习资料库/);
   assert.match(learningSource, /已写入分镜 skill 学习沉淀/);
   assert.match(learningSource, /下一次分镜生成会读取/);
@@ -268,6 +270,13 @@ test("chat flow saves explicit learning into the learning event pipeline without
   assert.match(chatSource, /applyAutonomousConversationLearning/);
   assert.match(helperSource, /assistantMessage\.learningEvent/);
   assert.match(helperSource, /assistantMessage\.skillReferencePath/);
+});
+
+test("explicit skill learning uses bundled skill creator route", () => {
+  const chatSource = extractFunction("chatWithAssistant");
+
+  assert.match(chatSource, /findLocalSkillRoute\("skill-creator"\)/);
+  assert.doesNotMatch(chatSource, /routeLocalSkill\("样例 学习 入库 技能学习"\)/);
 });
 
 test("chat flow no longer exposes legacy long-memory confirmation", () => {

@@ -4,6 +4,37 @@ const path = require("path");
 
 const SKILL_ROUTES = [
   {
+    id: "skill-creator",
+    name: "技能创建",
+    path: "skills/05-evolution/skill-creator",
+    keywords: [
+      "skill creator",
+      "skill-creator",
+      "创建 skill",
+      "创建skill",
+      "创建技能",
+      "生成 skill",
+      "生成skill",
+      "生成技能",
+      "修改 skill",
+      "修改skill",
+      "修改技能",
+      "更新 skill",
+      "更新skill",
+      "更新技能",
+      "改 skill",
+      "改skill",
+      "改技能",
+      "SKILL.md",
+      "references",
+      "scripts",
+      "assets",
+      "技能学习",
+      "技能沉淀",
+      "沉淀到技能",
+    ],
+  },
+  {
     id: "sample-ingest",
     name: "样例学习",
     path: "skills/04-learning/sample-ingest",
@@ -62,12 +93,24 @@ const FALLBACK_ROUTE = {
 
 function routeLocalSkill(text) {
   const input = String(text || "").toLowerCase();
+  const skillCreatorRoute = SKILL_ROUTES.find((route) => route.id === "skill-creator");
+  if (skillCreatorRoute && isSkillCreatorRequest(input)) {
+    return { ...skillCreatorRoute };
+  }
   for (const route of SKILL_ROUTES) {
     if (route.keywords.some((keyword) => input.includes(keyword.toLowerCase()))) {
       return { ...route };
     }
   }
   return { ...FALLBACK_ROUTE };
+}
+
+function isSkillCreatorRequest(input) {
+  const text = String(input || "");
+  const mentionsSkillFile = /skill\.md|references\/|scripts\/|assets\//i.test(text);
+  const mentionsSkill = /\bskill\b|技能创建器|技能学习|技能沉淀|正式技能|改技能|创建技能|修改技能|更新技能/.test(text);
+  const asksSkillAction = /创建|生成|修改|更新|改|重构|沉淀|学习|验证|校验/.test(text);
+  return (mentionsSkill || mentionsSkillFile) && asksSkillAction;
 }
 
 function findLocalSkillRoute(id) {

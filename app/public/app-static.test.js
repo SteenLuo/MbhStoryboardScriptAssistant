@@ -301,7 +301,7 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(indexSource, /learningSkillsTabCount/);
   assert.match(indexSource, /learningRecordHelp/);
   assert.match(indexSource, /学习记录说明/);
-  assert.match(learningPageSource, /系统会把技能学习、满意样例、纠错和归档证据记到这里。已保存不等于影响生成；生成只读取正式技能，不读取普通学习记录。学错了可以点“带引用去纠正”回到对话处理。/);
+  assert.match(learningPageSource, /系统会把技能学习、满意样例、纠错和归档证据记到这里。已保存不等于影响生成；生成只读取正式技能，不读取普通学习记录。主动技能学习会进入技能创建器流程，学错了可以点“带引用去纠正”回到对话处理。/);
   assert.match(learningPageSource, /已保存/);
   assert.match(learningPageSource, /已影响生成/);
   assert.match(learningPageSource, /普通学习记录会先作为学习资料保存；只有写入正式技能后，下一次对应生成才会读取/);
@@ -314,8 +314,8 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(indexSource, /learningSkillHelp/);
   assert.match(indexSource, /技能库说明/);
   assert.match(indexSource, /当前可调用的正式技能/);
+  assert.match(indexSource, /正式技能创建和修改由技能创建器承接/);
   assert.match(indexSource, /普通学习记录和技能草案不会自动影响生成/);
-  assert.match(indexSource, /这里不做复杂规则编辑/);
   assert.match(indexSource, /data-learning-library-tab-group="skills"[\s\S]*data-learning-library-tab="skills"[\s\S]*learningSkillHelp[\s\S]*<\/div>/);
   assert.match(indexSource, /<\/button>\s*<span class="learning-help-wrap">[\s\S]*learningSkillHelp/);
   assert.match(indexSource, /learningFailureJump/);
@@ -323,6 +323,7 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(indexSource, /learning-capability-summary/);
   assert.match(indexSource, /新手说明/);
   assert.match(indexSource, /当前学习功能/);
+  assert.match(indexSource, /用户主动点技能学习或明确要求改 skill 时，总控会调用技能创建器处理/);
   assert.match(indexSource, /普通学习记录不会自动改生成，也没有独立当前规则层/);
   assert.match(indexSource, /从学习记录点“带引用去纠正”/);
   assert.match(indexSource, /内部排查信息默认折叠/);
@@ -419,6 +420,15 @@ test("skill library renderer shows saved non-generation draft cards and draft em
     generationImpactText: "暂不影响生成；等待人工确认后才可能进入正式技能。",
     diffSummary: "Draft only: no official skill files or routes are changed.",
   });
+  const officialItem = renderSkillLibraryItem({
+    name: "skill-creator",
+    id: "skill-creator",
+    exists: true,
+    category: "skills/05-evolution",
+    path: "skills/05-evolution/skill-creator",
+    description: "Create or update a skill",
+    instructions: "# Skill Creator",
+  });
 
   assert.match(renderSkillLibrarySource, /暂无技能草案，正式技能仍可用/);
   assert.match(renderSkillItemSource, /recordType === "skill-draft"/);
@@ -429,6 +439,8 @@ test("skill library renderer shows saved non-generation draft cards and draft em
   assert.match(item.innerHTML, /暂不影响生成/);
   assert.match(item.innerHTML, /等待人工确认/);
   assert.match(item.innerHTML, /diff 摘要/);
+  assert.match(officialItem.innerHTML, /技能创建与进化/);
+  assert.doesNotMatch(officialItem.innerHTML, /技能进化 · skills\/05-evolution\/skill-creator/);
 });
 
 test("learning record renderer keeps novice fields in the default card", () => {
@@ -690,7 +702,7 @@ test("chat composer replaces generation buttons with explicit skill learning mod
   assert.match(sendSource, /learningMode,/);
   assert.match(sendSource, /skillRouteId: forcedSkillRouteId/);
   assert.match(sendSource, /workflowIntent: learningMode \|\| forcedSkillRouteId \? "" : state\.composeMode \|\| ""/);
-  assert.match(sendSource, /正在保存到本地学习资料库/);
+  assert.match(sendSource, /正在进入技能创建器流程并保存到学习资料库/);
   assert.match(sendSource, /正在调用\$\{composeModeLabel\(state\.composeMode\)\}技能/);
 });
 
