@@ -91,7 +91,7 @@ test("legacy current-rule landing is saved as history and does not affect genera
   assert.match(record.nextStepText, /技能学习重新沉淀到正式技能/);
 });
 
-test("skill-reference landing affects generation through storyboard skill sedimentation", () => {
+test("legacy skill-reference landing is saved history and does not affect generation", () => {
   const record = mapLearningDisplayRecord({
     eventId: "event-skill-reference",
     landingType: "skill-reference",
@@ -103,11 +103,12 @@ test("skill-reference landing affects generation through storyboard skill sedime
   });
 
   assertKnownDisplayStatus(record);
-  assert.equal(record.displayStatus, "已影响生成");
-  assert.equal(record.affectsGeneration, true);
-  assert.match(record.generationImpactText, /对应正式技能/);
-  assert.match(record.usedWhereText, /对应正式技能/);
-  assert.match(record.nextStepText, /下一次相关生成会读取/);
+  assert.equal(record.displayStatus, "已保存");
+  assert.equal(record.affectsGeneration, false);
+  assert.match(record.generationImpactText, /历史 skill reference/);
+  assert.match(record.generationImpactText, /skill-creator/);
+  assert.match(record.usedWhereText, /历史 skill reference/);
+  assert.match(record.nextStepText, /skill-creator 任务/);
 });
 
 test("unfinished generation landings wait for confirmation before affecting generation", () => {

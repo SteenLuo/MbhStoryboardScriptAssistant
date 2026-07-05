@@ -4,9 +4,10 @@ const {
   validateGenerationProofCombination,
 } = require("./learningContracts");
 
-const GENERATION_LANDING_TYPES = new Set(["formal-skill", "callable-skill", "skill-reference"]);
+const GENERATION_LANDING_TYPES = new Set(["formal-skill", "callable-skill"]);
 const SAVED_LANDING_TYPES = new Set([
   "current-rule",
+  "skill-reference",
   "sample",
   "evidence",
   "eval",
@@ -161,13 +162,13 @@ function hasUnknownProofWarning(claimText) {
 function resolveGenerationImpactText(event, displayStatus, affectsGeneration) {
   const landingType = normalizeString(event.landingType);
   if (affectsGeneration) {
-    if (landingType === "skill-reference") return "已写入对应正式技能；下一次相关生成会读取。";
     return "会被后续生成读取；是否执行成功要看本次输出校验和命中证据。";
   }
   if (displayStatus === "失败") return "学习未落地，不会影响生成。";
   if (displayStatus === "已被覆盖") return "已被后续学习覆盖，不再影响生成。";
   if (displayStatus === "待确认") return "尚未确认长期落点，暂不会直接改变生成。";
   if (landingType === "current-rule") return "历史学习资料，不会影响生成；当前生成只读取正式技能。";
+  if (landingType === "skill-reference") return "历史 skill reference 记录，不会影响当前生成；需要影响生成时请通过 skill-creator 修改正式技能并验证。";
   return "已保存为学习资料，不会直接改变生成。";
 }
 
@@ -197,21 +198,21 @@ function resolveUsedWhereText(event, displayStatus) {
   if (displayStatus === "已影响生成") {
     if (landingType === "formal-skill") return "正式技能：后续生成会读取。";
     if (landingType === "callable-skill") return "可调用技能：后续生成可按路由使用。";
-    if (landingType === "skill-reference") return "对应正式技能：后续相关生成会读取。";
     return "生成流程：后续生成会读取。";
   }
   if (displayStatus === "待确认") return "尚未落地。";
   if (landingType === "current-rule") return "学习资料库：历史学习资料。";
+  if (landingType === "skill-reference") return "学习资料库：历史 skill reference 记录。";
   return "学习资料库。";
 }
 
 function resolveNextStepText(event, displayStatus, actionLabel) {
   const landingType = normalizeString(event.landingType);
   if (displayStatus === "失败") return "请修正学习内容或落点后重试。";
-  if (displayStatus === "已影响生成" && landingType === "skill-reference") return "下一次相关生成会读取；如果结果不对，请从学习资料库带引用纠正。";
   if (displayStatus === "已影响生成") return "后续生成会读取；若本次输出违规，必须自动修复或记录失败，不能静默交付。";
   if (displayStatus === "已被覆盖") return "无需处理，查看覆盖它的新学习即可。";
   if (displayStatus === "已保存" && landingType === "current-rule") return "无需处理；如果这条仍要影响生成，请用技能学习重新沉淀到正式技能。";
+  if (displayStatus === "已保存" && landingType === "skill-reference") return "无需处理；如果这条仍要影响生成，请用技能学习生成 skill-creator 任务，并完成正式技能修改与验证。";
   if (displayStatus === "已保存") return "无需处理，可在需要时作为资料回看。";
   if (landingType === "sample-insufficient") {
     const neededSampleType = normalizeString(event.neededSampleType) || "同类样例";
