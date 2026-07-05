@@ -4956,12 +4956,14 @@ input.masked-key {
   flex: 1 1 auto;
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .learning-library-tabs button {
-  min-height: 32px;
+  min-height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4981,6 +4983,10 @@ input.masked-key {
 .learning-library-tabs button:hover {
   background: color-mix(in srgb, var(--accent) 12%, var(--field-bg));
   color: var(--ink);
+}
+
+.learning-library-tabs button.active {
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .learning-help-wrap {
@@ -5086,6 +5092,31 @@ input.masked-key {
   line-height: 1;
 }
 
+.learning-library-panel-summary {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--field-bg));
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.learning-library-panel-summary strong {
+  flex: 0 0 auto;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.learning-library-panel-summary span {
+  min-width: 0;
+}
+
 .learning-failure-jump {
   flex: 0 0 auto;
   min-height: 32px;
@@ -5135,6 +5166,14 @@ input.masked-key {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: color-mix(in srgb, var(--field-bg) 82%, transparent);
+}
+
+.learning-library-empty {
+  display: grid;
+  min-height: 112px;
+  place-items: center;
+  color: var(--muted);
+  text-align: center;
 }
 
 .learning-library-item.failed {

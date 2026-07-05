@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>猫主子漫剧剧本分镜小助手</title>
-    <link rel="stylesheet" href="/styles.css?v=0.5-learning-half" />
+    <link rel="stylesheet" href="/styles.css?v=0.5-learning-library-tabs" />
   </head>
   <body>
     <div class="app-shell">
@@ -260,7 +260,7 @@
             <div class="learning-library">
               <div class="learning-library-tabs-row">
                 <div class="learning-library-tabs" role="tablist" aria-label="学习资料库">
-                  <button class="active" type="button" data-learning-library-tab="records">
+                  <button id="learningRecordsTab" class="active" type="button" role="tab" aria-selected="true" aria-controls="learningLibraryRecords" data-learning-library-tab="records">
                     <span>学习记录</span>
                     <span class="learning-help-wrap">
                       <span id="learningRecordHelp" class="learning-help-button" aria-label="学习记录说明" aria-describedby="learningRecordHelpText">?</span>
@@ -276,7 +276,7 @@
                     </span>
                     <strong id="learningRecordsTabCount" class="learning-tab-count">0</strong>
                   </button>
-                  <button type="button" data-learning-library-tab="skills">
+                  <button id="learningSkillsTab" type="button" role="tab" aria-selected="false" aria-controls="learningLibrarySkills" data-learning-library-tab="skills">
                     <span>技能库</span>
                     <span class="learning-help-wrap">
                       <span id="learningSkillHelp" class="learning-help-button" aria-label="技能库说明" aria-describedby="learningSkillHelpText">?</span>
@@ -293,8 +293,9 @@
                   <strong id="learningFailureTabCount">0</strong>
                 </button>
               </div>
-              <div id="learningLibraryRecords" class="learning-library-list" data-learning-library-panel="records"></div>
-              <div id="learningLibrarySkills" class="learning-library-list" data-learning-library-panel="skills" hidden></div>
+              <div id="learningLibraryPanelSummary" class="learning-library-panel-summary"></div>
+              <div id="learningLibraryRecords" class="learning-library-list" role="tabpanel" aria-labelledby="learningRecordsTab" data-learning-library-panel="records"></div>
+              <div id="learningLibrarySkills" class="learning-library-list" role="tabpanel" aria-labelledby="learningSkillsTab" data-learning-library-panel="skills" hidden></div>
             </div>
           </div>
         </div>
@@ -499,6 +500,6 @@
     <script src="/markdown-format.js?v=20260611-markdown-v1"></script>
     <script src="/compose-validation.js?v=20260611-compose-validation-v1"></script>
     <script src="/project-tree.js?v=20260627-canvas-icons-paws-v1"></script>
-    <script src="/app.js?v=0.5-learning-half"></script>
+    <script src="/app.js?v=0.5-learning-library-tabs"></script>
   </body>
 </html>

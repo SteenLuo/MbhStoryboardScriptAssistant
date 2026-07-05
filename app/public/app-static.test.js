@@ -332,12 +332,15 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(indexSource, /learningLibraryRecords/);
   assert.doesNotMatch(indexSource, /learningLibraryRules/);
   assert.match(indexSource, /learningLibrarySkills/);
+  assert.match(indexSource, /learningLibraryPanelSummary/);
   assert.match(appSource, /learningLibrary/);
   assert.match(appSource, /function openLearningPage/);
   assert.match(appSource, /function closeLearningPage/);
   assert.match(appSource, /openNotificationTarget[\s\S]*openLearningPage/);
   assert.match(appSource, /function loadLearningPanel/);
   assert.match(appSource, /function renderLearningLibrary/);
+  assert.match(appSource, /function renderLearningPanelSummary/);
+  assert.doesNotMatch(appSource, /!records\.length && !rules\.length/);
   assert.match(appSource, /function renderLearningTabCounts/);
   assert.match(appSource, /function jumpToNextLearningFailure/);
   assert.doesNotMatch(appSource, /function setCurrentRuleStatus/);
