@@ -25,6 +25,15 @@ const SKILL_ROUTES = [
       "改 skill",
       "改skill",
       "改技能",
+      "改进技能",
+      "优化规则",
+      "补进技能",
+      "规则补进技能",
+      "这个规则补进技能里",
+      "质量下降",
+      "学习后质量下降",
+      "回退技能",
+      "技能进化",
       "SKILL.md",
       "references",
       "scripts",
@@ -39,12 +48,6 @@ const SKILL_ROUTES = [
     name: "样例学习",
     path: "skills/04-learning/sample-ingest",
     keywords: ["样例", "学习", "入库", "投喂", "参考样本", "历史剧本", "历史分镜", "规则提炼"],
-  },
-  {
-    id: "skill-evolution",
-    name: "技能进化",
-    path: "skills/05-evolution/skill-evolution",
-    keywords: ["技能进化", "改进技能", "更新技能", "质量下降", "降质", "回退", "评测", "优化规则"],
   },
   {
     id: "storyboard-generate",
@@ -108,8 +111,8 @@ function routeLocalSkill(text) {
 function isSkillCreatorRequest(input) {
   const text = String(input || "");
   const mentionsSkillFile = /skill\.md|references\/|scripts\/|assets\//i.test(text);
-  const mentionsSkill = /\bskill\b|技能创建器|技能学习|技能沉淀|正式技能|改技能|创建技能|修改技能|更新技能/.test(text);
-  const asksSkillAction = /创建|生成|修改|更新|改|重构|沉淀|学习|验证|校验/.test(text);
+  const mentionsSkill = /\bskill\b|技能创建器|技能学习|技能沉淀|正式技能|技能进化|改技能|改进技能|创建技能|修改技能|更新技能|补进技能/.test(text);
+  const asksSkillAction = /创建|生成|修改|更新|改|重构|沉淀|学习|验证|校验|优化|补进|回退/.test(text);
   return (mentionsSkill || mentionsSkillFile) && asksSkillAction;
 }
 

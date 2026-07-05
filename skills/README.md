@@ -25,7 +25,6 @@ skills/
 - `03-storyboard/storyboard-generate`：根据剧本生成 AI 漫剧分镜。
 - `04-learning/sample-ingest`：学习已有 AI 漫剧剧本和分镜样例，沉淀学习记录和规则建议。
 - `05-evolution/skill-creator`：直接内置 Codex 原版 skill-creator，用于创建、修改、更新和验证正式 skill。
-- `05-evolution/skill-evolution`：保留为历史学习证据、评测草案和排查材料来源，不再作为正式 skill 创建和修改的主入口。
 
 ## 使用原则
 
@@ -34,5 +33,5 @@ skills/
 - 每个技能只做一类事。
 - 学习记录、沉淀规则材料和技能版本分开。
 - 样例学习不能直接污染正式技能。
-- 用户主动技能学习或明确要求改 skill 时，由总控路由到 `05-evolution/skill-creator`，不要另造简化版技能创建器。
+- 用户主动技能学习或明确要求改 skill 时，由总控路由到 `05-evolution/skill-creator`，不要另造简化版技能创建器，也不要再走旧技能进化入口。
 - 总控技能只负责路由，不替代专业技能。

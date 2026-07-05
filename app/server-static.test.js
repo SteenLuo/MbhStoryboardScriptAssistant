@@ -124,27 +124,29 @@ test("server prompts no longer apply script level rules", () => {
   assert.doesNotMatch(serverSource, /B级本|A级本/);
 });
 
-test("explicit skill learning mode is handled locally through the bundled skill creator route", () => {
+test("explicit skill learning mode calls bundled skill creator instead of direct skill writes", () => {
   const chatSource = extractFunction("chatWithAssistant");
   const learningSource = extractFunction("handleLearningCompose");
+  const helperSource = extractFunction("applyAutonomousConversationLearning");
 
   assert.match(chatSource, /const explicitLearningMode = body\.learningMode === true/);
   assert.match(chatSource, /findLocalSkillRoute\("skill-creator"\)/);
   assert.doesNotMatch(chatSource, /routeLocalSkill\("样例 学习 入库 技能学习"\)/);
   assert.match(chatSource, /if \(explicitLearningMode\)/);
   assert.match(chatSource, /handleLearningCompose/);
+  assert.match(learningSource, /loadLocalSkillContext\(BUSINESS_ROOT,\s*selectedRoute/);
+  assert.match(learningSource, /deepseekChat/);
+  assert.match(learningSource, /writeSkillCreatorTaskRecord/);
   assert.match(learningSource, /writeConversationLearningRecord/);
-  assert.match(learningSource, /applyAutonomousConversationLearning/);
-  assert.match(learningSource, /local-learning/);
-  assert.match(learningSource, /已记录为技能学习材料/);
+  assert.doesNotMatch(learningSource, /applyAutonomousConversationLearning/);
   assert.match(learningSource, /原版 skill-creator/);
   assert.match(learningSource, /已保存到学习资料库/);
-  assert.match(learningSource, /已写入分镜 skill 学习沉淀/);
-  assert.match(learningSource, /下一次分镜生成会读取/);
+  assert.doesNotMatch(learningSource, /已写入分镜 skill 学习沉淀/);
+  assert.doesNotMatch(learningSource, /下一次分镜生成会读取/);
   assert.doesNotMatch(learningSource, /不会自动改写生成规则/);
   assert.doesNotMatch(learningSource, /沉淀到稳定 skill/);
   assert.doesNotMatch(learningSource, /已同步到当前规则/);
-  assert.doesNotMatch(learningSource, /deepseekChat/);
+  assert.doesNotMatch(helperSource, /writeSkillLearningReference/);
 });
 
 test("chat composer can force dedicated review and adaptation skills", () => {
@@ -257,19 +259,21 @@ test("learning correction API writes referenced correction events without blind 
   assert.match(correctionSource, /buildLearningLibrary/);
 });
 
-test("chat flow saves explicit learning into the learning event pipeline without generation", () => {
+test("chat flow saves explicit learning into the learning event pipeline without direct skill writes", () => {
   const chatSource = extractFunction("chatWithAssistant");
   const helperSource = extractFunction("applyAutonomousConversationLearning");
 
   assert.match(serverSource, /extractExplicitRuleLearningInput/);
   assert.doesNotMatch(helperSource, /learnExplicitRule/);
   assert.match(helperSource, /appendLearningEvent/);
-  assert.match(helperSource, /writeSkillLearningReference/);
-  assert.match(helperSource, /const landingType = skillReference\.applied \? "skill-reference" : "skill-draft"/);
-  assert.match(helperSource, /landingType,/);
+  assert.doesNotMatch(helperSource, /writeSkillLearningReference/);
+  assert.doesNotMatch(serverSource, /function writeSkillLearningReference/);
+  assert.doesNotMatch(serverSource, /学习沉淀要求\.md/);
+  assert.match(helperSource, /landingType:\s*"skill-draft"/);
+  assert.match(helperSource, /landingType:\s*"skill-draft"/);
   assert.match(chatSource, /applyAutonomousConversationLearning/);
   assert.match(helperSource, /assistantMessage\.learningEvent/);
-  assert.match(helperSource, /assistantMessage\.skillReferencePath/);
+  assert.doesNotMatch(helperSource, /assistantMessage\.skillReferencePath/);
 });
 
 test("explicit skill learning uses bundled skill creator route", () => {

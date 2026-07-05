@@ -887,6 +887,8 @@ async function chatWithAssistant(body) {
       userMessage,
       chatIntent,
       skillRoute,
+      provider: body.provider,
+      model: body.model,
     });
     conversation.messages.push(learningResult.assistantMessage);
     await saveConversation(conversation);
@@ -996,13 +998,34 @@ async function chatWithAssistant(body) {
   };
 }
 
-async function handleLearningCompose({ conversation, userMessage, chatIntent, skillRoute }) {
-  const assistantMessage = buildAssistantMessage({
-    content: "正在写入本地学习资料库...",
-    model: "local-learning",
-    chatIntent,
-    skillRoute,
+async function handleLearningCompose({ conversation, userMessage, chatIntent, skillRoute, provider, model }) {
+  const selectedRoute = skillRoute || findLocalSkillRoute("skill-creator");
+  const skillContext = await loadLocalSkillContext(BUSINESS_ROOT, selectedRoute);
+  const appSettings = await readAppSettings();
+  const result = await deepseekChat({
+    provider,
+    model,
+    messages: [
+      { role: "system", content: buildChatSystemPrompt(appSettings.appName) },
+      { role: "system", content: skillContext.prompt },
+      { role: "system", content: buildSkillCreatorLearningPrompt() },
+      { role: "user", content: messageContentForModel(userMessage) },
+    ],
+    temperature: 0.3,
   });
+
+  const assistantMessage = buildAssistantMessage({
+    ...result,
+    chatIntent,
+    skillRoute: {
+      id: skillContext.id,
+      name: skillContext.name,
+      path: skillContext.path,
+      files: skillContext.files,
+      skillRulesUsed: skillContext.skillRulesUsed || [],
+    },
+  });
+
   try {
     const learningRecord = await writeConversationLearningRecord(BUSINESS_ROOT, {
       conversation,
@@ -1015,32 +1038,59 @@ async function handleLearningCompose({ conversation, userMessage, chatIntent, sk
   } catch (error) {
     assistantMessage.learningError = error.message || String(error);
   }
+
+  let learningEvent = null;
+  let skillCreatorTask = null;
   try {
-    await applyAutonomousConversationLearning({
+    const taskDraft = buildSkillCreatorTaskDraft({
       conversation,
       userMessage,
       assistantMessage,
+      skillContext,
     });
+    const now = new Date().toISOString();
+    learningEvent = await appendLearningEvent(BUSINESS_ROOT, {
+      ...taskDraft.learningInput,
+      eventId: `skill-creator-${conversationId()}`,
+      internalStatus: "landed",
+      jobStatus: "completed",
+      landingType: "skill-draft",
+      landingIds: [taskDraft.relativePath],
+      skillId: taskDraft.skillId,
+      generationProof: {
+        proofStatus: "not_applicable",
+        claimText: "已生成 skill-creator 任务，完成修改和验证前不会影响生成。",
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+    skillCreatorTask = await writeSkillCreatorTaskRecord(BUSINESS_ROOT, {
+      ...taskDraft,
+      sourceEventIds: [learningEvent.eventId],
+      createdAt: now,
+      updatedAt: now,
+    });
+    assistantMessage.learningEvent = learningEvent.eventId;
+    assistantMessage.learningEventStatus = "已保存";
+    assistantMessage.skillCreatorTaskPath = skillCreatorTask.relativePath;
   } catch (error) {
     assistantMessage.learningError = error.message || String(error);
   }
 
   const lines = ["已记录为技能学习材料。"];
-  if (skillRoute?.id === "skill-creator") {
-    lines.push("本次由原版 skill-creator 路由承接；总控负责判断何时调用，学习资料库负责留痕和纠错。");
-  }
+  lines.push("本次由原版 skill-creator 生成技能修改任务；完成文件修改和验证前不会影响生成。");
   if (assistantMessage.learningRecord) {
     lines.push(`本地记录：${assistantMessage.learningRecord}`);
   }
-  if (assistantMessage.skillReferencePath) {
-    lines.push(`已写入分镜 skill 学习沉淀：${assistantMessage.skillReferencePath}`);
-    lines.push("下一次分镜生成会读取这条学习沉淀；如果输出仍不符合，可以从学习资料库带引用纠正。");
-  } else {
-    lines.push("已保存到学习资料库；这条内容未自动写入分镜 skill，需要人工整理后再影响生成。");
+  if (assistantMessage.skillCreatorTaskPath) {
+    lines.push(`skill-creator 任务：${assistantMessage.skillCreatorTaskPath}`);
   }
+  lines.push("已保存到学习资料库；这条内容不会绕过 skill-creator 直接写入正式技能。");
   if (assistantMessage.learningError) {
     lines.push(`学习记录异常：${assistantMessage.learningError}`);
   }
+  lines.push("");
+  lines.push(result.content);
   assistantMessage.content = lines.join("\n");
   return { assistantMessage };
 }
@@ -1052,8 +1102,7 @@ async function applyAutonomousConversationLearning({ conversation, userMessage, 
     assistantMessage,
   });
   if (!learningInput) return null;
-  const skillReference = await writeSkillLearningReference(BUSINESS_ROOT, learningInput);
-  const landingType = skillReference.applied ? "skill-reference" : "skill-draft";
+  const targetSkillId = inferTargetSkillIdForLearning(learningInput);
   const now = new Date().toISOString();
   const event = await appendLearningEvent(BUSINESS_ROOT, {
     ...learningInput,
@@ -1062,72 +1111,109 @@ async function applyAutonomousConversationLearning({ conversation, userMessage, 
     conflictKey: inferSkillLearningConflictKey(learningInput),
     internalStatus: "landed",
     jobStatus: "completed",
-    landingType,
-    landingIds: skillReference.relativePath ? [skillReference.relativePath] : [],
-    skillId: skillReference.skillId,
-    generationProof: skillReference.applied
-      ? {
-        proofStatus: "pending_first_hit",
-        claimText: "已写入分镜 skill 学习沉淀，下一次分镜生成会读取；是否执行成功以输出为准。",
-      }
-      : {
-        proofStatus: "not_applicable",
-        claimText: "已保存为学习资料，但尚未写入生成会读取的 skill 位置。",
-      },
+    landingType: "skill-draft",
+    landingIds: [],
+    skillId: targetSkillId,
+    generationProof: {
+      proofStatus: "not_applicable",
+      claimText: "已保存为 skill-creator 候选任务；未修改和验证正式技能前不会影响生成。",
+    },
     createdAt: now,
     updatedAt: now,
   });
   assistantMessage.learningEvent = event.eventId;
-  assistantMessage.learningEventStatus = skillReference.applied ? "已影响生成" : "已保存";
-  if (skillReference.relativePath) assistantMessage.skillReferencePath = skillReference.relativePath;
-  return { event, skillReference };
+  assistantMessage.learningEventStatus = "已保存";
+  return { event };
 }
 
-async function writeSkillLearningReference(root, learningInput) {
-  if (String(learningInput?.capability || "") !== "storyboard") {
-    return { applied: false, skillId: "", relativePath: "" };
-  }
-  const relativePath = "skills/03-storyboard/storyboard-generate/references/学习沉淀要求.md";
-  const targetPath = path.join(root, relativePath);
-  const ruleText = normalizeSkillLearningRuleText(learningInput);
-  if (!ruleText) return { applied: false, skillId: "", relativePath: "" };
-
-  await fsp.mkdir(path.dirname(targetPath), { recursive: true });
-  const header = [
-    "# 分镜技能学习沉淀要求",
-    "",
-    "以下规则来自用户在技能学习入口中的明确学习要求，已进入分镜生成上下文。",
-    "这些规则只能补充分镜生成行为，不得改变既有分镜字段格式。",
-    "",
-    "## 已沉淀要求",
-    "",
+function buildSkillCreatorLearningPrompt() {
+  return [
+    "你正在产品内承接“技能学习”。必须按原版 skill-creator 的方法判断是否需要创建或修改 skill。",
+    "当前网页模型不能直接操作文件系统，因此不要声称已经修改正式 skill 文件。",
+    "请输出：1. 学习结论；2. 建议修改的 skill；3. 建议修改的文件；4. SKILL.md/references/scripts/assets 的修改要点；5. 验证方式；6. 不影响生成的说明。",
+    "如果用户内容不足以改 skill，明确说明还缺什么证据或样例。",
   ].join("\n");
-  const existing = fs.existsSync(targetPath) ? await fsp.readFile(targetPath, "utf8") : "";
-  const nextLine = `- ${ruleText}`;
-  if (!existing.trim()) {
-    await fsp.writeFile(targetPath, `${header}${nextLine}\n`, "utf8");
-  } else if (!existing.includes(ruleText)) {
-    const needsNewline = existing.endsWith("\n") ? "" : "\n";
-    await fsp.writeFile(targetPath, `${existing}${needsNewline}${nextLine}\n`, "utf8");
-  }
-  return { applied: true, skillId: "storyboard-generate", relativePath };
 }
 
-function normalizeSkillLearningRuleText(learningInput) {
-  const raw = String(learningInput?.summary || learningInput?.rawTrigger || "").trim();
-  if (!raw) return "";
-  const mentionsDialogueLineCount = /镜号/.test(raw) && /台词/.test(raw) && /一行|只能有一行|第二行|多行/.test(raw);
-  const mentionsDialogueLength = /台词|对白/.test(raw) && /20|二十|字|长度|超过|超出/.test(raw);
-  if (mentionsDialogueLineCount && mentionsDialogueLength) {
-    return "每个镜号只能有一行台词字段；台词超过 20 个字或需要分句时，必须拆成新的连续镜号，不得在同一镜号下写第二行台词。";
-  }
-  if (mentionsDialogueLineCount) {
-    return "每个镜号只能有一行台词字段，不得在同一镜号下写第二行台词。";
-  }
-  if (mentionsDialogueLength) {
-    return "台词超过 20 个字时，必须拆成新的连续镜号。";
-  }
-  return raw.replace(/\s+/g, " ").slice(0, 240);
+function buildSkillCreatorTaskDraft({ conversation, userMessage, assistantMessage, skillContext }) {
+  const learningInput = extractExplicitRuleLearningInput({ conversation, userMessage, assistantMessage }) || {
+    rawTrigger: String(userMessage?.content || ""),
+    summary: String(userMessage?.content || "").slice(0, 240),
+    capability: inferCapabilityForSkillCreatorTask(String(userMessage?.content || "")),
+    sourceType: "conversation",
+    sourceEventIds: [],
+    landingIds: [],
+    outputId: String(assistantMessage?.outputId || assistantMessage?.id || ""),
+    projectId: String(conversation?.projectId || ""),
+    canvasId: String(conversation?.canvasId || userMessage?.canvasId || ""),
+    conversationId: String(conversation?.id || ""),
+    learningMode: "overall",
+    tokenUsage: assistantMessage?.usage || null,
+  };
+  const taskId = `task-${conversationId()}`;
+  const skillId = inferTargetSkillIdForLearning(learningInput);
+  const relativePath = `learning/skill-creator-tasks/skill-creator-task-${taskId}.json`;
+  return {
+    taskId,
+    relativePath,
+    skillId,
+    title: String(learningInput.summary || learningInput.rawTrigger || "技能创建任务").slice(0, 60),
+    summary: String(learningInput.summary || learningInput.rawTrigger || ""),
+    creatorOutput: String(assistantMessage?.content || ""),
+    proposedFiles: proposedSkillFilesForTask(skillId, skillContext),
+    relatedRecordIds: [],
+    learningInput,
+  };
+}
+
+async function writeSkillCreatorTaskRecord(root, task) {
+  const relativePath = task.relativePath || `learning/skill-creator-tasks/skill-creator-task-${task.taskId}.json`;
+  const targetPath = path.join(root, relativePath);
+  await fsp.mkdir(path.dirname(targetPath), { recursive: true });
+  const record = {
+    taskId: task.taskId,
+    title: task.title,
+    skillId: task.skillId,
+    status: "saved",
+    summary: task.summary,
+    creatorOutput: task.creatorOutput,
+    proposedFiles: task.proposedFiles || [],
+    sourceEventIds: task.sourceEventIds || [],
+    relatedRecordIds: task.relatedRecordIds || [],
+    affectsGeneration: false,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+  };
+  await fsp.writeFile(targetPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  return { ...record, path: targetPath, relativePath };
+}
+
+function inferTargetSkillIdForLearning(learningInput = {}) {
+  const capability = String(learningInput.capability || "");
+  if (capability === "storyboard") return "storyboard-generate";
+  if (capability === "script") return "script-generate";
+  if (capability === "novel") return "novel-intake";
+  return "skill-creator";
+}
+
+function inferCapabilityForSkillCreatorTask(text) {
+  const raw = String(text || "");
+  if (/分镜|镜头|镜号|拆镜|storyboard/i.test(raw)) return "storyboard";
+  if (/剧本|script/i.test(raw)) return "script";
+  if (/小说|原文|章节|novel/i.test(raw)) return "novel";
+  return "general";
+}
+
+function proposedSkillFilesForTask(skillId, skillContext = {}) {
+  const files = Array.isArray(skillContext.files) ? skillContext.files : [];
+  const directSkillFiles = files.filter((file) => file.includes(`/${skillId}/`) || file.endsWith(`${skillId}/SKILL.md`));
+  if (directSkillFiles.length) return directSkillFiles;
+  const defaultBySkill = {
+    "storyboard-generate": ["skills/03-storyboard/storyboard-generate/SKILL.md"],
+    "script-generate": ["skills/02-script/script-generate/SKILL.md"],
+    "novel-intake": ["skills/01-input-analysis/novel-intake/SKILL.md"],
+  };
+  return defaultBySkill[skillId] || ["skills/README.md"];
 }
 
 function inferSkillLearningTopicKey(learningInput) {
@@ -2192,6 +2278,7 @@ async function learningStatus() {
     regressionReports: await countFiles("learning/regression-reports"),
     snapshots: await countFiles("learning/snapshots"),
     skillEvolutionReports: await countFiles("learning/skill-evolution-reports"),
+    skillCreatorTasks: await countFiles("learning/skill-creator-tasks"),
   };
 }
 

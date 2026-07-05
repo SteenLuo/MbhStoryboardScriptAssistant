@@ -400,6 +400,36 @@ test("buildLearningLibrary aggregates saved skill drafts without affecting gener
   assert.equal(library.accessIssues.some((issue) => issue.path?.endsWith("misc-report.json")), false);
 });
 
+test("buildLearningLibrary aggregates skill creator tasks without exposing legacy evolution drafts as active workflow", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-skill-creator-tasks-"));
+  await fsp.mkdir(path.join(root, "learning", "skill-creator-tasks"), { recursive: true });
+  await fsp.writeFile(path.join(root, "learning", "skill-creator-tasks", "skill-creator-task-task-a.json"), JSON.stringify({
+    taskId: "task-a",
+    skillId: "storyboard-generate",
+    title: "把分镜台词规则沉淀到正式 skill",
+    status: "saved",
+    sourceEventIds: ["event-a"],
+    relatedRecordIds: ["record-a"],
+    summary: "用户主动技能学习后，由 skill-creator 形成待执行任务。",
+    proposedFiles: ["skills/03-storyboard/storyboard-generate/SKILL.md"],
+    createdAt: "2026-07-05T12:00:00.000Z",
+    affectsGeneration: false,
+  }), "utf8");
+
+  const library = await buildLearningLibrary(root);
+  const task = library.skillItems.find((item) => item.recordId === "skill-creator-task:task-a");
+
+  assert.ok(task);
+  assert.strictEqual(task.skillId, "storyboard-generate");
+  assert.strictEqual(task.displayStatus, "已保存");
+  assert.strictEqual(task.generationImpactText, "暂不影响生成；需要执行 skill-creator 任务并验证后才可能进入正式技能。");
+  assert.strictEqual(task.nextStepText, "等待按 skill-creator 任务修改并验证；完成前不会写入生成上下文。");
+  assert.strictEqual(task.affectsGeneration, false);
+  assert.deepStrictEqual(task.sourceEventIds, ["event-a"]);
+  assert.deepStrictEqual(task.proposedFiles, ["skills/03-storyboard/storyboard-generate/SKILL.md"]);
+  assert.equal(library.impactItems.some((item) => item.recordId === "skill-creator-task:task-a"), false);
+});
+
 test("buildLearningLibrary reports malformed skill drafts as access issues while keeping skills visible", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-library-bad-skill-drafts-"));
   const draftDir = path.join(root, "learning", "skill-evolution-reports");

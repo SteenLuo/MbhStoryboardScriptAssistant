@@ -130,7 +130,7 @@ try {
     $lines.Add("")
     $lines.Add("下一步：")
     $lines.Add("")
-    if ($item.NextAction) { $lines.Add($item.NextAction) } else { $lines.Add("进入 skill-evolution 复核。") }
+    if ($item.NextAction) { $lines.Add($item.NextAction) } else { $lines.Add("进入 skill-creator 任务，由原版技能创建器判断是否修改正式 skill。") }
     $lines.Add("")
     $lines.Add("来源：``$($item.Source)``")
     $lines.Add("")

@@ -1,101 +1,138 @@
-{
-  "versionId": "initial-skills-v1",
-  "createdAt": "2026-07-05",
-  "source": "baselines/initial-skills",
-  "principle": "Generation rules are validation rules. Validation must be derived from the same skill prompt used for generation.",
-  "officialSkillCount": 9,
-  "learnedSkillItemCount": 0,
-  "defaultActiveHardRules": [],
-  "files": [
-    {
-      "path": "README.md",
-      "bytes": 628,
-      "sha256": "5ef95444195578239b5bec6561d58e77e56111f2c7e3522d41acdcf2c64ea5c0"
-    },
-    {
-      "path": "skills/00-orchestrator/mbh-workflow/SKILL.md",
-      "bytes": 4671,
-      "sha256": "8744a2b92acc2ecbdb75952fbfcb1cecf0f787a2447f38d03e494dd2e6ca61c4"
-    },
-    {
-      "path": "skills/01-input-analysis/novel-intake/references/输入整理规则.md",
-      "bytes": 2312,
-      "sha256": "3f67f299456bd9113c3de5dd9b2ab25b8b662f366163910f618cc49b39f03770"
-    },
-    {
-      "path": "skills/01-input-analysis/novel-intake/SKILL.md",
-      "bytes": 4641,
-      "sha256": "710e53d119fb3cc8fc4427138e4b4e3e7fd6f9d40cebd8d68aabd930149604f9"
-    },
-    {
-      "path": "skills/02-script/script-generate/references/AI漫剧剧本生成规则.md",
-      "bytes": 4752,
-      "sha256": "67c31b3dd8957912380e1f0a9f02b2287d96aa9eeabc9fb42ae16d522914b82f"
-    },
-    {
-      "path": "skills/02-script/script-generate/SKILL.md",
-      "bytes": 3045,
-      "sha256": "5ebac76960aecc20116cd0742fd4cce095654427fa2ec027b497b14be3f0f5fd"
-    },
-    {
-      "path": "skills/02-script/script-hard-issue-review/SKILL.md",
-      "bytes": 28240,
-      "sha256": "c13f42922447333a7ed12843168ac4d212ca660d94e01c9d45082ff4f90d6bfa"
-    },
-    {
-      "path": "skills/02-script/script-manju-adaptation-analysis/agents/openai.yaml",
-      "bytes": 305,
-      "sha256": "982040151d31c5852723a2f4bd36023f479c582df39010af9aa54885a133542a"
-    },
-    {
-      "path": "skills/02-script/script-manju-adaptation-analysis/SKILL.md",
-      "bytes": 12933,
-      "sha256": "e2e7f5c0a27f0ff00ff045ef18df09be6704f7f9837f7d30f47868b86d94bcf4"
-    },
-    {
-      "path": "skills/02-script/script-review-rewrite/references/剧本评审规则.md",
-      "bytes": 2765,
-      "sha256": "f92c28950b1e40a87e91f1f60d5d0f1da08d4411f3f341dab0ad92054d0c0f4b"
-    },
-    {
-      "path": "skills/02-script/script-review-rewrite/SKILL.md",
-      "bytes": 5830,
-      "sha256": "ff1a71e8c74b639ac19b1ebbeae3e1c474a63f79e1d3343e1f12d5ff01cc389d"
-    },
-    {
-      "path": "skills/03-storyboard/storyboard-generate/references/分镜生成规则.md",
-      "bytes": 7079,
-      "sha256": "e58a591c79892c5aa3e4ce1a7244b2d392ff0fe36eccc396254e3ff0a69aeaf7"
-    },
-    {
-      "path": "skills/03-storyboard/storyboard-generate/SKILL.md",
-      "bytes": 5163,
-      "sha256": "dd671b45755377e5c3997d416e765c6539059ced49d7471f381d9f845095ce8a"
-    },
-    {
-      "path": "skills/04-learning/sample-ingest/references/样例学习规则.md",
-      "bytes": 7285,
-      "sha256": "00d8dcd80c978256dc7b19292475287e479be2c9e88642181596c6e9c6214552"
-    },
-    {
-      "path": "skills/04-learning/sample-ingest/SKILL.md",
-      "bytes": 9628,
-      "sha256": "1b8c8a16c7aa293205b44e7cdbb95e597aedc15dd66f2347f30a99ff8fafeead"
-    },
-    {
-      "path": "skills/05-evolution/skill-evolution/references/技能进化规则.md",
-      "bytes": 4731,
-      "sha256": "aa56afd16b21e0f6f04baf31c2860196f27d896b2d406ea24f4dd840debd06db"
-    },
-    {
-      "path": "skills/05-evolution/skill-evolution/SKILL.md",
-      "bytes": 5113,
-      "sha256": "3a82176b558e945b79a96341301cd6adb1305b8aabc96ba9ba5348171b6a53d1"
-    },
-    {
-      "path": "skills/README.md",
-      "bytes": 1789,
-      "sha256": "8fab6b5811e743f5f1dc9948d98998b347134d2b688e52a31a5df4fb6f52ff4b"
-    }
-  ]
+﻿{
+    "versionId":  "initial-skills-v1",
+    "createdAt":  "2026-07-05",
+    "source":  "baselines/initial-skills",
+    "principle":  "Generation rules are validation rules. Validation must be derived from the same skill prompt used for generation.",
+    "officialSkillCount":  9,
+    "learnedSkillItemCount":  0,
+    "defaultActiveHardRules":  [
+
+                               ],
+    "files":  [
+                  {
+                      "path":  "README.md",
+                      "bytes":  628,
+                      "sha256":  "5ef95444195578239b5bec6561d58e77e56111f2c7e3522d41acdcf2c64ea5c0"
+                  },
+                  {
+                      "path":  "skills/00-orchestrator/mbh-workflow/SKILL.md",
+                      "bytes":  6111,
+                      "sha256":  "fef06003cbdcffa531be6141237560bfb42b4d72f674d0f02028c545380f5826"
+                  },
+                  {
+                      "path":  "skills/01-input-analysis/novel-intake/references/输入整理规则.md",
+                      "bytes":  2312,
+                      "sha256":  "3f67f299456bd9113c3de5dd9b2ab25b8b662f366163910f618cc49b39f03770"
+                  },
+                  {
+                      "path":  "skills/01-input-analysis/novel-intake/SKILL.md",
+                      "bytes":  4641,
+                      "sha256":  "710e53d119fb3cc8fc4427138e4b4e3e7fd6f9d40cebd8d68aabd930149604f9"
+                  },
+                  {
+                      "path":  "skills/02-script/script-generate/references/AI漫剧剧本生成规则.md",
+                      "bytes":  4752,
+                      "sha256":  "67c31b3dd8957912380e1f0a9f02b2287d96aa9eeabc9fb42ae16d522914b82f"
+                  },
+                  {
+                      "path":  "skills/02-script/script-generate/SKILL.md",
+                      "bytes":  3045,
+                      "sha256":  "5ebac76960aecc20116cd0742fd4cce095654427fa2ec027b497b14be3f0f5fd"
+                  },
+                  {
+                      "path":  "skills/02-script/script-hard-issue-review/SKILL.md",
+                      "bytes":  28240,
+                      "sha256":  "c13f42922447333a7ed12843168ac4d212ca660d94e01c9d45082ff4f90d6bfa"
+                  },
+                  {
+                      "path":  "skills/02-script/script-manju-adaptation-analysis/agents/openai.yaml",
+                      "bytes":  305,
+                      "sha256":  "982040151d31c5852723a2f4bd36023f479c582df39010af9aa54885a133542a"
+                  },
+                  {
+                      "path":  "skills/02-script/script-manju-adaptation-analysis/SKILL.md",
+                      "bytes":  12933,
+                      "sha256":  "e2e7f5c0a27f0ff00ff045ef18df09be6704f7f9837f7d30f47868b86d94bcf4"
+                  },
+                  {
+                      "path":  "skills/02-script/script-review-rewrite/references/剧本评审规则.md",
+                      "bytes":  2765,
+                      "sha256":  "f92c28950b1e40a87e91f1f60d5d0f1da08d4411f3f341dab0ad92054d0c0f4b"
+                  },
+                  {
+                      "path":  "skills/02-script/script-review-rewrite/SKILL.md",
+                      "bytes":  5830,
+                      "sha256":  "ff1a71e8c74b639ac19b1ebbeae3e1c474a63f79e1d3343e1f12d5ff01cc389d"
+                  },
+                  {
+                      "path":  "skills/03-storyboard/storyboard-generate/references/分镜生成规则.md",
+                      "bytes":  7079,
+                      "sha256":  "e58a591c79892c5aa3e4ce1a7244b2d392ff0fe36eccc396254e3ff0a69aeaf7"
+                  },
+                  {
+                      "path":  "skills/03-storyboard/storyboard-generate/SKILL.md",
+                      "bytes":  5163,
+                      "sha256":  "dd671b45755377e5c3997d416e765c6539059ced49d7471f381d9f845095ce8a"
+                  },
+                  {
+                      "path":  "skills/04-learning/sample-ingest/references/样例学习规则.md",
+                      "bytes":  7292,
+                      "sha256":  "d013604243d0474dcf641059221b6e991d4a44c40513a61a7f23e1fe96309b3d"
+                  },
+                  {
+                      "path":  "skills/04-learning/sample-ingest/SKILL.md",
+                      "bytes":  9640,
+                      "sha256":  "10b304185114c2808ea54f75b0ccf8eaba45808da0002dd7fcbc39cc834fd2e2"
+                  },
+                  {
+                      "path":  "skills/05-evolution/skill-creator/agents/openai.yaml",
+                      "bytes":  188,
+                      "sha256":  "b750627cdd588fdbb5b46e854d3384d1a504fad3b8ed73ca5d7ead3804df78b6"
+                  },
+                  {
+                      "path":  "skills/05-evolution/skill-creator/assets/skill-creator.png",
+                      "bytes":  1563,
+                      "sha256":  "a4024b0306ddb05847e1012879d37aaf1e658205199da596f5145ed7a88d9162"
+                  },
+                  {
+                      "path":  "skills/05-evolution/skill-creator/assets/skill-creator-small.svg",
+                      "bytes":  1322,
+                      "sha256":  "edb19a0c59f9a1b5253b9af6d2f9f03cac27b2fe6a0275ebccbbdbff07891a1a"
+                  },
+                  {
+                      "path":  "skills/05-evolution/skill-creator/license.txt",
+                      "bytes":  11560,
+                      "sha256":  "3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5"
+                  },
+                  {
+                      "path":  "skills/05-evolution/skill-creator/references/openai_yaml.md",
+                      "bytes":  2405,
+                      "sha256":  "7039d465b05342cbacf861f08d20192ab1eeee112bc5d8ff0fb66234756887a9"
+                  },
+                  {
+                      "path":  "skills/05-evolution/skill-creator/scripts/generate_openai_yaml.py",
+                      "bytes":  6845,
+                      "sha256":  "9ea002c57657e169b1bddcae227e55a5d87c43735da6d87cf682b3e216abb84b"
+                  },
+                  {
+                      "path":  "skills/05-evolution/skill-creator/scripts/init_skill.py",
+                      "bytes":  15002,
+                      "sha256":  "50281d4b53c73f6ffa1e98adf1ee9fcd55d4854970f24513e33da65f073f74be"
+                  },
+                  {
+                      "path":  "skills/05-evolution/skill-creator/scripts/quick_validate.py",
+                      "bytes":  3394,
+                      "sha256":  "5347a0a09cfb546bba1c0d1a30dae0a233d9a05f57bd4e7877155c588bcdabf7"
+                  },
+                  {
+                      "path":  "skills/05-evolution/skill-creator/SKILL.md",
+                      "bytes":  22463,
+                      "sha256":  "2940e08d49e5197453e58a4387d14cb07101b97911c992ef75c8289e0a1734c0"
+                  },
+                  {
+                      "path":  "skills/README.md",
+                      "bytes":  1997,
+                      "sha256":  "5378ab71af65ead4fc512f62a5b359877f5834e07df64103bc5cca4defe076e0"
+                  }
+              ]
 }

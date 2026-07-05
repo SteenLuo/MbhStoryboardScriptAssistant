@@ -46,12 +46,20 @@ test("routeLocalSkill selects manju adaptation analysis for adaptation requests"
 test("routeLocalSkill selects bundled skill creator for skill creation and modification requests", async () => {
   const createRoute = routeLocalSkill("请创建一个新的分镜质量检查 skill");
   const updateRoute = routeLocalSkill("修改分镜生成 SKILL.md，并给它增加 references");
+  const improveRoute = routeLocalSkill("请改进技能");
+  const putRuleRoute = routeLocalSkill("这个规则补进技能里");
+  const optimizeRoute = routeLocalSkill("优化规则");
   const directRoute = findLocalSkillRoute("skill-creator");
 
   assert.strictEqual(createRoute.id, "skill-creator");
   assert.strictEqual(updateRoute.id, "skill-creator");
+  assert.strictEqual(improveRoute.id, "skill-creator");
+  assert.strictEqual(putRuleRoute.id, "skill-creator");
+  assert.strictEqual(optimizeRoute.id, "skill-creator");
   assert.strictEqual(directRoute.name, "技能创建");
   assert.strictEqual(directRoute.path, "skills/05-evolution/skill-creator");
+  assert.strictEqual(findLocalSkillRoute("skill-evolution"), null);
+  await assert.rejects(fsp.access(path.join(ROOT, "skills/05-evolution/skill-evolution/SKILL.md")));
 
   const context = await loadLocalSkillContext(ROOT, directRoute);
   assert.match(context.prompt, /# Skill Creator/);
@@ -175,8 +183,8 @@ test("pending skill evolution drafts stay out of generated local skill context a
   assert.ok(!context.files.some((file) => file.includes("skill-evolution-draft")));
 });
 
-test("New-SkillEvolutionDraft writes draft metadata without touching official skills or skill index", async () => {
-  const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-skill-draft-script-"));
+test("New-SkillCreatorTask writes task metadata without touching official skills or skill index", async () => {
+  const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-skill-creator-task-script-"));
   const snapshotDir = path.join(tempRoot, "learning/snapshots");
   const skillDir = path.join(tempRoot, "skills/03-storyboard/storyboard-generate");
   await fsp.mkdir(snapshotDir, { recursive: true });
@@ -208,7 +216,7 @@ test("New-SkillEvolutionDraft writes draft metadata without touching official sk
   await fsp.writeFile(path.join(tempRoot, "learning/evals/eval-alpha.md"), "# Eval alpha\n", "utf8");
   await fsp.writeFile(path.join(tempRoot, "learning/conversation-records/event-alpha.md"), "# Event alpha\n", "utf8");
 
-  const scriptPath = path.join(ROOT, "tools/New-SkillEvolutionDraft.ps1");
+  const scriptPath = path.join(ROOT, "tools/New-SkillCreatorTask.ps1");
   const { stdout } = await execFileAsync("powershell", [
     "-NoProfile",
     "-ExecutionPolicy",
@@ -224,20 +232,26 @@ test("New-SkillEvolutionDraft writes draft metadata without touching official sk
 
   const metadataPath = path.join(
     tempRoot,
-    "learning/skill-evolution-reports/skill-evolution-draft-2026-07-04.json",
+    "learning/skill-creator-tasks/skill-creator-task-2026-07-04.json",
   );
   const metadata = JSON.parse(await fsp.readFile(metadataPath, "utf8"));
 
   assert.match(stdout, /JsonPath/);
-  assert.strictEqual(metadata.skillId, "skill-evolution");
-  assert.deepStrictEqual(metadata.relatedRuleIds, ["rule-alpha"]);
-  assert.deepStrictEqual(metadata.relatedEvalResultIds, ["eval-alpha"]);
-  assert.deepStrictEqual(metadata.sourceEventIds, ["event-alpha"]);
-  assert.match(metadata.diffSummary, /Draft only/);
-  assert.strictEqual(metadata.humanConfirmationStatus, "pending");
-  assert.strictEqual(metadata.publishAllowed, false);
+  assert.strictEqual(metadata.taskId, "skill-creator-task-2026-07-04");
+  assert.strictEqual(metadata.skillId, "skill-creator");
+  assert.match(metadata.summary, /原版 skill-creator/);
+  assert.deepStrictEqual(metadata.proposedFiles, [
+    "skills/*/SKILL.md",
+    "skills/*/references/",
+    "skills/*/scripts/",
+    "skills/*/assets/",
+  ]);
+  assert.strictEqual(metadata.evidenceCounts.candidateRules, 1);
+  assert.strictEqual(metadata.evidenceCounts.evalFiles, 1);
+  assert.strictEqual(metadata.evidenceCounts.conversationRecords, 1);
   assert.strictEqual(metadata.affectsGeneration, false);
   assert.strictEqual(await fsp.readFile(officialSkillPath, "utf8"), officialSkillText);
+  await fsp.access(path.join(tempRoot, "learning/skill-creator-tasks/skill-creator-task-2026-07-04.md"));
   await assert.rejects(fsp.access(path.join(tempRoot, "learning/skill-index.json")));
-  await assert.rejects(fsp.access(path.join(tempRoot, "skills/skill-evolution/SKILL.md")));
+  await assert.rejects(fsp.access(path.join(tempRoot, "skills/skill-creator/SKILL.md")));
 });

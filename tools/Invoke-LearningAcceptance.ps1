@@ -102,7 +102,7 @@ function New-MinimalSkillFixtures {
     'skills/02-script/script-review-rewrite',
     'skills/03-storyboard/storyboard-generate',
     'skills/04-learning/sample-ingest',
-    'skills/05-evolution/skill-evolution'
+    'skills/05-evolution/skill-creator'
   )
 
   foreach ($relative in $skillPaths) {

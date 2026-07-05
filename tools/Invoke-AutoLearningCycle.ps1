@@ -19,7 +19,7 @@ $taskDraft = & (Join-Path $toolsPath "New-M4TaskDraft.ps1") -Root $rootPath.Path
 $conversationCandidates = & (Join-Path $toolsPath "New-CandidateRulesFromConversation.ps1") -Root $rootPath.Path -Date $Date -Force:$Force
 $regressionTask = & (Join-Path $toolsPath "New-RegressionEvalTask.ps1") -Root $rootPath.Path -Date $Date -Force:$Force
 $snapshot = & (Join-Path $toolsPath "New-LearningSnapshot.ps1") -Root $rootPath.Path -OutDir (Join-Path $rootPath.Path "learning/snapshots") -Date $Date -Force:$Force
-$evolutionDraft = & (Join-Path $toolsPath "New-SkillEvolutionDraft.ps1") -Root $rootPath.Path -Date $Date -Force:$Force
+$skillCreatorTask = & (Join-Path $toolsPath "New-SkillCreatorTask.ps1") -Root $rootPath.Path -Date $Date -Force:$Force
 $regressionCount = 0
 $regressionDir = Join-Path $rootPath.Path "learning/regression-reports"
 if (Test-Path -LiteralPath $regressionDir) {
@@ -39,7 +39,7 @@ if (Test-Path -LiteralPath $conversationRecordDir) {
   RegressionEvalTask = $regressionTask.TaskPath
   RegressionEvalTasks = @($regressionTask.Tasks)
   LearningSnapshot = $snapshot.ReportPath
-  SkillEvolutionDraft = $evolutionDraft.DraftPath
+  SkillCreatorTask = $skillCreatorTask.TaskPath
   TaskCount = $taskDraft.TaskCount
   HighPriorityTaskCount = $taskDraft.HighPriorityCount
   ConversationCandidateCount = $conversationCandidates.CandidateCount

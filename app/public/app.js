@@ -6560,6 +6560,25 @@ function renderSkillLibraryItem(skill) {
     `;
     return item;
   }
+  if (skill.recordType === "skill-creator-task") {
+    const statusText = formatSkillDraftStatus(skill.taskStatus || skill.status);
+    const proposedFiles = Array.isArray(skill.proposedFiles) && skill.proposedFiles.length
+      ? skill.proposedFiles.slice(0, 6).join("、")
+      : "等待 skill-creator 判断具体文件";
+    item.className = "learning-library-item status-已保存";
+    item.innerHTML = `
+      <div class="learning-library-item-head">
+        <strong>${escapeHtml(skill.name || "skill-creator 任务")}</strong>
+        <span>${escapeHtml(skill.actionLabel || statusText || "等待执行")}</span>
+      </div>
+      <p><b>目标技能：</b>${escapeHtml(skill.skillId || "待判断")}</p>
+      <p><b>是否影响生成：</b>${escapeHtml(skill.generationImpactText || "暂不影响生成；执行并验证后才可能进入正式技能。")}</p>
+      <p><b>下一步：</b>${escapeHtml(skill.nextStepText || "按 skill-creator 任务修改并验证。")}</p>
+      <p><b>摘要：</b>${escapeHtml(skill.diffSummary || "暂无摘要。")}</p>
+      <p><b>建议文件：</b>${escapeHtml(proposedFiles)}</p>
+    `;
+    return item;
+  }
   item.className = `learning-library-item${skill.exists ? "" : " missing"}`;
   const description = skill.description || "暂无技能摘要。";
   const instructions = skill.instructions || "未读取到技能说明。";
@@ -6673,7 +6692,7 @@ function formatSkillCategory(category) {
     "skills/02-script": "剧本能力",
     "skills/03-storyboard": "分镜能力",
     "skills/04-learning": "学习能力",
-    "skills/05-evolution": "技能创建与进化",
+    "skills/05-evolution": "技能创建",
   };
   if (!category) return "技能";
   return labels[category] || String(category).replace(/^skills\//, "技能 / ");

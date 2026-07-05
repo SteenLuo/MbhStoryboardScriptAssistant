@@ -55,7 +55,7 @@ try {
   $acceptedRules = Get-Files "learning/accepted-rules"
   $evalFiles = Get-Files "learning/evals"
   $evalTasks = Get-Files "learning/evals/tasks"
-  $skillEvolutionReports = Get-Files "learning/skill-evolution-reports"
+$skillCreatorTasks = Get-Files "learning/skill-creator-tasks"
   $regressionReports = Get-Files "learning/regression-reports"
   $conversationRecords = Get-Files "learning/conversation-records"
   $sampleReports = Get-Files "samples/_reports"
@@ -81,7 +81,7 @@ try {
   $lines.Add("")
   $lines.Add("生成日期：$Date")
   $lines.Add("")
-  $lines.Add("说明：本快照用于汇总当前学习资产和评测证据，帮助后续判断哪些规则可以继续观察、哪些规则可以进入技能进化。")
+$lines.Add("说明：本快照用于汇总当前学习资产和评测证据，帮助后续判断哪些资料可以继续观察、哪些资料应进入 skill-creator 任务。")
   $lines.Add("")
 
   $lines.Add("## 一、资产概览")
@@ -92,7 +92,7 @@ try {
   $lines.Add("| 已确认规则文件 | $($acceptedRules.Count) |")
   $lines.Add("| 评测文件 | $($evalFiles.Count) |")
 $lines.Add("| 评测任务卡 | $($evalTasks.Count) |")
-$lines.Add("| 技能进化报告 | $($skillEvolutionReports.Count) |")
+$lines.Add("| skill-creator 任务 | $($skillCreatorTasks.Count) |")
 $lines.Add("| 降质和回退记录 | $($regressionReports.Count) |")
 $lines.Add("| 对话学习记录 | $($conversationRecords.Count) |")
 $lines.Add("| 样例分拣 / 入库报告 | $($sampleReports.Count) |")
@@ -159,7 +159,7 @@ $lines.Add("| 样例分拣 / 入库报告 | $($sampleReports.Count) |")
   $lines.Add("")
   $lines.Add("- M4 已具备较完整的证据链：样例分拣、未知材料二次判断、运行记录、覆盖核对、正文对齐复核、题材规则证据评估。")
   $lines.Add("- 后续对话中的偏好、质量反馈、流程调整和反例，应先进入对话学习记录，再决定是否转成候选规则或降质记录。")
-  $lines.Add("- 如果出现降质和回退记录，后续技能进化必须优先处理降质风险。")
+  $lines.Add("- 如果出现降质和回退记录，后续 skill-creator 任务必须优先处理降质风险。")
   $lines.Add("- 经营逆袭、修仙玄幻、豪门强女主等题材规则仍应留在候选区，等待跨剧目样例补证据。")
   $lines.Add("- 跨题材基础规则已更适合进入正式技能，例如字段完整、部分对应、一对多关系、目标时长校准、历史噪声修正。")
   $lines.Add("")
@@ -170,7 +170,7 @@ $lines.Add("| 样例分拣 / 入库报告 | $($sampleReports.Count) |")
   $lines.Add("2. 对未知材料先写 ``unknown-material-review``，再决定是否进入 M4。")
   $lines.Add("3. 每完成一轮评测后，运行本工具生成新的学习快照。")
   $lines.Add("4. 每次对话结束前，如果本轮出现新偏好、质量反馈或可复用规则，运行 ``tools/New-ConversationLearningRecord.ps1``。")
-  $lines.Add("5. 由 ``skill-evolution`` 根据快照和证据评估决定是否修改正式技能。")
+  $lines.Add("5. 由原版 ``skill-creator`` 根据快照和证据评估决定是否修改正式技能。")
   $lines.Add("")
 
   Set-Content -LiteralPath $reportPath -Encoding UTF8 -Value ($lines -join "`r`n")

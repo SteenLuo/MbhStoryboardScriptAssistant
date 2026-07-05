@@ -273,7 +273,7 @@ try {
   $lines.Add("")
   $lines.Add("1. 对状态为待审的高优先级任务执行正文对齐或覆盖复核。")
   $lines.Add("2. 执行后写入 ``runs/``，再更新学习快照。")
-  $lines.Add("3. 由 ``New-SkillEvolutionDraft.ps1`` 生成技能进化草案。")
+  $lines.Add("3. 由 ``New-SkillCreatorTask.ps1`` 生成 skill-creator 任务。")
   $lines.Add("")
 
   Set-Content -LiteralPath $draftPath -Encoding UTF8 -Value ($lines -join "`r`n")

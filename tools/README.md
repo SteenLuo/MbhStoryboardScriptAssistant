@@ -92,17 +92,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\New-LearningSnapshot.
 - 候选规则和已确认规则入口。
 - 下一步建议。
 
-## New-SkillEvolutionDraft.ps1
+## New-SkillCreatorTask.ps1
 
-用途：基于最新学习快照生成技能进化草案，默认写入 `learning/skill-evolution-reports/skill-evolution-draft-日期.md`。
+用途：基于最新学习快照生成 skill-creator 待执行任务，默认写入 `learning/skill-creator-tasks/skill-creator-task-日期.md`。
 
 示例：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "tools\New-SkillEvolutionDraft.ps1" -Force
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\New-SkillCreatorTask.ps1" -Force
 ```
 
-草案只用于待审，不会自动修改正式技能。
+任务只用于交给原版 skill-creator 执行，不会自动修改正式技能。
 
 ## New-M4TaskDraft.ps1
 
@@ -118,7 +118,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\New-M4TaskDraft.ps1" 
 
 ## Invoke-AutoLearningCycle.ps1
 
-用途：材料投放后的无感学习入口。按顺序运行投放区扫描、M4 任务草案、学习快照、技能进化草案。
+用途：材料投放后的无感学习入口。按顺序运行投放区扫描、M4 任务草案、学习快照、skill-creator 任务。
 
 示例：
 
@@ -135,7 +135,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\Invoke-AutoLearningCy
 示例：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "tools\New-ConversationLearningRecord.ps1" -Title "对话学习应无感发生" -NeedLearning "是" -MaterialType "流程偏好" -QualitySignal "无明显变化" -LearningAction "候选规则" -Summary "用户希望后续对话结束时由系统自动判断是否需要学习，不要求用户主动触发。" -Evidence "用户明确说后续对话中进行学习，每次对话结束后判断是否需要总结或学习。" -NextAction "写入 sample-ingest 和 skill-evolution 的学习流程。" -Force
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\New-ConversationLearningRecord.ps1" -Title "对话学习应无感发生" -NeedLearning "是" -MaterialType "流程偏好" -QualitySignal "无明显变化" -LearningAction "候选规则" -Summary "用户希望后续对话结束时由系统自动判断是否需要学习，不要求用户主动触发。" -Evidence "用户明确说后续对话中进行学习，每次对话结束后判断是否需要总结或学习。" -NextAction "写入学习资料库，必要时生成 skill-creator 任务。" -Force
 ```
 
 普通问答不必生成记录；出现质量下降时，还要配合 `New-QualityRegressionRecord.ps1`。

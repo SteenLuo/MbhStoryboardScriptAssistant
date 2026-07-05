@@ -64,6 +64,8 @@ if (-not $KeepLearningData) {
     "candidate-rules\*.md",
     "candidate-rules\*.json",
     "skill-evolution-reports\*.json",
+    "skill-creator-tasks\*.json",
+    "skill-creator-tasks\*.md",
     "snapshots\learning-snapshot-*.md",
     "evidence\*.json",
     "samples\*.json",

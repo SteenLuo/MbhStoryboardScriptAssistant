@@ -429,9 +429,23 @@ test("skill library renderer shows saved non-generation draft cards and draft em
     description: "Create or update a skill",
     instructions: "# Skill Creator",
   });
+  const taskItem = renderSkillLibraryItem({
+    recordType: "skill-creator-task",
+    recordId: "skill-creator-task:task-a",
+    name: "把分镜规则交给 skill-creator",
+    skillId: "storyboard-generate",
+    taskStatus: "saved",
+    actionLabel: "等待执行",
+    affectsGeneration: false,
+    generationImpactText: "暂不影响生成；需要执行 skill-creator 任务并验证后才可能进入正式技能。",
+    nextStepText: "等待按 skill-creator 任务修改并验证；完成前不会写入生成上下文。",
+    diffSummary: "由主动技能学习生成的待执行任务。",
+    proposedFiles: ["skills/03-storyboard/storyboard-generate/SKILL.md"],
+  });
 
   assert.match(renderSkillLibrarySource, /暂无技能草案，正式技能仍可用/);
   assert.match(renderSkillItemSource, /recordType === "skill-draft"/);
+  assert.match(renderSkillItemSource, /recordType === "skill-creator-task"/);
   assert.match(renderSkillItemSource, /draftStatus/);
   assert.match(renderSkillItemSource, /humanConfirmationStatus/);
   assert.match(item.innerHTML, /技能草案/);
@@ -439,7 +453,13 @@ test("skill library renderer shows saved non-generation draft cards and draft em
   assert.match(item.innerHTML, /暂不影响生成/);
   assert.match(item.innerHTML, /等待人工确认/);
   assert.match(item.innerHTML, /diff 摘要/);
-  assert.match(officialItem.innerHTML, /技能创建与进化/);
+  assert.match(taskItem.innerHTML, /等待执行/);
+  assert.match(taskItem.innerHTML, /目标技能/);
+  assert.match(taskItem.innerHTML, /storyboard-generate/);
+  assert.match(taskItem.innerHTML, /暂不影响生成/);
+  assert.match(taskItem.innerHTML, /建议文件/);
+  assert.match(officialItem.innerHTML, /技能创建/);
+  assert.doesNotMatch(officialItem.innerHTML, /技能创建与进化/);
   assert.doesNotMatch(officialItem.innerHTML, /技能进化 · skills\/05-evolution\/skill-creator/);
 });
 

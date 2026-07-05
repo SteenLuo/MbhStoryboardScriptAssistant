@@ -9,12 +9,13 @@ const { FALLBACK_ROUTE, SKILL_ROUTES } = require("./localSkills");
 
 async function buildLearningLibrary(root) {
   const accessIssues = [];
-  const [events, evidenceResult, sampleResult, evalResult, skillDraftResult] = await Promise.all([
+  const [events, evidenceResult, sampleResult, evalResult, skillDraftResult, skillCreatorTaskResult] = await Promise.all([
     safeReadEvents(root, accessIssues),
     readMaterialRecords(path.join(root, "learning", "evidence"), "evidenceId", "evidence", accessIssues),
     readMaterialRecords(path.join(root, "learning", "samples"), "sampleId", "samples", accessIssues),
     readEvalRecords(path.join(root, "learning", "evals"), accessIssues),
     readSkillDraftRecords(path.join(root, "learning", "skill-evolution-reports"), accessIssues),
+    readSkillCreatorTaskRecords(path.join(root, "learning", "skill-creator-tasks"), accessIssues),
   ]);
 
   const eventRecords = buildPublicLearningRecords(events, accessIssues);
@@ -42,6 +43,7 @@ async function buildLearningLibrary(root) {
     ...skillRoutes(root, accessIssues)
       .map((route) => publicSkill(root, route, accessIssues))
       .filter(hasUsableRecordId),
+    ...skillCreatorTaskResult.records.map(publicSkillCreatorTask).filter(hasUsableRecordId),
     ...skillDraftResult.records.map(publicSkillDraft).filter(hasUsableRecordId),
   ]);
 
@@ -353,6 +355,36 @@ async function readSkillDraftRecords(dir, accessIssues) {
   return { records };
 }
 
+async function readSkillCreatorTaskRecords(dir, accessIssues) {
+  if (!fs.existsSync(dir)) return { records: [] };
+  let entries;
+  try {
+    entries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    accessIssues.push(accessIssue("skill-creator-tasks", error, dir));
+    return { records: [] };
+  }
+
+  const records = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== ".json") continue;
+    const file = path.join(dir, entry.name);
+    const taskLikeName = /^skill-creator-task-.*\.json$/i.test(entry.name);
+    if (!taskLikeName) continue;
+    try {
+      const parsed = JSON.parse(await fsp.readFile(file, "utf8"));
+      if (isValidSkillCreatorTaskRecord(parsed)) {
+        records.push(parsed);
+      } else {
+        accessIssues.push(accessIssue("skill-creator-tasks", new Error("Skill creator task JSON is missing taskId."), file, { count: 1 }));
+      }
+    } catch (error) {
+      accessIssues.push(accessIssue("skill-creator-tasks", error, file, { count: 1 }));
+    }
+  }
+  return { records };
+}
+
 function collectJsonFiles(dir, files) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const fullPath = path.join(dir, entry.name);
@@ -388,6 +420,15 @@ function isValidSkillDraftRecord(record) {
     typeof record === "object" &&
     !Array.isArray(record) &&
     normalizeString(record.draftId),
+  );
+}
+
+function isValidSkillCreatorTaskRecord(record) {
+  return Boolean(
+    record &&
+    typeof record === "object" &&
+    !Array.isArray(record) &&
+    normalizeString(record.taskId),
   );
 }
 
@@ -464,6 +505,44 @@ function publicSkillDraft(draft) {
       relatedEvalResultIds: normalizeStringArray(draft.relatedEvalResultIds),
       sourceEventIds: normalizeStringArray(draft.sourceEventIds),
       diffSummary,
+    },
+  };
+}
+
+function publicSkillCreatorTask(task) {
+  const taskId = normalizeString(task.taskId);
+  const skillId = normalizeString(task.skillId || task.targetSkillId || task.id || "skill-creator");
+  const summary = normalizeString(task.summary || task.title || task.creatorOutput);
+  return {
+    recordId: prefixedId("skill-creator-task", taskId),
+    recordType: "skill-creator-task",
+    id: taskId,
+    taskId,
+    skillId,
+    name: normalizeString(task.title) || "skill-creator 任务",
+    taskStatus: normalizeString(task.status || "saved"),
+    displayStatus: "已保存",
+    status: "已保存",
+    actionLabel: "等待执行",
+    affectsGeneration: false,
+    generationImpactText: "暂不影响生成；需要执行 skill-creator 任务并验证后才可能进入正式技能。",
+    nextStepText: "等待按 skill-creator 任务修改并验证；完成前不会写入生成上下文。",
+    sourceEventIds: normalizeStringArray(task.sourceEventIds),
+    relatedRecordIds: normalizeStringArray(task.relatedRecordIds),
+    proposedFiles: normalizeStringArray(task.proposedFiles),
+    diffSummary: summary,
+    creatorOutput: normalizeString(task.creatorOutput),
+    generatedAt: normalizeString(task.generatedAt || task.createdAt),
+    updatedAt: normalizeString(task.updatedAt || task.generatedAt || task.createdAt),
+    createdAt: normalizeString(task.createdAt || task.generatedAt),
+    readonly: true,
+    advanced: {
+      ...task,
+      taskId,
+      skillId,
+      sourceEventIds: normalizeStringArray(task.sourceEventIds),
+      relatedRecordIds: normalizeStringArray(task.relatedRecordIds),
+      proposedFiles: normalizeStringArray(task.proposedFiles),
     },
   };
 }

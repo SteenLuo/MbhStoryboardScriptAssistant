@@ -257,6 +257,7 @@ function New-CustomerPackage {
     "learning/regression-reports",
     "learning/snapshots",
     "learning/skill-evolution-reports",
+    "learning/skill-creator-tasks",
     "samples/_inbox",
     "samples/_reports"
   )
