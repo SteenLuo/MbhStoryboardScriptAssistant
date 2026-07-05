@@ -3,7 +3,6 @@ const test = require("node:test");
 
 const {
   applyStoryboardHardRuleValidation,
-  getApplicableStoryboardHardRules,
   isStoryboardValidationResolved,
   repairStoryboardDialogueIssues,
   storyboardContentFingerprint,
@@ -17,14 +16,26 @@ function countTextCharacters(text) {
   return Array.from(String(text || "")).filter((char) => /[\p{L}\p{N}]/u.test(char)).length;
 }
 
-test("validateStoryboardContent flags dialogue lines longer than 20 Chinese characters", () => {
+test("validateStoryboardContent does not check dialogue length by default", () => {
+  const content = [
+    "shot: 1",
+    "dialogue: Lin: The system will become more complete and the team will keep improving together",
+  ].join("\n");
+
+  const result = validateStoryboardContent(content);
+
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.issues.length, 0);
+});
+
+test("validateStoryboardContent checks dialogue length when enabled", () => {
   const content = [
     "镜号：8",
     "台词：林秀娥：会有更完善的制度，更好的待遇，更大的发展空间，希望大家继续努力。",
     "时长：5s",
   ].join("\n");
 
-  const result = validateStoryboardContent(content);
+  const result = validateStoryboardContent(content, { checkDialogueLength: true });
 
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.issues[0].lineNumber, 2);
@@ -40,7 +51,7 @@ test("validateStoryboardContent counts only the spoken dialogue after speaker la
     "时长：5s",
   ].join("\n");
 
-  const result = validateStoryboardContent(content);
+  const result = validateStoryboardContent(content, { checkDialogueLength: true });
 
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.issues.length, 0);
@@ -53,7 +64,7 @@ test("validateStoryboardContent does not count punctuation toward the 20 charact
     "时长：5s",
   ].join("\n");
 
-  const result = validateStoryboardContent(content);
+  const result = validateStoryboardContent(content, { checkDialogueLength: true });
 
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.issues.length, 0);
@@ -66,7 +77,7 @@ test("validateStoryboardContent reports the spoken dialogue without speaker labe
     "时长：5s",
   ].join("\n");
 
-  const result = validateStoryboardContent(content);
+  const result = validateStoryboardContent(content, { checkDialogueLength: true });
 
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.issues[0].dialogue, "会有更完善的制度，更好的待遇，更大的发展空间，希望大家继续努力。");
@@ -79,7 +90,7 @@ test("validateStoryboardContent flags markdown bold dialogue labels", () => {
     "**时长：** 3s",
   ].join("\n");
 
-  const result = validateStoryboardContent(content);
+  const result = validateStoryboardContent(content, { checkDialogueLength: true });
 
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.issues[0].lineNumber, 2);
@@ -120,7 +131,7 @@ test("splitDialogueLine keeps short dialogue unchanged", () => {
 
   assert.deepStrictEqual(lines, [{ text: "赵小满：那就这么定了。" }]);
 });
-test("validateStoryboardHardRules flags long dialogue through stable storyboard skill rules", () => {
+test("validateStoryboardHardRules skips stable skill rules by default", () => {
   const content = [
     "shot: 1",
     "dialogue: Lin: The system will become more complete and the team will keep improving together",
@@ -128,35 +139,59 @@ test("validateStoryboardHardRules flags long dialogue through stable storyboard 
 
   const result = validateStoryboardHardRules(content);
 
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.checked, false);
+  assert.strictEqual(result.issues.length, 0);
+});
+
+test("validateStoryboardHardRules flags long dialogue through stable storyboard skill rules when enabled", () => {
+  const content = [
+    "shot: 1",
+    "dialogue: Lin: The system will become more complete and the team will keep improving together",
+  ].join("\n");
+
+  const result = validateStoryboardHardRules(content, { useStableSkillRules: true });
+
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.issues[0].type, "dialogue-too-long");
   assert.strictEqual(result.issues[0].hardRuleId, "storyboard.dialogue.length");
   assert.match(result.issues[0].skillRulesUsedRefs[0], /stable-skill/);
-  assert.deepStrictEqual(result.issues[0].currentRulesUsedRefs, []);
 });
 
-test("validateStoryboardHardRules flags multiple speakers in the same shot when a speaker-count rule was used", () => {
+test("validateStoryboardHardRules flags multiple speakers through stable storyboard skill rules", () => {
   const content = [
     "镜号：10",
     "台词：王婶：昨天柳树沟那个赵媒婆又来了吧？",
     "台词：林秀娥：王婶，您家翠芬嫁人的时候收了三百还是三百五？",
     "时长：3s",
   ].join("\n");
-  const currentRulesUsed = [{
-    ruleId: "rule-one-speaker",
-    topicKey: "storyboard.dialogue.speaker-count",
-    conflictKey: "storyboard.dialogue.speaker-count.single-speaker",
-    sourceEventIds: ["event-one-speaker"],
-    status: "active",
-  }];
-
-  const result = validateStoryboardHardRules(content, { currentRulesUsed, includeCurrentRules: true });
+  const result = validateStoryboardHardRules(content, { useStableSkillRules: true });
 
   assert.strictEqual(result.ok, false);
-  assert.ok(result.appliedRules.some((rule) => rule.ruleId === "rule-one-speaker"));
+  assert.ok(result.appliedRules.some((rule) => rule.ruleId === "stable-skill-storyboard-single-speaker"));
   assert.strictEqual(result.issues[0].type, "dialogue-multiple-speakers");
   assert.strictEqual(result.issues[0].hardRuleId, "storyboard.dialogue.speaker-count");
   assert.deepStrictEqual(result.issues[0].speakers, ["王婶", "林秀娥"]);
+});
+
+test("validateStoryboardHardRules flags more than one dialogue field in the same shot", () => {
+  const content = [
+    "镜号：5",
+    "景别：近景",
+    "台词：旁白VO：我到这儿一年了。",
+    "台词：旁白VO：后半年在等机会。",
+    "时长：4s",
+  ].join("\n");
+
+  const result = validateStoryboardHardRules(content, { useStableSkillRules: true });
+
+  assert.strictEqual(result.ok, false);
+  assert.ok(result.appliedRules.some((rule) => rule.ruleId === "stable-skill-storyboard-dialogue-line-count"));
+  assert.ok(result.issues.some((issue) =>
+    issue.type === "dialogue-too-many-lines" &&
+    issue.hardRuleId === "storyboard.dialogue.line-count" &&
+    issue.dialogueLineCount === 2
+  ));
 });
 
 test("validateStoryboardSpeakerCount allows different speakers in different shots", () => {
@@ -251,28 +286,23 @@ test("applyStoryboardHardRuleValidation strips non-storyboard preamble and markd
   assert.match(result.content, /^镜号：1/m);
 });
 
-test("repairStoryboardDialogueIssues splits long dialogue into lines within the hard limit", () => {
+test("repairStoryboardDialogueIssues does not split long dialogue into same-shot lines", () => {
   const content = [
     "shot: 1",
     "dialogue: Lin: The system will become more complete and the team will keep improving together",
     "duration: 3s",
   ].join("\n");
-  const validation = validateStoryboardHardRules(content, {
-    currentRulesUsed: [{
-      ruleId: "rule-dialogue-length",
-      topicKey: "storyboard.dialogue.length",
-      conflictKey: "storyboard.dialogue.length",
-    }],
-  });
+  const validation = validateStoryboardHardRules(content, { useStableSkillRules: true });
 
   const repaired = repairStoryboardDialogueIssues(content, validation.issues);
-  const repairedValidation = validateStoryboardContent(repaired.content);
+  const repairedValidation = validateStoryboardContent(repaired.content, { checkDialogueLength: true });
 
-  assert.strictEqual(repaired.repaired, true);
-  assert.strictEqual(repairedValidation.ok, true);
+  assert.strictEqual(repaired.repaired, false);
+  assert.strictEqual(repaired.content, content);
+  assert.strictEqual(repairedValidation.ok, false);
 });
 
-test("repairStoryboardDialogueIssues preserves voice and speaker markers when splitting", () => {
+test("repairStoryboardDialogueIssues leaves voice and speaker markers untouched", () => {
   const cases = [
     { marker: "\u65c1\u767dVO\uff1a", expected: "\u53f0\u8bcd\uff1a\u65c1\u767dVO\uff1a" },
     { marker: "\u89d2\u8272OS\uff1a", expected: "\u53f0\u8bcd\uff1a\u89d2\u8272OS\uff1a" },
@@ -289,63 +319,29 @@ test("repairStoryboardDialogueIssues preserves voice and speaker markers when sp
       `\u53f0\u8bcd\uff1a${item.marker}The system will become more complete and the team will keep improving together`,
       "duration: 3s",
     ].join("\n");
-    const validation = validateStoryboardHardRules(content, {
-      currentRulesUsed: [{
-        ruleId: "rule-dialogue-length",
-        topicKey: "storyboard.dialogue.length",
-        conflictKey: "storyboard.dialogue.length",
-      }],
-    });
+    const validation = validateStoryboardHardRules(content, { useStableSkillRules: true });
 
     const repaired = repairStoryboardDialogueIssues(content, validation.issues);
 
-    assert.strictEqual(repaired.repaired, true, item.marker);
-    const repairedDialogueLines = repaired.content.split(/\r?\n/).filter((line) => line.startsWith("\u53f0\u8bcd"));
-    assert.ok(repairedDialogueLines.length > 1, item.marker);
-    assert.ok(repairedDialogueLines.every((line) => line.startsWith(item.expected)), item.marker);
+    assert.strictEqual(repaired.repaired, false, item.marker);
+    assert.strictEqual(repaired.content, content, item.marker);
   }
 });
 
-test("repairStoryboardDialogueIssues preserves markdown bold dialogue labels", () => {
+test("repairStoryboardDialogueIssues does not expand markdown bold dialogue labels", () => {
   const content = [
     "**镜号：10**",
     "**台词：** 王婶：秀娥啊，昨天柳树沟那个赵媒婆又来了吧？听说是加价了，三百五。你爹还没松口？",
     "**时长：** 3s",
   ].join("\n");
-  const validation = validateStoryboardHardRules(content, {
-    currentRulesUsed: [{
-      ruleId: "rule-dialogue-length",
-      topicKey: "storyboard.dialogue.length",
-      conflictKey: "storyboard.dialogue.length.max-chars",
-    }],
-  });
+  const validation = validateStoryboardHardRules(content, { useStableSkillRules: true });
 
   const repaired = repairStoryboardDialogueIssues(content, validation.issues);
-  const repairedValidation = validateStoryboardContent(repaired.content);
+  const repairedValidation = validateStoryboardContent(repaired.content, { checkDialogueLength: true });
   const repairedDialogueLines = repaired.content.split(/\r?\n/).filter((line) => line.includes("王婶："));
 
-  assert.strictEqual(repaired.repaired, true);
-  assert.strictEqual(repairedValidation.ok, true);
-  assert.ok(repairedDialogueLines.length > 1);
-  assert.ok(repairedDialogueLines.every((line) => line.startsWith("**台词：** 王婶：")));
-  assert.ok(repairedDialogueLines.every((line) => countTextCharacters(line.slice(line.indexOf("王婶：") + "王婶：".length)) <= 20));
-});
-
-test("getApplicableStoryboardHardRules ignores style preferences that are not programmatically checkable", () => {
-  const rules = getApplicableStoryboardHardRules([
-    {
-      ruleId: "rule-style",
-      topicKey: "storyboard.style.preference",
-      conflictKey: "storyboard.style.preference",
-      status: "active",
-    },
-    {
-      ruleId: "rule-disabled-dialogue",
-      topicKey: "storyboard.dialogue.length",
-      conflictKey: "storyboard.dialogue.length",
-      status: "disabled",
-    },
-  ]);
-
-  assert.deepStrictEqual(rules, []);
+  assert.strictEqual(repaired.repaired, false);
+  assert.strictEqual(repairedValidation.ok, false);
+  assert.strictEqual(repairedDialogueLines.length, 1);
+  assert.strictEqual(repaired.content, content);
 });

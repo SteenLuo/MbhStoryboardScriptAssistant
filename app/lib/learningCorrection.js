@@ -84,7 +84,6 @@ function buildLearningCorrectionEvent(input = {}) {
     summary,
     rawTrigger: summary,
     relatedRecordIds: payload.recordId ? [payload.recordId] : [],
-    currentRulesUsedRefs: findCorrectionRuleId(payload) ? [findCorrectionRuleId(payload)] : [],
     createdAt,
     updatedAt: createdAt,
   };
@@ -134,18 +133,9 @@ async function applyLearningCorrectionRequest(root, body = {}, deps = {}) {
 
   const ruleId = findCorrectionRuleId(correction.payload);
   if (correction.action === "disable") {
-    if (ruleId) {
-      try {
-        response.disableResult = await deps.updateCurrentRuleStatus(root, { ruleId, status: "disabled" });
-        response.message = `已记录纠正说明，并停用当前规则：${ruleId}`;
-      } catch (error) {
-        response.warning = `已记录纠正，但没有停用规则：${error.message || String(error)}`;
-        response.message = response.warning;
-      }
-    } else {
-      response.warning = "已记录纠正，但没有停用规则：没有可安全停用的当前规则编号，未盲改规则。";
-      response.message = response.warning;
-    }
+    response.message = ruleId
+      ? `已记录停用纠正：${ruleId}。当前阶段没有当前规则层开关，系统不会盲改 skill 文件；后续可按这条引用覆盖、收窄或人工移除对应 skill 沉淀。`
+      : "已记录停用纠正。当前阶段没有当前规则层开关，系统不会盲改 skill 文件；后续可按这条引用覆盖、收窄或人工移除对应 skill 沉淀。";
   } else {
     response.message = "已记录纠正说明，后续可按这条引用继续覆盖或收窄。";
   }

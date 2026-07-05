@@ -6137,7 +6137,7 @@ async function loadLearningLibrary() {
 }
 
 function renderLearningLibrary() {
-  const data = state.learningLibrary || { records: [], currentRules: [], skills: [] };
+  const data = state.learningLibrary || { records: [], skills: [] };
   const skills = data.skills || [];
   const skillItems = skills.some((skill) => skill.recordType === "skill-draft")
     ? skills
@@ -6152,20 +6152,16 @@ function renderLearningLibrary() {
     panel.hidden = panel.dataset.learningLibraryPanel !== state.learningLibraryTab;
   });
   renderLearningLibraryList("learningLibraryRecords", data.records || [], renderLearningRecordItem, "还没有学习记录；当你说以后都这样、投喂样例或归档画布后，会出现在这里");
-  renderLearningLibraryList("learningLibraryRules", data.currentRules || [], renderCurrentRuleItem, "暂无沉淀规则");
   renderLearningLibraryList("learningLibrarySkills", skillItems, renderSkillLibraryItem, "暂无技能草案，正式技能仍可用");
 }
 
 function renderLearningTabCounts(data) {
   const records = data.records || [];
-  const rules = data.currentRules || [];
   const skillCount = data.skills?.length || 0;
-  const activeRuleCount = rules.filter((rule) => !rule.coveredByRuleId && rule.status !== "covered").length;
   const unviewedFailures = records.filter((record) => (
     isFailedLearningRecord(record) && !state.viewedLearningFailureIds.has(learningRecordKey(record))
   ));
   setTextIfPresent("learningRecordsTabCount", String(records.length));
-  setTextIfPresent("learningRulesTabCount", String(activeRuleCount));
   setTextIfPresent("learningSkillsTabCount", String(skillCount));
   setTextIfPresent("learningFailureTabCount", String(unviewedFailures.length));
 
@@ -6291,9 +6287,9 @@ function readableLearningFailureStage(value, fallback) {
     "write-learning-evidence": "写入学习证据",
     "archive-evidence": "写入学习证据",
     evidence: "写入学习证据",
-    "publish-current-ruleset": "整理沉淀规则",
-    "current-ruleset": "整理沉淀规则",
-    "ruleset-publish": "整理沉淀规则",
+    "publish-current-ruleset": "整理学习沉淀",
+    "current-ruleset": "整理学习沉淀",
+    "ruleset-publish": "整理学习沉淀",
     "hard-rule-validation": "校验生成结果",
     "hard-rule-validation-failed": "校验生成结果",
     "learning-correction": "处理纠错说明",
@@ -6507,66 +6503,6 @@ function jumpToNextLearningFailure() {
   });
 }
 
-function renderCurrentRuleItem(rule) {
-  const item = document.createElement("article");
-  item.className = `learning-library-item status-${safeClassName(rule.status)}`;
-  const canToggle = ["active", "disabled"].includes(rule.status) && !rule.coveredByRuleId;
-  const nextStatus = rule.status === "active" ? "disabled" : "active";
-  const actionLabel = rule.status === "active" ? "暂停沉淀" : "恢复沉淀";
-  const impactText = rule.generationImpactText || "已保存为待沉淀规则，不会自动影响生成；稳定 skill 才会被生成读取。";
-  const nextStepText = rule.nextStepText || "需要时人工评审，再沉淀到稳定 skill。";
-  item.innerHTML = `
-    <div class="learning-library-item-head">
-      <strong>${escapeHtml(rule.content || rule.topicKey || "规则")}</strong>
-      <span>${escapeHtml(formatCurrentRuleStatus(rule.status))}</span>
-    </div>
-    <p>适用：${escapeHtml(formatLearningCapability(rule.capability))} · ${escapeHtml(formatLearningTopic(rule.topicKey))} · 更新时间 ${escapeHtml(formatDateTime(rule.updatedAt || rule.createdAt))}</p>
-    <p><b>是否影响生成：</b>${escapeHtml(impactText)}</p>
-    <p><b>下一步：</b>${escapeHtml(nextStepText)}</p>
-    ${canToggle ? `
-      <div class="learning-rule-actions">
-        <button type="button" data-rule-status-action data-rule-id="${escapeHtml(rule.ruleId)}" data-next-status="${nextStatus}">
-          ${actionLabel}
-        </button>
-      </div>
-    ` : ""}
-  `;
-  const action = item.querySelector("[data-rule-status-action]");
-  if (action) {
-    action.addEventListener("click", () => setCurrentRuleStatus(rule.ruleId, nextStatus));
-  }
-  return item;
-}
-
-async function setCurrentRuleStatus(ruleId, status) {
-  const statusNode = $("learningStatus");
-  if (statusNode) {
-    statusNode.hidden = false;
-    statusNode.textContent = status === "disabled" ? "正在暂停沉淀规则..." : "正在恢复沉淀规则...";
-  }
-  try {
-    const result = await api("/api/learning-rules/status", {
-      method: "POST",
-      body: JSON.stringify({ ruleId, status }),
-    });
-    if (result.library) {
-      state.learningLibrary = result.library;
-      renderLearningLibrary();
-    } else {
-      await loadLearningLibrary();
-    }
-    if (statusNode) {
-      statusNode.hidden = false;
-      statusNode.textContent = status === "disabled" ? "沉淀规则已暂停。" : "沉淀规则已恢复。";
-    }
-  } catch (error) {
-    if (statusNode) {
-      statusNode.hidden = false;
-      statusNode.textContent = `沉淀规则状态更新失败：${error.message}`;
-    }
-  }
-}
-
 function renderSkillLibraryItem(skill) {
   const item = document.createElement("article");
   if (skill.recordType === "skill-draft-empty") {
@@ -6670,16 +6606,6 @@ function normalizeLearningDisplayStatus(status, fallback = "处理中") {
 
 function formatLearningStatus(status) {
   return normalizeLearningDisplayStatus(status);
-}
-
-function formatCurrentRuleStatus(status) {
-  const value = String(status || "").trim();
-  const labels = {
-    active: "已保存",
-    disabled: "已暂停",
-    covered: "已被覆盖",
-  };
-  return labels[value] || formatLearningStatus(value);
 }
 
 function formatLearningSource(sourceType) {

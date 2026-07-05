@@ -52,7 +52,7 @@ test("normalizeLearningEvent maps legacy status values into internal and job sta
   assert.equal(landed.learningMode, "overall");
   assert.equal(landed.internalStatus, "landed");
   assert.equal(landed.jobStatus, "completed");
-  assert.equal(landed.landingType, "current-rule");
+  assert.equal(landed.landingType, "learning-record");
 
   const failed = normalizeLearningEvent({ eventId: "event-failed", status: "失败" });
   assert.equal(failed.internalStatus, "failed");
@@ -69,7 +69,6 @@ test("normalizeLearningEvent preserves only public generation proof fields", () 
     generationProof: {
       proofStatus: "validated",
       claimText: "已在生成中验证",
-      currentRulesUsedRefs: ["rule-a", " ", 42],
       skillRulesUsedRefs: ["stable-a", " "],
       validationResultRefs: ["run-a", null, "run-b"],
       lastCheckedOutputId: 123,
@@ -83,7 +82,6 @@ test("normalizeLearningEvent preserves only public generation proof fields", () 
   assert.deepEqual(event.generationProof, {
     proofStatus: "validated",
     claimText: "已在生成中验证",
-    currentRulesUsedRefs: ["rule-a", "42"],
     skillRulesUsedRefs: ["stable-a"],
     validationResultRefs: ["run-a", "run-b"],
     lastCheckedOutputId: "123",

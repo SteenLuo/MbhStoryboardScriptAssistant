@@ -3,35 +3,27 @@ const fsp = require("node:fs/promises");
 const path = require("node:path");
 
 const { listLearningEvents } = require("./autonomousLearning");
-const { loadCurrentRulesetForPrompt } = require("./currentRulesetContext");
 const { buildCorrectionAction } = require("./learningCorrection");
 const { mapLearningDisplayRecord } = require("./learningStatusMapper");
 const { FALLBACK_ROUTE, SKILL_ROUTES } = require("./localSkills");
 
 async function buildLearningLibrary(root) {
   const accessIssues = [];
-  const [events, rulesetResult, evidenceResult, sampleResult, evalResult, skillDraftResult] = await Promise.all([
+  const [events, evidenceResult, sampleResult, evalResult, skillDraftResult] = await Promise.all([
     safeReadEvents(root, accessIssues),
-    safeReadRuleset(root, accessIssues),
     readMaterialRecords(path.join(root, "learning", "evidence"), "evidenceId", "evidence", accessIssues),
     readMaterialRecords(path.join(root, "learning", "samples"), "sampleId", "samples", accessIssues),
     readEvalRecords(path.join(root, "learning", "evals"), accessIssues),
     readSkillDraftRecords(path.join(root, "learning", "skill-evolution-reports"), accessIssues),
   ]);
 
-  const ruleset = rulesetResult.ruleset;
-  const promptSafeRuleById = new Map((ruleset.rules || []).map((rule) => [normalizeString(rule.ruleId), rule]));
-  const eventRecords = buildPublicLearningRecords(events, accessIssues)
-    .map((record) => applyCurrentRuleImpactOverlay(record, rulesetResult, promptSafeRuleById));
+  const eventRecords = buildPublicLearningRecords(events, accessIssues);
   const evidenceRecords = evidenceResult.records.map(publicEvidenceRecord).filter(hasUsableRecordId);
   const sampleRecords = sampleResult.records.map(publicSampleRecord).filter(hasUsableRecordId);
   const evalRecords = evalResult.records.map(publicEvalRecord).filter(hasUsableRecordId);
   const materialRecords = [...evidenceRecords, ...sampleRecords];
   const records = sortLearningRecords([...eventRecords, ...materialRecords, ...evalRecords]);
   const impactItems = sortLearningRecords(uniqueRecordsById([
-    ...(ruleset.rules || [])
-      .map(publicImpactRule)
-      .filter((record) => hasUsableRecordId(record) && record.affectsGeneration),
     ...eventRecords.filter((record) => record.affectsGeneration),
   ]));
   const sampleItems = sortLearningRecords(uniqueRecordsById([
@@ -60,7 +52,7 @@ async function buildLearningLibrary(root) {
     evalItems: evalItems,
     skillItems: skillItems,
     accessIssues: accessIssues,
-    currentRules: (ruleset.rules || []).map(publicCurrentRule).filter(hasUsableRecordId),
+    currentRules: [],
     skills: skillItems,
   };
 }
@@ -72,38 +64,6 @@ async function safeReadEvents(root, accessIssues) {
     accessIssues.push(accessIssue("events", error, path.join(root, "learning", "events.jsonl")));
     return [];
   }
-}
-
-async function safeReadRuleset(root, accessIssues) {
-  const currentRulesetFile = path.join(root, "learning", "current-ruleset.json");
-  const fileExists = fs.existsSync(currentRulesetFile);
-  try {
-    const result = await loadCurrentRulesetForPrompt(root);
-    if (result.loadError) {
-      accessIssues.push(accessIssue("rules", new Error(result.loadError), currentRulesetFile, {
-        sourceFile: result.sourceFile ? path.relative(root, result.sourceFile).replace(/\\/g, "/") : "",
-      }));
-    }
-    return {
-      ok: result.ok,
-      ruleset: result.ruleset || emptyRuleset(),
-      sourceFile: result.sourceFile || "",
-      fileExists,
-      loadError: result.loadError || "",
-    };
-  } catch (error) {
-    accessIssues.push(accessIssue("rules", error, currentRulesetFile));
-    return { ok: false, ruleset: emptyRuleset(), sourceFile: "", fileExists, loadError: error.message || String(error) };
-  }
-}
-
-function emptyRuleset() {
-  return {
-    version: 0,
-    lastGoodVersion: 0,
-    updatedAt: "",
-    rules: [],
-  };
 }
 
 function publicLearningRecord(event) {
@@ -256,157 +216,6 @@ function savedMaterialRecord(input) {
   return {
     ...record,
     correctionAction: buildCorrectionAction(record),
-  };
-}
-
-function publicImpactRule(rule) {
-  const record = {
-    recordId: prefixedId("rule", rule.ruleId),
-    displayStatus: rule.status === "covered" ? "已被覆盖" : "已保存",
-    status: rule.status === "covered" ? "已被覆盖" : "已保存",
-    actionLabel: "不用管",
-    affectsGeneration: false,
-    generationImpactText: "已保存为待沉淀规则，不会自动影响生成；稳定 skill 才会被生成读取。",
-    learnedText: rule.content,
-    sourceText: "学习资料库",
-    usedWhereText: "学习资料库：待沉淀规则",
-    nextStepText: "无需处理；后续人工评审后，可沉淀到稳定 skill。",
-    createdAt: rule.createdAt,
-    updatedAt: rule.updatedAt,
-    advanced: {
-      ruleId: rule.ruleId,
-      topicKey: rule.topicKey,
-      conflictKey: rule.conflictKey,
-      capability: rule.capability,
-      priority: rule.priority,
-      sourceEventIds: normalizeStringArray(rule.sourceEventIds),
-      status: rule.status,
-      coveredByRuleId: rule.coveredByRuleId,
-    },
-  };
-  return {
-    ...record,
-    correctionAction: buildCorrectionAction(record),
-  };
-}
-
-function publicCurrentRule(rule) {
-  return {
-    recordId: prefixedId("rule", rule.ruleId),
-    ruleId: rule.ruleId,
-    topicKey: rule.topicKey,
-    capability: rule.capability,
-    content: rule.content,
-    priority: rule.priority,
-    sourceEventIds: rule.sourceEventIds,
-    status: rule.status,
-    coveredByRuleId: rule.coveredByRuleId,
-    createdAt: rule.createdAt,
-    updatedAt: rule.updatedAt,
-    generationImpactText: "已保存为待沉淀规则，不会自动影响生成；稳定 skill 才会被生成读取。",
-    nextStepText: "需要时人工评审，再沉淀到稳定 skill。",
-    advanced: {
-      topicKey: rule.topicKey,
-      conflictKey: rule.conflictKey,
-      sourceEventIds: normalizeStringArray(rule.sourceEventIds),
-    },
-  };
-}
-
-function applyCurrentRuleImpactOverlay(record, rulesetResult, promptSafeRuleById) {
-  if (!record || normalizeString(record.advanced?.landingType) !== "current-rule") return record;
-
-  const ruleId = normalizeString(record.advanced?.ruleId || firstString(record.advanced?.landingIds));
-  const promptSafeRule = ruleId ? promptSafeRuleById.get(ruleId) : null;
-  if (!rulesetResult.fileExists) return record;
-
-  let overlay;
-  if (promptSafeRule?.status === "active") {
-    overlay = {
-      displayStatus: "已保存",
-      status: "已保存",
-      actionLabel: "不用管",
-      generationImpactText: "已保存为待沉淀规则，不会自动影响生成；稳定 skill 才会被生成读取。",
-      usedWhereText: "学习资料库：待沉淀规则",
-      nextStepText: "无需处理；后续人工评审后，可沉淀到稳定 skill。当前不会自动影响生成。",
-      generationProof: {
-        proofStatus: "not_applicable",
-        claimText: "这条规则只作为学习资料沉淀，不参与当前生成。",
-      },
-    };
-  } else if (!rulesetResult.ok) {
-    overlay = {
-      displayStatus: "待确认",
-      status: "待确认 / 待纠正",
-      actionLabel: "待纠正",
-      generationImpactText: "沉淀规则文件加载失败，但生成不读取该文件；需要整理学习资料库。",
-      usedWhereText: "学习资料库：规则沉淀文件异常。",
-      nextStepText: "请带引用去纠正，或整理这条规则后再决定是否沉淀到稳定 skill。",
-      generationProof: {
-        proofStatus: "not_applicable",
-        claimText: "沉淀规则文件异常，但当前生成由稳定 skill 驱动。",
-      },
-    };
-  } else if (promptSafeRule?.status === "disabled") {
-    overlay = {
-      displayStatus: "已保存",
-      status: "已保存",
-      actionLabel: "不用管",
-      generationImpactText: "已保存为待沉淀规则，不会自动影响生成；稳定 skill 才会被生成读取。",
-      usedWhereText: "学习资料库：待沉淀规则。",
-      nextStepText: "无需处理；后续人工评审后，可沉淀到稳定 skill。",
-      generationProof: {
-        proofStatus: "not_applicable",
-        claimText: "这条规则只作为学习资料沉淀，不参与当前生成。",
-      },
-    };
-  } else if (promptSafeRule?.status === "covered") {
-    overlay = {
-      displayStatus: "已被覆盖",
-      status: "已被覆盖",
-      actionLabel: "不用管",
-      generationImpactText: "已被后续学习覆盖，不再影响生成。",
-      usedWhereText: promptSafeRule.coveredByRuleId ? `已被后续规则覆盖：${promptSafeRule.coveredByRuleId}` : "已被后续规则覆盖。",
-      nextStepText: "无需处理，查看覆盖它的新学习即可。",
-      generationProof: {
-        proofStatus: "not_applicable",
-        claimText: "已被后续学习覆盖，不再需要生成命中证据。",
-      },
-    };
-  } else {
-    overlay = {
-      displayStatus: "待确认",
-      status: "待确认 / 待纠正",
-      actionLabel: "待纠正",
-      generationImpactText: "未在沉淀规则列表中找到对应规则；当前不会自动影响生成。",
-      usedWhereText: "学习资料库：待整理。",
-      nextStepText: "请带引用去纠正，或重新说明这条是否值得沉淀到稳定 skill。",
-      generationProof: {
-        proofStatus: "not_applicable",
-        claimText: "当前没有可追溯的生成规则，不需要生成命中证据。",
-      },
-    };
-  }
-
-  const nextRecord = {
-    ...record,
-    ...overlay,
-    affectsGeneration: false,
-    advanced: {
-      ...(record.advanced || {}),
-      topicKey: promptSafeRule?.topicKey || record.advanced?.topicKey || "",
-      conflictKey: promptSafeRule?.conflictKey || record.advanced?.conflictKey || "",
-      capability: promptSafeRule?.capability || record.advanced?.capability || "",
-      sourceEventIds: normalizeStringArray(promptSafeRule?.sourceEventIds).length
-        ? normalizeStringArray(promptSafeRule.sourceEventIds)
-        : normalizeStringArray(record.advanced?.sourceEventIds),
-      rulesetLoadError: rulesetResult.loadError || "",
-      currentRuleStatus: promptSafeRule?.status || "",
-    },
-  };
-  return {
-    ...nextRecord,
-    correctionAction: buildCorrectionAction(nextRecord),
   };
 }
 

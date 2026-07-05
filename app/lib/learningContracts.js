@@ -18,7 +18,6 @@ const GENERATION_PROOF_STRING_FIELDS = [
   "lastCheckedAt",
 ];
 const GENERATION_PROOF_ARRAY_FIELDS = [
-  "currentRulesUsedRefs",
   "skillRulesUsedRefs",
   "validationResultRefs",
   "failureEventIds",
@@ -26,7 +25,7 @@ const GENERATION_PROOF_ARRAY_FIELDS = [
 
 const LEGACY_STATUS_DEFAULTS = {
   处理中: { internalStatus: "received", jobStatus: "running" },
-  已生效: { internalStatus: "landed", jobStatus: "completed", learningMode: "overall", landingType: "current-rule" },
+  已生效: { internalStatus: "landed", jobStatus: "completed", learningMode: "overall", landingType: "learning-record" },
   失败: { internalStatus: "failed", jobStatus: "failed" },
   已被覆盖: { internalStatus: "covered", jobStatus: "completed" },
   待确认: { internalStatus: "received", jobStatus: "waiting" },
@@ -80,7 +79,6 @@ function normalizeLearningEvent(input = {}) {
     neededSampleType: normalizeString(input.neededSampleType),
     neededCount: normalizeNonNegativeInteger(input.neededCount),
     relatedRecordIds: normalizeStringArray(input.relatedRecordIds),
-    currentRulesUsedRefs: normalizeStringArray(input.currentRulesUsedRefs),
     skillRulesUsedRefs: normalizeStringArray(input.skillRulesUsedRefs),
     sampleCount: normalizeNonNegativeInteger(input.sampleCount),
     sampleRecordIds: normalizeStringArray(input.sampleRecordIds),

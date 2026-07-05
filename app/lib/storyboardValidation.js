@@ -41,19 +41,27 @@ const STABLE_STORYBOARD_SKILL_RULES = [
     sourceFile: "skills/03-storyboard/storyboard-generate/SKILL.md",
     origin: "stable-skill",
   },
-];
-const PROGRAMMATIC_HARD_RULES = [
   {
-    hardRuleId: "storyboard.dialogue.length",
-    topicKeys: new Set(["storyboard.dialogue.length", "storyboard.dialogue.length.max-chars"]),
-  },
-  {
-    hardRuleId: "storyboard.dialogue.speaker-count",
-    topicKeys: new Set(["storyboard.dialogue.speaker-count", "storyboard.dialogue.speaker-count.single-speaker"]),
+    ruleId: "stable-skill-storyboard-dialogue-line-count",
+    topicKey: "storyboard.dialogue.line-count",
+    conflictKey: "storyboard.dialogue.line-count.single-line",
+    capability: "storyboard",
+    status: "active",
+    hardRuleId: "storyboard.dialogue.line-count",
+    sourceEventIds: [],
+    sourceFile: "skills/03-storyboard/storyboard-generate/SKILL.md",
+    origin: "stable-skill",
   },
 ];
 
 function validateStoryboardContent(content, options = {}) {
+  const checkDialogueLength = options.checkDialogueLength === true;
+  if (!checkDialogueLength) {
+    return {
+      ok: true,
+      issues: [],
+    };
+  }
   const maxChars = Number(options.maxDialogueChars || MAX_DIALOGUE_CHARS);
   const lines = String(content || "").split(/\r?\n/);
   const issues = [];
@@ -68,7 +76,7 @@ function validateStoryboardContent(content, options = {}) {
       lineNumber: index + 1,
       lineText: line,
       dialogue,
-      message: `台词超过 ${maxChars} 字，需拆成新的分镜或拆分台词。`,
+      message: `台词超过 ${maxChars} 字，需拆成新的连续镜号。`,
       suggestedLines: splitDialogueLine(dialogue, maxChars),
     });
   });
@@ -76,21 +84,6 @@ function validateStoryboardContent(content, options = {}) {
     ok: issues.length === 0,
     issues,
   };
-}
-
-function getApplicableStoryboardHardRules(currentRulesUsed = []) {
-  const rules = Array.isArray(currentRulesUsed) ? currentRulesUsed : [];
-  return rules
-    .map(normalizeRuleRef)
-    .filter(Boolean)
-    .filter((rule) => rule.status === "" || rule.status === "active")
-    .map((rule) => {
-      const registry = PROGRAMMATIC_HARD_RULES.find((item) =>
-        item.topicKeys.has(rule.topicKey) || item.topicKeys.has(rule.conflictKey)
-      );
-      return registry ? { ...rule, hardRuleId: registry.hardRuleId } : null;
-    })
-    .filter(Boolean);
 }
 
 function validateStoryboardHardRules(content, options = {}) {
@@ -108,13 +101,18 @@ function validateStoryboardHardRules(content, options = {}) {
   const ruleGroups = groupRulesByHardRuleId(appliedRules);
   if (ruleGroups.has("storyboard.dialogue.length")) {
     const rules = ruleGroups.get("storyboard.dialogue.length");
-    const validation = validateStoryboardContent(content, options);
+    const validation = validateStoryboardContent(content, { ...options, checkDialogueLength: true });
     issues.push(...attachHardRuleMeta(validation.issues, rules, "storyboard.dialogue.length"));
   }
   if (ruleGroups.has("storyboard.dialogue.speaker-count")) {
     const rules = ruleGroups.get("storyboard.dialogue.speaker-count");
     const validation = validateStoryboardSpeakerCount(content);
     issues.push(...attachHardRuleMeta(validation.issues, rules, "storyboard.dialogue.speaker-count"));
+  }
+  if (ruleGroups.has("storyboard.dialogue.line-count")) {
+    const rules = ruleGroups.get("storyboard.dialogue.line-count");
+    const validation = validateStoryboardDialogueLineCount(content);
+    issues.push(...attachHardRuleMeta(validation.issues, rules, "storyboard.dialogue.line-count"));
   }
   return {
     ok: issues.length === 0,
@@ -125,11 +123,7 @@ function validateStoryboardHardRules(content, options = {}) {
 }
 
 function getStoryboardValidationRules(options = {}) {
-  const stableRules = options.useStableSkillRules === false ? [] : getStableStoryboardSkillRules();
-  const currentRules = options.includeCurrentRules
-    ? getApplicableStoryboardHardRules(options.currentRulesUsed)
-    : [];
-  return [...stableRules, ...currentRules];
+  return options.useStableSkillRules === true ? getStableStoryboardSkillRules() : [];
 }
 
 function getStableStoryboardSkillRules() {
@@ -157,22 +151,39 @@ function applyStoryboardHardRuleValidation(content, options = {}) {
     };
   }
 
-  const repair = repairStoryboardDialogueIssues(normalizedContent, initial.issues, options);
-  const finalValidation = repair.repaired
-    ? validateStoryboardHardRules(repair.content, options)
-    : initial;
   return {
-    content: repair.content,
-    validation: finalValidation,
+    content: normalizedContent,
+    validation: initial,
     hardRuleValidation: {
       checked: true,
-      repaired: repair.repaired,
-      repairStrategy: repair.repaired ? "splitDialogueLine" : "",
-      finalOk: finalValidation.ok,
+      repaired: false,
+      repairStrategy: "",
+      finalOk: initial.ok,
       appliedRules: initial.appliedRules,
       initialIssues: initial.issues,
-      finalIssues: finalValidation.issues,
+      finalIssues: initial.issues,
     },
+  };
+}
+
+function validateStoryboardDialogueLineCount(content) {
+  const shots = parseStoryboardShots(content);
+  const issues = [];
+  for (const shot of shots) {
+    const dialogueLines = shot.lines.filter((line) => parseDialogueLine(line.text));
+    if (dialogueLines.length <= 1) continue;
+    issues.push({
+      type: "dialogue-too-many-lines",
+      severity: "error",
+      lineNumber: dialogueLines[1]?.lineNumber || shot.lineNumber,
+      shotNumber: shot.shotNumber,
+      dialogueLineCount: dialogueLines.length,
+      message: `同一个镜号只能有一行台词字段，当前镜号出现 ${dialogueLines.length} 行。`,
+    });
+  }
+  return {
+    ok: issues.length === 0,
+    issues,
   };
 }
 
@@ -286,40 +297,9 @@ function isStoryboardStartLine(line) {
 }
 
 function repairStoryboardDialogueIssues(content, issues = [], options = {}) {
-  const maxChars = Number(options.maxDialogueChars || MAX_DIALOGUE_CHARS);
-  const issueByLine = new Map(
-    (Array.isArray(issues) ? issues : [])
-      .filter((issue) => issue?.type === "dialogue-too-long" && Number(issue.lineNumber) > 0)
-      .map((issue) => [Number(issue.lineNumber), issue]),
-  );
-  if (!issueByLine.size) return { content, repaired: false };
-
-  let repaired = false;
-  const lines = String(content || "").split(/\r?\n/);
-  const nextLines = [];
-  lines.forEach((line, index) => {
-    const issue = issueByLine.get(index + 1);
-    if (!issue) {
-      nextLines.push(line);
-      return;
-    }
-    const parsedLine = parseDialogueLine(line);
-    const dialogueBody = parsedLine?.body || issue.dialogue || line;
-    const splitLines = splitDialogueLine(dialogueBody, maxChars);
-    if (splitLines.length <= 1) {
-      nextLines.push(line);
-      return;
-    }
-    repaired = true;
-    const fieldPrefix = parsedLine?.fieldPrefix || "台词：";
-    const speakerMarker = parsedLine?.speakerMarker || "";
-    for (const splitLine of splitLines) {
-      nextLines.push(`${fieldPrefix}${speakerMarker}${splitLine.text || splitLine}`);
-    }
-  });
   return {
-    content: nextLines.join("\n"),
-    repaired,
+    content,
+    repaired: false,
   };
 }
 
@@ -479,16 +459,11 @@ function attachHardRuleMeta(issues = [], rules = [], hardRuleId = "") {
     .filter((rule) => rule.origin === "stable-skill")
     .map((rule) => rule.ruleId)
     .filter(Boolean);
-  const currentRulesUsedRefs = rules
-    .filter((rule) => rule.origin !== "stable-skill")
-    .map((rule) => rule.ruleId)
-    .filter(Boolean);
   const sourceEventIds = collectRuleSourceEventIds(rules);
   return (Array.isArray(issues) ? issues : []).map((issue) => ({
     ...issue,
     hardRuleId,
     skillRulesUsedRefs,
-    currentRulesUsedRefs,
     sourceEventIds,
   }));
 }
@@ -516,22 +491,6 @@ function storyboardContentFingerprint(content) {
   return `${text.length}:${(hash >>> 0).toString(16)}`;
 }
 
-function normalizeRuleRef(rule) {
-  if (!rule || typeof rule !== "object") return null;
-  const topicKey = String(rule.topicKey || "").trim();
-  const conflictKey = String(rule.conflictKey || topicKey).trim();
-  if (!topicKey && !conflictKey) return null;
-  return {
-    ruleId: String(rule.ruleId || "").trim(),
-    topicKey,
-    conflictKey,
-    status: String(rule.status || "").trim(),
-    sourceEventIds: Array.isArray(rule.sourceEventIds)
-      ? rule.sourceEventIds.map((item) => String(item || "").trim()).filter(Boolean)
-      : [],
-  };
-}
-
 function collectRuleSourceEventIds(rules = []) {
   const ids = new Set();
   for (const rule of Array.isArray(rules) ? rules : []) {
@@ -551,7 +510,6 @@ function isStoryboardValidationResolved(node) {
 
 module.exports = {
   applyStoryboardHardRuleValidation,
-  getApplicableStoryboardHardRules,
   getStableStoryboardSkillRules,
   isStoryboardValidationResolved,
   MAX_DIALOGUE_CHARS,

@@ -140,18 +140,8 @@ async function recordArchiveLearningEvidence(root, input = {}, deps = {}) {
   }
 }
 
-function collectSourceEventIds(input, canvas) {
+function collectSourceEventIds(input) {
   const ids = new Set(normalizeStringArray(input.sourceEventIds));
-  for (const node of Array.isArray(canvas.nodes) ? canvas.nodes : []) {
-    for (const rule of Array.isArray(node?.meta?.currentRulesUsed) ? node.meta.currentRulesUsed : []) {
-      for (const id of normalizeStringArray(rule?.sourceEventIds)) ids.add(id);
-    }
-    for (const version of Array.isArray(node?.meta?.versions) ? node.meta.versions : []) {
-      for (const rule of Array.isArray(version?.currentRulesUsed) ? version.currentRulesUsed : []) {
-        for (const id of normalizeStringArray(rule?.sourceEventIds)) ids.add(id);
-      }
-    }
-  }
   return Array.from(ids).sort();
 }
 

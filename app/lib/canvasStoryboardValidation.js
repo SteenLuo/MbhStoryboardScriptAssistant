@@ -18,9 +18,11 @@ function applyStoryboardNodeValidation(node = {}, options = {}) {
   if (isStoryboardValidationResolved(node)) return node;
 
   const hardRuleResult = applyStoryboardHardRuleValidation(node.content || "", {
-    useStableSkillRules: options.useStableSkillRules !== false,
+    useStableSkillRules: options.useStableSkillRules === true,
   });
-  const validation = hardRuleResult.validation || validateStoryboardContent(hardRuleResult.content || node.content || "");
+  const validation = hardRuleResult.validation || validateStoryboardContent(hardRuleResult.content || node.content || "", {
+    checkDialogueLength: false,
+  });
   const nextMeta = {
     ...(node.meta || {}),
     validation,

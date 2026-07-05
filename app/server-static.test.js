@@ -29,10 +29,10 @@ test("canvas storyboard generation loads the local storyboard skill context", ()
   assert.match(contextSource, /findLocalSkillRoute\("storyboard-generate"\)/);
   assert.match(contextSource, /routeLocalSkill\("分镜"\)/);
   assert.match(contextSource, /分镜标准格式\.md/);
-  assert.match(contextSource, /同一个镜号只能有一个说话人/);
-  assert.match(contextSource, /单条台词不得超过 20 个字/);
   assert.match(contextSource, /字段标签使用纯文本/);
   assert.match(contextSource, /只输出分镜正文/);
+  assert.match(contextSource, /enforceStableHardRules:\s*hasStoryboardDialogueHardRules\(prompt\)/);
+  assert.match(serverSource, /STORYBOARD_DIALOGUE_HARD_RULE_PATTERN/);
   assert.match(promptSource, /canvasStoryboardSkillContext\(\)/);
   assert.match(generateSource, /canvasStoryboardSkillContext\(\)/);
   assert.match(generateSource, /storyboardSkillContext/);
@@ -44,22 +44,31 @@ test("canvas storyboard nodes use stable skill rule refs instead of dynamic curr
   const generateSource = extractFunction("generateCanvasStoryboards");
 
   assert.doesNotMatch(contextSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
+  assert.doesNotMatch(contextSource, /每个镜号只能有一行台词/);
+  assert.doesNotMatch(contextSource, /超过 20 个字时必须拆成新的连续镜号/);
+  assert.doesNotMatch(contextSource, /拆成多条台词/);
   assert.match(promptSource, /canvasStoryboardSkillContext\(\)/);
   assert.match(generateSource, /const storyboardSkillContext = await canvasStoryboardSkillContext\(\)/);
   assert.match(generateSource, /skillPrompt:\s*storyboardSkillContext\.prompt/);
+  assert.match(generateSource, /enforceStableHardRules:\s*storyboardSkillContext\.enforceStableHardRules/);
   assert.doesNotMatch(generateSource, /currentRulesUsed:\s*storyboardSkillContext\.currentRulesUsed/);
   assert.match(generateSource, /skillRulesUsed/);
 });
 
-test("canvas storyboard generation applies hard-rule validation repair and failure feedback", () => {
+test("canvas storyboard generation applies hard-rule validation and failure feedback", () => {
   const generateSource = extractFunction("generateCanvasStoryboards");
+  const generationSource = extractFunction("generateStoryboardEpisodeWithValidation");
   const reviseSource = extractFunction("reviseCanvasNode");
 
   assert.match(serverSource, /applyStoryboardHardRuleValidation/);
   assert.match(serverSource, /recordStoryboardHardRuleFailure/);
-  assert.match(generateSource, /applyStoryboardHardRuleValidation\(result\.content/);
+  assert.match(generateSource, /generateStoryboardEpisodeWithValidation/);
+  assert.match(generationSource, /applyStoryboardHardRuleValidation\(result\.content/);
+  assert.match(generationSource, /STORYBOARD_GENERATION_MAX_ATTEMPTS/);
+  assert.match(generationSource, /buildStoryboardHardRuleRetryFeedback/);
   assert.match(generateSource, /hardRuleValidation/);
   assert.match(generateSource, /recordStoryboardHardRuleFailure/);
+  assert.match(generateSource, /generationAttempts/);
   assert.match(reviseSource, /applyStoryboardHardRuleValidation\(result\.content/);
   assert.match(reviseSource, /hardRuleValidation/);
 });
@@ -128,8 +137,10 @@ test("explicit skill learning mode is handled locally without model generation",
   assert.match(learningSource, /local-learning/);
   assert.match(learningSource, /已记录为技能学习材料/);
   assert.match(learningSource, /已保存到学习资料库/);
-  assert.match(learningSource, /不会自动改写生成规则/);
-  assert.match(learningSource, /沉淀到稳定 skill/);
+  assert.match(learningSource, /已写入分镜 skill 学习沉淀/);
+  assert.match(learningSource, /下一次分镜生成会读取/);
+  assert.doesNotMatch(learningSource, /不会自动改写生成规则/);
+  assert.doesNotMatch(learningSource, /沉淀到稳定 skill/);
   assert.doesNotMatch(learningSource, /已同步到当前规则/);
   assert.doesNotMatch(learningSource, /deepseekChat/);
 });
@@ -164,7 +175,9 @@ test("canvas revision endpoint only updates revision nodes once", () => {
   assert.match(reviseSource, /variantKind/);
   assert.match(reviseSource, /parentNodeId/);
   assert.match(reviseSource, /chatLocked/);
-  assert.match(reviseSource, /formatStoryboardRevisionIssues\(storyboardRevisionIssuesForPrompt\(parentNode\)\)/);
+  assert.match(reviseSource, /const storyboardValidationOptions = \{/);
+  assert.match(reviseSource, /useStableSkillRules:\s*storyboardSkillContext\?\.enforceStableHardRules === true/);
+  assert.match(reviseSource, /formatStoryboardRevisionIssues\(storyboardRevisionIssuesForPrompt\(parentNode,\s*storyboardValidationOptions\)\)/);
   assert.match(reviseSource, /storyboardIssueContext \? `\\n\$\{storyboardIssueContext\}` : ""/);
   assert.match(reviseSource, /const hardRuleResult = node\.type === "storyboard"/);
   assert.match(reviseSource, /const revisedValidation = hardRuleResult\?\.validation \|\| null/);
@@ -210,7 +223,6 @@ test("acceptance fixture mode separates code root from mutable business data roo
   assert.match(apiSource, /acceptanceRoot:\s*ACCEPTANCE_ROOT/);
   assert.match(apiSource, /buildLearningLibrary\(BUSINESS_ROOT\)/);
   assert.match(apiSource, /listNotifications\(BUSINESS_ROOT\)/);
-  assert.match(apiSource, /updateCurrentRuleStatus\(BUSINESS_ROOT/);
   assert.match(apiSource, /handleNotification\(BUSINESS_ROOT/);
   assert.match(correctionSource, /applyLearningCorrectionRequest\(BUSINESS_ROOT,\s*body/);
   assert.match(archiveSource, /recordArchiveLearningEvidence\(BUSINESS_ROOT/);
@@ -222,14 +234,13 @@ test("learning library API exposes fixed D7 contract fields", () => {
 
   assert.match(serverSource, /require\("\.\/lib\/learningLibrary"\)/);
   assert.match(serverSource, /require\("\.\/lib\/learningCorrection"\)/);
-  assert.match(serverSource, /updateCurrentRuleStatus/);
   assert.match(apiSource, /\/api\/learning-library/);
   assert.match(apiSource, /buildLearningLibrary\(BUSINESS_ROOT\)/);
   for (const field of ["records", "impactItems", "sampleItems", "evalItems", "skillItems", "accessIssues"]) {
     assert.match(learningLibrarySource, new RegExp(`${field}:`));
   }
-  assert.match(apiSource, /\/api\/learning-rules\/status/);
-  assert.match(apiSource, /updateCurrentRuleStatus\(BUSINESS_ROOT/);
+  assert.doesNotMatch(apiSource, /\/api\/learning-rules\/status/);
+  assert.doesNotMatch(serverSource, /updateCurrentRuleStatus/);
 });
 
 test("learning correction API writes referenced correction events without blind rule edits", () => {
@@ -241,7 +252,6 @@ test("learning correction API writes referenced correction events without blind 
   assert.match(serverSource, /applyLearningCorrectionRequest/);
   assert.match(correctionSource, /applyLearningCorrectionRequest\(BUSINESS_ROOT,\s*body/);
   assert.match(correctionSource, /appendLearningEvent/);
-  assert.match(correctionSource, /updateCurrentRuleStatus/);
   assert.match(correctionSource, /buildLearningLibrary/);
 });
 
@@ -250,10 +260,14 @@ test("chat flow saves explicit learning into the learning event pipeline without
   const helperSource = extractFunction("applyAutonomousConversationLearning");
 
   assert.match(serverSource, /extractExplicitRuleLearningInput/);
-  assert.match(serverSource, /learnExplicitRule/);
+  assert.doesNotMatch(helperSource, /learnExplicitRule/);
+  assert.match(helperSource, /appendLearningEvent/);
+  assert.match(helperSource, /writeSkillLearningReference/);
+  assert.match(helperSource, /const landingType = skillReference\.applied \? "skill-reference" : "skill-draft"/);
+  assert.match(helperSource, /landingType,/);
   assert.match(chatSource, /applyAutonomousConversationLearning/);
-  assert.match(helperSource, /notifyOnFailure:\s*true/);
   assert.match(helperSource, /assistantMessage\.learningEvent/);
+  assert.match(helperSource, /assistantMessage\.skillReferencePath/);
 });
 
 test("chat flow no longer exposes legacy long-memory confirmation", () => {

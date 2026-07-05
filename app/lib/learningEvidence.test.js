@@ -35,7 +35,6 @@ function sampleCanvas() {
             { id: "v1", nodeId: "script-a", title: "剧本 A" },
             { id: "v2", nodeId: "script-b", title: "剧本 B", isPrimary: true },
           ],
-          currentRulesUsed: [{ ruleId: "rule-1", sourceEventIds: ["event-rule"] }],
         },
       },
       {
@@ -45,7 +44,6 @@ function sampleCanvas() {
         content: "分镜正文",
         meta: {
           episodeNumber: 1,
-          currentRulesUsed: [{ ruleId: "rule-2", sourceEventIds: ["event-storyboard"] }],
         },
       },
     ],
@@ -67,7 +65,7 @@ test("writeLearningEvidence saves a traceable evidence package with final versio
   assert.ok(!/[\\/:*?"<>|]/.test(path.basename(result.path)));
   assert.strictEqual(result.canvasId, "canvas:demo/unsafe");
   assert.strictEqual(result.outputId, "output/final:1");
-  assert.deepStrictEqual(result.sourceEventIds.sort(), ["event-manual", "event-rule", "event-storyboard"]);
+  assert.deepStrictEqual(result.sourceEventIds.sort(), ["event-manual"]);
 
   const saved = JSON.parse(await fsp.readFile(result.path, "utf8"));
   assert.strictEqual(saved.evidenceId, result.evidenceId);

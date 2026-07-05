@@ -48,11 +48,11 @@ function buildCompletenessMatrix() {
     {
       milestone: "M5",
       name: "自主学习闭环",
-      expected: "对话、反馈、样例和降质记录能转成学习记录、当前规则与快照。",
-      webStatus: "已接入：网页对话会自动写入学习记录，设置面板可刷新学习闭环。",
+      expected: "对话、反馈、样例和降质记录能转成学习记录、学习资料和 skill 学习沉淀。",
+      webStatus: "已接入：网页对话会自动写入学习记录，学习资料库集中展示学习相关内容。",
       evidence: ["app/lib/conversationLearning.js", "tools/Invoke-AutoLearningCycle.ps1", "learning/conversation-records/"],
-      gaps: ["自动学习记录仍是规则触发，后续可升级为更细的分类器。"],
-      next: "补学习记录列表和当前规则核对入口。",
+      gaps: ["自动学习记录仍主要依赖显式触发，后续可升级为更细的分类器。"],
+      next: "继续完善学习资料库中的学习记录、样例、纠错和 skill 沉淀说明。",
     },
     {
       milestone: "M6",

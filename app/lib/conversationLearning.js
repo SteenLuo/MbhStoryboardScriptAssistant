@@ -78,7 +78,7 @@ async function writeConversationLearningRecord(root, { conversation, userMessage
     "",
     "- 如果是否需要学习为[否]，本记录仅作为跳过依据，不进入规则升级。",
     "- 如果质量信号为[变差]，必须优先生成或关联降质和回退记录。",
-    "- 如果学习动作是[学习记录]，该内容进入学习资料库；用户主动点击技能学习时，只保存为沉淀材料，不自动改写生成规则。后续需要人工评审后再沉淀到稳定 skill。",
+    "- 如果学习动作是[学习记录]，该内容进入学习资料库；用户主动点击技能学习且内容属于分镜生成约束时，会写入分镜 skill 学习沉淀，下一次分镜生成会读取。",
     "",
   ];
   await fsp.writeFile(outPath, lines.join("\r\n"), "utf8");
@@ -268,7 +268,7 @@ function nextActionFor(classification, assistantMessage) {
     return "保留记录作为跳过依据，不进入规则沉淀。";
   }
   const skill = assistantMessage?.skillRoute?.name || "相关技能";
-  return `进入学习资料库；如果本轮由用户主动点击技能学习触发，则同步发布为当前规则，供 ${skill} 后续调用读取。`;
+  return `进入学习资料库；如果本轮由用户主动点击技能学习触发且内容属于分镜生成约束，则写入分镜 skill 学习沉淀，供 ${skill} 后续调用读取。`;
 }
 
 function relatedFilesFor(conversation, skillRoute) {

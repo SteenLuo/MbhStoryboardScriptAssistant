@@ -20,7 +20,7 @@ const { normalizeModelSettings, publicModelSettings, resolveActiveModelSettings,
 const { handleNotification, listNotifications } = require("./lib/notifications");
 const { buildLearningLibrary } = require("./lib/learningLibrary");
 const { applyLearningCorrectionRequest } = require("./lib/learningCorrection");
-const { appendLearningEvent, learnExplicitRule, updateCurrentRuleStatus } = require("./lib/autonomousLearning");
+const { appendLearningEvent } = require("./lib/autonomousLearning");
 const { recordArchiveLearningEvidence } = require("./lib/learningEvidence");
 const { analyzeCanvasArchiveReadiness } = require("./lib/canvasArchive");
 const { applyStoryboardHardRuleValidation, isStoryboardValidationResolved, validateStoryboardContent } = require("./lib/storyboardValidation");
@@ -384,7 +384,8 @@ async function saveCanvas(canvas, options = {}) {
     if (existing.deletedAt) throw new Error("画布已在回收站，不能继续编辑。");
   }
   if (!options.skipStoryboardValidation) {
-    normalized = normalizeCanvas(applyCanvasStoryboardValidation(normalized));
+    const storyboardValidationOptions = options.storyboardValidationOptions || await currentStoryboardValidationOptions();
+    normalized = normalizeCanvas(applyCanvasStoryboardValidation(normalized, storyboardValidationOptions));
   }
   await fsp.writeFile(file, JSON.stringify(normalized, null, 2), "utf8");
   return normalized;
@@ -394,7 +395,8 @@ async function getCanvas(id) {
   if (!id) return saveCanvas(createCanvas("新画布"));
   const file = await canvasFile(id);
   if (!fs.existsSync(file)) throw new Error("找不到画布");
-  return normalizeCanvas(await readJsonFile(file));
+  const storyboardValidationOptions = await currentStoryboardValidationOptions();
+  return normalizeCanvas(applyCanvasStoryboardValidation(await readJsonFile(file), storyboardValidationOptions));
 }
 
 async function listCanvases(options = {}) {
@@ -423,13 +425,15 @@ async function listCanvases(options = {}) {
   return canvases;
 }
 
-function buildCanvasArchiveCheck(canvas) {
+async function buildCanvasArchiveCheck(canvas) {
+  const storyboardValidationOptions = await currentStoryboardValidationOptions();
   const readiness = analyzeCanvasArchiveReadiness(canvas);
   const storyboardIssues = [];
   for (const node of canvas.nodes || []) {
     if (node.type !== "storyboard") continue;
     if (isStoryboardValidationResolved(node)) continue;
-    const validation = validateStoryboardContent(node.content);
+    const hardRuleResult = applyStoryboardHardRuleValidation(node.content, storyboardValidationOptions);
+    const validation = hardRuleResult.validation || validateStoryboardContent(node.content, { checkDialogueLength: false });
     if (!validation.ok) {
       storyboardIssues.push({
         nodeId: node.id,
@@ -452,7 +456,7 @@ async function checkCanvasArchiveReadiness(body) {
 
 async function archiveCanvasRecord(body) {
   const canvas = await getCanvas(body.canvasId || body.id);
-  const archiveCheck = buildCanvasArchiveCheck(canvas);
+  const archiveCheck = await buildCanvasArchiveCheck(canvas);
   if (!archiveCheck.ok) {
     return { ok: false, canvas, archiveCheck };
   }
@@ -1024,7 +1028,12 @@ async function handleLearningCompose({ conversation, userMessage, chatIntent, sk
   if (assistantMessage.learningRecord) {
     lines.push(`本地记录：${assistantMessage.learningRecord}`);
   }
-  lines.push("已保存到学习资料库；不会自动改写生成规则，后续需要人工沉淀到稳定 skill。");
+  if (assistantMessage.skillReferencePath) {
+    lines.push(`已写入分镜 skill 学习沉淀：${assistantMessage.skillReferencePath}`);
+    lines.push("下一次分镜生成会读取这条学习沉淀；如果输出仍不符合，可以从学习资料库带引用纠正。");
+  } else {
+    lines.push("已保存到学习资料库；这条内容未自动写入分镜 skill，需要人工整理后再影响生成。");
+  }
   if (assistantMessage.learningError) {
     lines.push(`学习记录异常：${assistantMessage.learningError}`);
   }
@@ -1039,13 +1048,99 @@ async function applyAutonomousConversationLearning({ conversation, userMessage, 
     assistantMessage,
   });
   if (!learningInput) return null;
-  const result = await learnExplicitRule(BUSINESS_ROOT, learningInput, {
-    notifyOnFailure: true,
+  const skillReference = await writeSkillLearningReference(BUSINESS_ROOT, learningInput);
+  const landingType = skillReference.applied ? "skill-reference" : "skill-draft";
+  const now = new Date().toISOString();
+  const event = await appendLearningEvent(BUSINESS_ROOT, {
+    ...learningInput,
+    eventId: `skill-learn-${conversationId()}`,
+    topicKey: inferSkillLearningTopicKey(learningInput),
+    conflictKey: inferSkillLearningConflictKey(learningInput),
+    internalStatus: "landed",
+    jobStatus: "completed",
+    landingType,
+    landingIds: skillReference.relativePath ? [skillReference.relativePath] : [],
+    skillId: skillReference.skillId,
+    generationProof: skillReference.applied
+      ? {
+        proofStatus: "pending_first_hit",
+        claimText: "已写入分镜 skill 学习沉淀，下一次分镜生成会读取；是否执行成功以输出为准。",
+      }
+      : {
+        proofStatus: "not_applicable",
+        claimText: "已保存为学习资料，但尚未写入生成会读取的 skill 位置。",
+      },
+    createdAt: now,
+    updatedAt: now,
   });
-  assistantMessage.learningEvent = result.event?.eventId || "";
-  assistantMessage.learningEventStatus = result.event?.status || "";
-  if (result.event?.ruleId) assistantMessage.learningRuleId = result.event.ruleId;
-  return result;
+  assistantMessage.learningEvent = event.eventId;
+  assistantMessage.learningEventStatus = skillReference.applied ? "已影响生成" : "已保存";
+  if (skillReference.relativePath) assistantMessage.skillReferencePath = skillReference.relativePath;
+  return { event, skillReference };
+}
+
+async function writeSkillLearningReference(root, learningInput) {
+  if (String(learningInput?.capability || "") !== "storyboard") {
+    return { applied: false, skillId: "", relativePath: "" };
+  }
+  const relativePath = "skills/03-storyboard/storyboard-generate/references/学习沉淀要求.md";
+  const targetPath = path.join(root, relativePath);
+  const ruleText = normalizeSkillLearningRuleText(learningInput);
+  if (!ruleText) return { applied: false, skillId: "", relativePath: "" };
+
+  await fsp.mkdir(path.dirname(targetPath), { recursive: true });
+  const header = [
+    "# 分镜技能学习沉淀要求",
+    "",
+    "以下规则来自用户在技能学习入口中的明确学习要求，已进入分镜生成上下文。",
+    "这些规则只能补充分镜生成行为，不得改变既有分镜字段格式。",
+    "",
+    "## 已沉淀要求",
+    "",
+  ].join("\n");
+  const existing = fs.existsSync(targetPath) ? await fsp.readFile(targetPath, "utf8") : "";
+  const nextLine = `- ${ruleText}`;
+  if (!existing.trim()) {
+    await fsp.writeFile(targetPath, `${header}${nextLine}\n`, "utf8");
+  } else if (!existing.includes(ruleText)) {
+    const needsNewline = existing.endsWith("\n") ? "" : "\n";
+    await fsp.writeFile(targetPath, `${existing}${needsNewline}${nextLine}\n`, "utf8");
+  }
+  return { applied: true, skillId: "storyboard-generate", relativePath };
+}
+
+function normalizeSkillLearningRuleText(learningInput) {
+  const raw = String(learningInput?.summary || learningInput?.rawTrigger || "").trim();
+  if (!raw) return "";
+  const mentionsDialogueLineCount = /镜号/.test(raw) && /台词/.test(raw) && /一行|只能有一行|第二行|多行/.test(raw);
+  const mentionsDialogueLength = /台词|对白/.test(raw) && /20|二十|字|长度|超过|超出/.test(raw);
+  if (mentionsDialogueLineCount && mentionsDialogueLength) {
+    return "每个镜号只能有一行台词字段；台词超过 20 个字或需要分句时，必须拆成新的连续镜号，不得在同一镜号下写第二行台词。";
+  }
+  if (mentionsDialogueLineCount) {
+    return "每个镜号只能有一行台词字段，不得在同一镜号下写第二行台词。";
+  }
+  if (mentionsDialogueLength) {
+    return "台词超过 20 个字时，必须拆成新的连续镜号。";
+  }
+  return raw.replace(/\s+/g, " ").slice(0, 240);
+}
+
+function inferSkillLearningTopicKey(learningInput) {
+  const text = `${learningInput?.summary || ""}\n${learningInput?.rawTrigger || ""}`;
+  if (String(learningInput?.capability || "") === "storyboard") {
+    if (/镜号/.test(text) && /台词/.test(text) && /一行|多行|第二行/.test(text)) return "storyboard.dialogue.line-count";
+    if (/台词|对白/.test(text) && /20|二十|字|长度|超过|超出/.test(text)) return "storyboard.dialogue.length";
+    return "storyboard.general";
+  }
+  return String(learningInput?.capability || "general") || "general";
+}
+
+function inferSkillLearningConflictKey(learningInput) {
+  const topicKey = inferSkillLearningTopicKey(learningInput);
+  if (topicKey === "storyboard.dialogue.line-count") return "storyboard.dialogue.line-count.single-line";
+  if (topicKey === "storyboard.dialogue.length") return "storyboard.dialogue.length.max-chars";
+  return topicKey;
 }
 
 function runReadme(title, route) {
@@ -1204,7 +1299,9 @@ async function runWorkflowTask({ runDir, task, model, apiKey, force = false }) {
   let finalContent = result.content;
   let hardRuleValidation = null;
   if (task === "storyboard-generate") {
-    const hardRuleResult = applyStoryboardHardRuleValidation(result.content);
+    const hardRuleResult = applyStoryboardHardRuleValidation(result.content, {
+      useStableSkillRules: hasStoryboardDialogueHardRules(skillPrompt),
+    });
     hardRuleValidation = hardRuleResult.hardRuleValidation;
     if (hardRuleValidation.checked && !hardRuleValidation.finalOk) {
       await recordStoryboardHardRuleFailure({
@@ -1212,7 +1309,7 @@ async function runWorkflowTask({ runDir, task, model, apiKey, force = false }) {
         outputId: config.file,
         hardRuleValidation,
       });
-      throw new Error("标准工作流分镜产物违反已命中的硬规则，自动拆分修复后仍未通过，已写入学习失败事件。");
+      throw new Error("标准工作流分镜产物未按已命中的 skill 硬规则生成，已写入学习失败事件，请重新生成。");
     }
     finalContent = hardRuleResult.content;
   }
@@ -1305,17 +1402,100 @@ async function canvasStoryboardSkillContext() {
     "【画布分镜生成补充要求】",
     "每次调用只生成当前分集的分镜脚本，不要合并其他集数，不要输出表格。",
     "【硬性输出约束】",
-    "1. 同一个镜号只能有一个说话人；如果出现两个人物对话，必须拆成连续镜号，每个镜号只保留一个人物的台词。",
-    "2. 单条台词不得超过 20 个字；超过时必须拆成新的镜号或拆成多条台词，且每条都不超过 20 个字。",
-    "3. 字段标签使用纯文本，不要使用 Markdown 加粗、表格、项目符号或把多个字段挤在同一行。",
-    "4. 每个镜号必须按文本块输出：镜号、景别、运镜、情绪/动作、音效、台词、时长；人物对白只能放在台词字段，不要写进情绪/动作。",
-    "5. 只输出分镜正文，不要寒暄、解释、标题、Markdown 分隔线或“好的，收到任务”等非分镜内容。",
+    "1. 字段标签使用纯文本，不要使用 Markdown 加粗、表格、项目符号或把多个字段挤在同一行。",
+    "2. 每个镜号必须按文本块输出：镜号、景别、运镜、情绪/动作、音效、台词、时长；人物对白只能放在台词字段，不要写进情绪/动作。",
+    "3. 只输出分镜正文，不要寒暄、解释、标题、Markdown 分隔线或“好的，收到任务”等非分镜内容。",
     `## 分镜标准文档：${standardPath}\n\n${standardText}`,
   ].join("\n\n");
   return {
     prompt,
     skillRulesUsed: [],
+    enforceStableHardRules: hasStoryboardDialogueHardRules(prompt),
   };
+}
+
+const STORYBOARD_GENERATION_MAX_ATTEMPTS = 3;
+const STORYBOARD_DIALOGUE_HARD_RULE_PATTERN = /每个镜号只能有一行|同一镜号下不得出现第二行|单条台词不得超过\s*20|台词超过\s*20|不得超过20|不能超过20|同一个镜号只能有一个说话人|只允许存在一个人物的台词/;
+
+function hasStoryboardDialogueHardRules(prompt) {
+  return STORYBOARD_DIALOGUE_HARD_RULE_PATTERN.test(String(prompt || ""));
+}
+
+async function currentStoryboardValidationOptions() {
+  const storyboardSkillContext = await canvasStoryboardSkillContext();
+  return {
+    useStableSkillRules: storyboardSkillContext.enforceStableHardRules === true,
+  };
+}
+
+async function generateStoryboardEpisodeWithValidation(input = {}) {
+  const usages = [];
+  let result = null;
+  let hardRuleResult = null;
+  let retryFeedback = "";
+
+  for (let attempt = 1; attempt <= STORYBOARD_GENERATION_MAX_ATTEMPTS; attempt += 1) {
+    result = await runCanvasTask({
+      task: "storyboard-generate",
+      input: buildStoryboardEpisodeGenerationInput(input, retryFeedback),
+      model: input.model,
+      apiKey: input.apiKey,
+      skillPrompt: input.skillPrompt,
+    });
+    usages.push(result.usage);
+    hardRuleResult = applyStoryboardHardRuleValidation(result.content, {
+      useStableSkillRules: input.enforceStableHardRules === true,
+    });
+    if (!hardRuleResult.hardRuleValidation.checked || hardRuleResult.hardRuleValidation.finalOk) {
+      return { result, hardRuleResult, usages, attempts: attempt };
+    }
+    retryFeedback = buildStoryboardHardRuleRetryFeedback(hardRuleResult.hardRuleValidation.finalIssues);
+  }
+
+  return {
+    result,
+    hardRuleResult,
+    usages,
+    attempts: STORYBOARD_GENERATION_MAX_ATTEMPTS,
+  };
+}
+
+function buildStoryboardEpisodeGenerationInput(input = {}, retryFeedback = "") {
+  const episode = input.episode || {};
+  const sourceNode = input.sourceNode || {};
+  const index = Number(input.index || 0);
+  const title = episode.title || `第${episode.number || index + 1}集`;
+  const lines = [
+    `请只为以下分集生成分镜脚本：${title}`,
+    "",
+  ];
+  if (retryFeedback) {
+    lines.push(
+      "【上一版未通过，请重新生成完整分镜】",
+      "不要解释原因，不要只改局部片段；必须输出完整分镜正文。",
+      retryFeedback,
+      "处理原则：宁可增加连续镜号，也不能让任意一行台词超过 20 个字；同一个镜号只能有一行台词字段。",
+      "",
+    );
+  }
+  lines.push(episode.content || sourceNode.content || "");
+  return lines.join("\n");
+}
+
+function buildStoryboardHardRuleRetryFeedback(issues = []) {
+  const normalized = (Array.isArray(issues) ? issues : []).slice(0, 12).map((issue, index) => {
+    const lineNumber = issue.lineNumber ? `第 ${issue.lineNumber} 行` : `问题 ${index + 1}`;
+    const lineText = String(issue.lineText || issue.dialogue || "").trim();
+    const reason = issue.message || issue.type || "硬规则未通过";
+    return `- ${lineNumber}：${reason}${lineText ? `\n  原文：${lineText}` : ""}`;
+  });
+  if (!normalized.length) {
+    return "- 上一版存在分镜硬规则违规，请逐镜号检查台词长度、台词字段数量和说话人数量。";
+  }
+  return [
+    "上一版存在以下硬规则违规，必须在新一版中全部消除：",
+    ...normalized,
+  ].join("\n");
 }
 
 function findCanvasNode(canvas, nodeId) {
@@ -1403,28 +1583,28 @@ async function generateCanvasStoryboards(body) {
   for (let index = 0; index < selectedEpisodes.length; index += 1) {
     const episode = selectedEpisodes[index];
     const plannedNode = plan.nodes[index];
-    const result = await runCanvasTask({
-      task: "storyboard-generate",
-      input: [
-        `请只为以下分集生成分镜脚本：${episode.title || `第${episode.number || index + 1}集`}`,
-        "",
-        episode.content || sourceNode.content,
-      ].join("\n"),
+    const generation = await generateStoryboardEpisodeWithValidation({
+      episode,
+      sourceNode,
+      index,
+      body,
       model: body.model,
       apiKey: body.apiKey,
       skillPrompt: storyboardSkillContext.prompt,
+      enforceStableHardRules: storyboardSkillContext.enforceStableHardRules,
     });
-    usages.push(result.usage);
+    usages.push(...generation.usages);
+    const result = generation.result;
     lastModel = result.model || lastModel;
     const titleScope = { nodes: [...(canvas.nodes || []), ...generatedNodes] };
-    const hardRuleResult = applyStoryboardHardRuleValidation(result.content);
+    const hardRuleResult = generation.hardRuleResult;
     if (hardRuleResult.hardRuleValidation.checked && !hardRuleResult.hardRuleValidation.finalOk) {
       await recordStoryboardHardRuleFailure({
         canvasId: canvas.id,
         outputId: plannedNode.id,
         hardRuleValidation: hardRuleResult.hardRuleValidation,
       });
-      throw new Error("分镜输出违反已命中的硬规则，自动拆分修复后仍未通过，已写入学习失败事件。");
+      throw new Error("分镜输出未按已命中的 skill 硬规则生成，已写入学习失败事件，请重新生成。");
     }
     generatedNodes.push({
       ...plannedNode,
@@ -1435,6 +1615,7 @@ async function generateCanvasStoryboards(body) {
         model: result.model,
         usage: result.usage,
         generatedAt: new Date().toISOString(),
+        generationAttempts: generation.attempts,
         skillRulesUsed: hardRuleResult.hardRuleValidation.appliedRules || [],
         validation: hardRuleResult.validation,
         hardRuleValidation: hardRuleResult.hardRuleValidation,
@@ -1475,18 +1656,16 @@ async function recordStoryboardHardRuleFailure(input = {}) {
     canvasId: input.canvasId,
     outputId: input.outputId,
     sourceEventIds,
-    currentRulesUsedRefs: [],
     skillRulesUsedRefs: ruleRefs,
-    summary: "分镜输出违反稳定分镜技能硬规则，自动修正后仍失败。",
+    summary: "分镜输出未按稳定分镜 skill 硬规则生成，已拦截。",
     error: {
       stage: "storyboard-hard-rule-post-validation",
       code: "STORYBOARD_HARD_RULE_VALIDATION_FAILED",
-      message: "自动台词拆分后仍存在硬规则违规。",
+      message: "生成结果仍存在硬规则违规，未交付为可用分镜。",
       issues: input.hardRuleValidation?.finalIssues || input.hardRuleValidation?.initialIssues || [],
     },
     generationProof: {
       proofStatus: "failed",
-      currentRulesUsedRefs: [],
       skillRulesUsedRefs: ruleRefs,
       validationResultRefs: [String(input.outputId || "").trim()].filter(Boolean),
       failureEventIds: [eventId],
@@ -1503,13 +1682,11 @@ function safeEventSegment(value) {
     .slice(0, 48) || "output";
 }
 
-function storyboardRevisionIssuesForPrompt(parentNode) {
+function storyboardRevisionIssuesForPrompt(parentNode, storyboardValidationOptions = {}) {
   if (parentNode?.type !== "storyboard") return [];
-  const savedValidation = parentNode.meta?.validation;
-  if (savedValidation && !savedValidation.ok && Array.isArray(savedValidation.issues)) {
-    return savedValidation.issues;
-  }
-  return validateStoryboardContent(parentNode.content).issues;
+  const hardRuleResult = applyStoryboardHardRuleValidation(parentNode.content, storyboardValidationOptions);
+  const validation = hardRuleResult.validation || validateStoryboardContent(parentNode.content, { checkDialogueLength: false });
+  return validation.ok ? [] : validation.issues;
 }
 
 function formatStoryboardRevisionIssues(issues = []) {
@@ -1551,7 +1728,10 @@ async function reviseCanvasNode(body) {
 
   const storyboardSkillContext = node.type === "storyboard" ? await canvasStoryboardSkillContext() : null;
   const skillPrompt = storyboardSkillContext?.prompt || "";
-  const storyboardIssueContext = formatStoryboardRevisionIssues(storyboardRevisionIssuesForPrompt(parentNode));
+  const storyboardValidationOptions = {
+    useStableSkillRules: storyboardSkillContext?.enforceStableHardRules === true,
+  };
+  const storyboardIssueContext = formatStoryboardRevisionIssues(storyboardRevisionIssuesForPrompt(parentNode, storyboardValidationOptions));
   const messages = [
     {
       role: "system",
@@ -1588,7 +1768,7 @@ async function reviseCanvasNode(body) {
     messages,
   });
   const hardRuleResult = node.type === "storyboard"
-    ? applyStoryboardHardRuleValidation(result.content)
+    ? applyStoryboardHardRuleValidation(result.content, storyboardValidationOptions)
     : null;
   if (hardRuleResult?.hardRuleValidation?.checked && !hardRuleResult.hardRuleValidation.finalOk) {
     await recordStoryboardHardRuleFailure({
@@ -1596,7 +1776,7 @@ async function reviseCanvasNode(body) {
       outputId: node.id,
       hardRuleValidation: hardRuleResult.hardRuleValidation,
     });
-    throw new Error("分镜修改结果违反已命中的硬规则，自动拆分修复后仍未通过，已写入学习失败事件。");
+    throw new Error("分镜修改结果未按已命中的 skill 硬规则生成，已写入学习失败事件，请重新生成。");
   }
   const revisedValidation = hardRuleResult?.validation || null;
   const revisedContent = hardRuleResult?.content || result.content;
@@ -1864,7 +2044,9 @@ async function generateWithDeepSeek(body) {
   let finalContent = result.content;
   let hardRuleValidation = null;
   if (body.task === "storyboard-generate") {
-    const hardRuleResult = applyStoryboardHardRuleValidation(result.content);
+    const hardRuleResult = applyStoryboardHardRuleValidation(result.content, {
+      useStableSkillRules: hasStoryboardDialogueHardRules(skillPrompt),
+    });
     hardRuleValidation = hardRuleResult.hardRuleValidation;
     if (hardRuleValidation.checked && !hardRuleValidation.finalOk) {
       await recordStoryboardHardRuleFailure({
@@ -1872,7 +2054,7 @@ async function generateWithDeepSeek(body) {
         outputId: config.file,
         hardRuleValidation,
       });
-      throw new Error("分镜产物违反已命中的硬规则，自动拆分修复后仍未通过，已写入学习失败事件。");
+      throw new Error("分镜产物未按已命中的 skill 硬规则生成，已写入学习失败事件，请重新生成。");
     }
     finalContent = hardRuleResult.content;
   }
@@ -2012,7 +2194,6 @@ async function learningStatus() {
 async function handleLearningCorrection(body = {}) {
   return applyLearningCorrectionRequest(BUSINESS_ROOT, body, {
     appendLearningEvent,
-    updateCurrentRuleStatus,
     buildLearningLibrary,
   });
 }
@@ -2127,10 +2308,6 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/runs") {
     return sendJson(res, 200, await createRun(body));
-  }
-  if (req.method === "POST" && url.pathname === "/api/learning-rules/status") {
-    const result = await updateCurrentRuleStatus(BUSINESS_ROOT, body);
-    return sendJson(res, 200, { ...result, library: await buildLearningLibrary(BUSINESS_ROOT) });
   }
   if (req.method === "POST" && url.pathname === "/api/learning-corrections") {
     return sendJson(res, 200, await handleLearningCorrection(body));

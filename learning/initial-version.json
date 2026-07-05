@@ -1,0 +1,58 @@
+{
+  "versionId": "initial-v1",
+  "createdAt": "2026-07-05",
+  "purpose": "Initial skill and validation baseline for repeatable learning tests and Git packaging.",
+  "principle": "Generation rules are validation rules. Validation must not maintain a separate hidden rule set.",
+  "baseline": {
+    "path": "baselines/initial-skills",
+    "manifest": "baselines/initial-skills/manifest.json",
+    "package": "packages/initial-skills-v1.zip",
+    "packageSha256": "d606eb7f91cf9fe607820e932ffe6a6bc2de8624b13d437aec139f827f08ceca"
+  },
+  "skills": {
+    "officialSkillCount": 9,
+    "learnedSkillItemCount": 0,
+    "source": "skills/**/SKILL.md",
+    "baselineSource": "baselines/initial-skills/skills/**/SKILL.md"
+  },
+  "validation": {
+    "sourceOfTruth": "Current generation skill prompt.",
+    "defaultActiveHardRules": [],
+    "activation": "A validation hard rule is active only when the current generation skill prompt contains the same rule.",
+    "initialStoryboardDialoguePolicy": {
+      "maxCharsPerDialogueLine": null,
+      "singleDialogueLinePerShot": null,
+      "singleSpeakerPerShot": null
+    },
+    "implementationFiles": [
+      {
+        "path": "app/lib/storyboardValidation.js",
+        "sha256": "dd67abf69aeb0393c65c1a3cb96b49d2b30e0064b98310b953dfecd161f9caca"
+      },
+      {
+        "path": "app/lib/canvasStoryboardValidation.js",
+        "sha256": "1b1b538b77543b6450d25a58b1062cdeecba0f10d5640c1f04e41a5b657a9211"
+      },
+      {
+        "path": "app/server.js",
+        "sha256": "11bd66f583f6f814a5282631c78b193473b38b93957be9526dc5be6c61278c83"
+      }
+    ]
+  },
+  "reset": {
+    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/Reset-SkillsToInitial.ps1",
+    "keep": [
+      "Official skill files restored from baselines/initial-skills",
+      "Official skill reference files",
+      "Initial validation derivation code"
+    ],
+    "clear": [
+      "learning/events.jsonl",
+      "learning/current-ruleset.json rules",
+      "learning/ruleset-history/*.json",
+      "learning/conversation-records generated records",
+      "learning/skill-evolution-reports generated draft JSON",
+      "skills/**/references/??????.md"
+    ]
+  }
+}

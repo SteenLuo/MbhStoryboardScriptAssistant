@@ -107,8 +107,6 @@ async function loadLocalSkillContext(root, route, options = {}) {
     name: selected.name,
     path: selected.path,
     files,
-    currentRulesUsed: [],
-    currentRulesLoadError: null,
     prompt: [
       `【本轮本地技能】${selected.name}（${selected.id}）`,
       "以下内容来自本项目本地 skills 目录。你必须优先遵守这些技能说明；如果与普通聊天习惯冲突，以本地技能为准。",

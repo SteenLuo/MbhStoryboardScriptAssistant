@@ -123,7 +123,6 @@ test("loadLocalSkillContext does not load current rules into generation prompts"
   assert.doesNotMatch(context.prompt, /当前规则层/);
   assert.doesNotMatch(context.prompt, /分镜台词每句 20 字以内/);
   assert.ok(!context.files.includes("learning/current-ruleset.json"));
-  assert.deepStrictEqual(context.currentRulesUsed, []);
 });
 
 test("pending skill evolution drafts stay out of generated local skill context and routes", async () => {

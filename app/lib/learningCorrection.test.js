@@ -4,7 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { appendLearningEvent, readLearningEventRecords, updateCurrentRuleStatus, writeCurrentRuleset } = require("./autonomousLearning");
+const { appendLearningEvent, readLearningEventRecords } = require("./autonomousLearning");
 const { buildLearningLibrary } = require("./learningLibrary");
 const {
   DEFAULT_CORRECTION_TEXTS,
@@ -95,7 +95,7 @@ test("correction event falls back to waiting correction when locator is missing"
   assert.match(result.record.nextStepText, /补充正确的纠正位置|补充是哪条记录/);
 });
 
-test("disable correction records the event but does not throw for a missing rule", async () => {
+test("disable correction records the event without using a current rule layer", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-correction-missing-rule-"));
   const result = await applyLearningCorrectionRequest(root, {
     payload: {
@@ -108,7 +108,6 @@ test("disable correction records the event but does not throw for a missing rule
     message: "这条先停用，后续我再补说明。",
   }, {
     appendLearningEvent,
-    updateCurrentRuleStatus,
     buildLearningLibrary,
     now: () => "2026-07-04T00:00:00.000Z",
     idSource: () => "correction-missing-rule",
@@ -117,32 +116,15 @@ test("disable correction records the event but does not throw for a missing rule
   const events = await readLearningEventRecords(root);
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.disableResult, null);
-  assert.match(result.warning, /没有停用规则/);
-  assert.match(result.message, /已记录纠正/);
+  assert.strictEqual(result.warning, "");
+  assert.match(result.message, /没有当前规则层开关/);
+  assert.match(result.message, /不会盲改 skill 文件/);
   assert.ok(result.library);
   assert.ok(events.some((event) => event.eventId === "correction-missing-rule" && event.learningMode === "correction"));
 });
 
-test("disable correction records the event but does not throw for a covered rule", async () => {
+test("disable correction records legacy rule references as correction evidence only", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "mbh-learning-correction-covered-rule-"));
-  await writeCurrentRuleset(root, {
-    version: 1,
-    lastGoodVersion: 1,
-    updatedAt: "2026-07-04T00:00:00.000Z",
-    rules: [{
-      ruleId: "rule-covered",
-      topicKey: "storyboard.general",
-      conflictKey: "storyboard.general",
-      capability: "storyboard",
-      content: "旧规则",
-      priority: 50,
-      sourceEventIds: ["event-old"],
-      status: "covered",
-      coveredByRuleId: "rule-new",
-      createdAt: "2026-07-04T00:00:00.000Z",
-      updatedAt: "2026-07-04T00:00:00.000Z",
-    }],
-  });
 
   const result = await applyLearningCorrectionRequest(root, {
     payload: {
@@ -155,7 +137,6 @@ test("disable correction records the event but does not throw for a covered rule
     message: "这条先停用，后续我再补说明。",
   }, {
     appendLearningEvent,
-    updateCurrentRuleStatus,
     buildLearningLibrary,
     now: () => "2026-07-04T00:10:00.000Z",
     idSource: () => "correction-covered-rule",
@@ -164,8 +145,12 @@ test("disable correction records the event but does not throw for a covered rule
   const events = await readLearningEventRecords(root);
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.disableResult, null);
-  assert.match(result.warning, /没有停用规则/);
-  assert.match(result.warning, /覆盖/);
-  assert.ok(result.library.currentRules.some((rule) => rule.ruleId === "rule-covered" && rule.status === "covered"));
+  assert.strictEqual(result.warning, "");
+  assert.match(result.message, /没有当前规则层开关/);
+  assert.deepStrictEqual(result.library.currentRules, []);
+  assert.ok(result.library.records.some((record) =>
+    record.advanced?.eventId === "correction-covered-rule" &&
+    record.advanced?.landingType === "correction"
+  ));
   assert.ok(events.some((event) => event.eventId === "correction-covered-rule" && event.learningMode === "correction"));
 });

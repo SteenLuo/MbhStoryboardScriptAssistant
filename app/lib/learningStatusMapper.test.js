@@ -70,7 +70,7 @@ test("normalized minimal sample and evidence landings stay saved despite default
   }
 });
 
-test("current rule landing is saved for skill sedimentation and does not affect generation", () => {
+test("legacy current-rule landing is saved as history and does not affect generation", () => {
   const record = mapLearningDisplayRecord({
     eventId: "event-rule",
     ruleId: "rule-event-rule",
@@ -85,10 +85,29 @@ test("current rule landing is saved for skill sedimentation and does not affect 
   assert.equal(record.displayStatus, "已保存");
   assert.equal(record.actionLabel, "不用管");
   assert.equal(record.affectsGeneration, false);
-  assert.match(record.generationImpactText, /待沉淀规则/);
-  assert.match(record.generationImpactText, /稳定 skill/);
+  assert.match(record.generationImpactText, /历史学习资料/);
+  assert.match(record.generationImpactText, /分镜 skill/);
   assert.equal(record.generationProof.proofStatus, "not_applicable");
-  assert.match(record.nextStepText, /沉淀到稳定 skill/);
+  assert.match(record.nextStepText, /技能学习重新沉淀到分镜 skill/);
+});
+
+test("skill-reference landing affects generation through storyboard skill sedimentation", () => {
+  const record = mapLearningDisplayRecord({
+    eventId: "event-skill-reference",
+    landingType: "skill-reference",
+    learningMode: "overall",
+    internalStatus: "landed",
+    jobStatus: "completed",
+    summary: "每个镜号只能有一行台词字段",
+    skillId: "storyboard-generate",
+  });
+
+  assertKnownDisplayStatus(record);
+  assert.equal(record.displayStatus, "已影响生成");
+  assert.equal(record.affectsGeneration, true);
+  assert.match(record.generationImpactText, /分镜 skill 学习沉淀/);
+  assert.match(record.usedWhereText, /分镜 skill 学习沉淀/);
+  assert.match(record.nextStepText, /下一次分镜生成会读取/);
 });
 
 test("unfinished generation landings wait for confirmation before affecting generation", () => {
@@ -150,6 +169,33 @@ test("failed learning exposes correction action and failed proof", () => {
   assert.match(record.nextStepText, /修正|纠正/);
 });
 
+test("legacy hard-rule failure wording is normalized for public display", () => {
+  const record = mapLearningDisplayRecord({
+    eventId: "event-legacy-hard-rule-failed",
+    landingType: "eval",
+    learningMode: "evidence",
+    internalStatus: "failed",
+    jobStatus: "failed",
+    summary: "分镜输出违反稳定分镜技能硬规则，自动修正后仍失败。",
+    error: {
+      stage: "storyboard-hard-rule-post-validation",
+      message: "自动台词拆分后仍存在硬规则违规。",
+      issues: [{
+        type: "dialogue-too-long",
+        currentRulesUsedRefs: ["legacy-rule"],
+        skillRulesUsedRefs: ["stable-skill-storyboard-dialogue-length"],
+      }],
+    },
+  });
+
+  assert.equal(record.learnedText, "分镜输出未按稳定分镜 skill 硬规则生成，已拦截。");
+  assert.equal(record.advanced.summary, "分镜输出未按稳定分镜 skill 硬规则生成，已拦截。");
+  assert.equal(record.advanced.error.message, "生成结果仍存在硬规则违规，未交付为可用分镜。");
+  assert.equal(Object.hasOwn(record.advanced.error.issues[0], "currentRulesUsedRefs"), false);
+  assert.deepEqual(record.advanced.error.issues[0].skillRulesUsedRefs, ["stable-skill-storyboard-dialogue-length"]);
+  assert.doesNotMatch(record.learnedText, /自动修正|自动台词拆分/);
+});
+
 test("covered learning no longer affects generation", () => {
   const record = mapLearningDisplayRecord({
     eventId: "event-covered",
@@ -198,14 +244,14 @@ test("mapper exposes only public generation proof fields", () => {
     generationProof: {
       proofStatus: "validated",
       claimText: "已验证",
-      currentRulesUsedRefs: ["rule-a"],
+      skillRulesUsedRefs: ["stable-skill-storyboard-dialogue-length"],
       stack: "debug stack",
       traceToken: "secret",
     },
   });
 
   assert.equal(record.generationProof.proofStatus, "validated");
-  assert.deepEqual(record.generationProof.currentRulesUsedRefs, ["rule-a"]);
+  assert.deepEqual(record.generationProof.skillRulesUsedRefs, ["stable-skill-storyboard-dialogue-length"]);
   assert.equal(Object.hasOwn(record.generationProof, "stack"), false);
   assert.equal(Object.hasOwn(record.generationProof, "traceToken"), false);
 });
