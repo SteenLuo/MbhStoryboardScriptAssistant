@@ -86,9 +86,9 @@ test("legacy current-rule landing is saved as history and does not affect genera
   assert.equal(record.actionLabel, "不用管");
   assert.equal(record.affectsGeneration, false);
   assert.match(record.generationImpactText, /历史学习资料/);
-  assert.match(record.generationImpactText, /分镜 skill/);
+  assert.match(record.generationImpactText, /正式技能/);
   assert.equal(record.generationProof.proofStatus, "not_applicable");
-  assert.match(record.nextStepText, /技能学习重新沉淀到分镜 skill/);
+  assert.match(record.nextStepText, /技能学习重新沉淀到正式技能/);
 });
 
 test("skill-reference landing affects generation through storyboard skill sedimentation", () => {
@@ -105,9 +105,9 @@ test("skill-reference landing affects generation through storyboard skill sedime
   assertKnownDisplayStatus(record);
   assert.equal(record.displayStatus, "已影响生成");
   assert.equal(record.affectsGeneration, true);
-  assert.match(record.generationImpactText, /分镜 skill 学习沉淀/);
-  assert.match(record.usedWhereText, /分镜 skill 学习沉淀/);
-  assert.match(record.nextStepText, /下一次分镜生成会读取/);
+  assert.match(record.generationImpactText, /对应正式技能/);
+  assert.match(record.usedWhereText, /对应正式技能/);
+  assert.match(record.nextStepText, /下一次相关生成会读取/);
 });
 
 test("unfinished generation landings wait for confirmation before affecting generation", () => {
@@ -188,8 +188,8 @@ test("legacy hard-rule failure wording is normalized for public display", () => 
     },
   });
 
-  assert.equal(record.learnedText, "分镜输出未按稳定分镜 skill 硬规则生成，已拦截。");
-  assert.equal(record.advanced.summary, "分镜输出未按稳定分镜 skill 硬规则生成，已拦截。");
+  assert.equal(record.learnedText, "分镜输出未按正式分镜技能硬规则生成，已拦截。");
+  assert.equal(record.advanced.summary, "分镜输出未按正式分镜技能硬规则生成，已拦截。");
   assert.equal(record.advanced.error.message, "生成结果仍存在硬规则违规，未交付为可用分镜。");
   assert.equal(Object.hasOwn(record.advanced.error.issues[0], "currentRulesUsedRefs"), false);
   assert.deepEqual(record.advanced.error.issues[0].skillRulesUsedRefs, ["stable-skill-storyboard-dialogue-length"]);

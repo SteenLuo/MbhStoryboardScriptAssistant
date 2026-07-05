@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>猫主子漫剧剧本分镜小助手</title>
-    <link rel="stylesheet" href="/styles.css?v=0.5-learning-library-tabs" />
+    <link rel="stylesheet" href="/styles.css?v=0.5-learning-library-copy" />
   </head>
   <body>
     <div class="app-shell">
@@ -226,7 +226,7 @@
         <div class="learning-page-head">
           <div>
             <h2 id="learningPageTitle">学习资料库</h2>
-            <p>系统会把技能学习、满意样例、纠错和归档证据记到这里。已保存不等于影响生成；当前生成只读取分镜 skill。学错了可以点“带引用去纠正”回到对话处理。</p>
+            <p>系统会把技能学习、满意样例、纠错和归档证据记到这里。已保存不等于影响生成；生成只读取正式技能，不读取普通学习记录。学错了可以点“带引用去纠正”回到对话处理。</p>
           </div>
           <button id="closeLearningPage" class="ghost" type="button">关闭</button>
         </div>
@@ -235,7 +235,7 @@
             <section class="learning-guide" aria-label="学习逻辑说明">
               <div class="learning-guide-intro">
                 <strong>新手说明</strong>
-                <span>默认只看这三件事：已保存了什么、是否已经写入分镜 skill、下一步要不要待确认。</span>
+                <span>默认只看这三件事：保存了什么、是否已经写入正式技能、下一步要不要处理。</span>
               </div>
               <div class="learning-guide-grid">
                 <article>
@@ -244,7 +244,7 @@
                 </article>
                 <article>
                   <strong>已影响生成</strong>
-                  <p>普通学习记录会先作为学习资料保存；写入分镜 skill 学习沉淀后，下一次分镜生成会读取。</p>
+                  <p>普通学习记录会先作为学习资料保存；只有写入正式技能后，下一次对应生成才会读取。</p>
                 </article>
                 <article>
                   <strong>学错了怎么改</strong>
@@ -260,33 +260,38 @@
             <div class="learning-library">
               <div class="learning-library-tabs-row">
                 <div class="learning-library-tabs" role="tablist" aria-label="学习资料库">
-                  <button id="learningRecordsTab" class="active" type="button" role="tab" aria-selected="true" aria-controls="learningLibraryRecords" data-learning-library-tab="records">
-                    <span>学习记录</span>
+                  <div class="learning-library-tab-group active" data-learning-library-tab-group="records">
+                    <button id="learningRecordsTab" class="active" type="button" role="tab" aria-selected="true" aria-controls="learningLibraryRecords" data-learning-library-tab="records" aria-label="学习记录">
+                      <span>学习记录</span>
+                      <strong id="learningRecordsTabCount" class="learning-tab-count">0</strong>
+                    </button>
                     <span class="learning-help-wrap">
-                      <span id="learningRecordHelp" class="learning-help-button" aria-label="学习记录说明" aria-describedby="learningRecordHelpText">?</span>
+                      <button id="learningRecordHelp" class="learning-help-button" type="button" aria-label="学习记录说明" aria-describedby="learningRecordHelpText">?</button>
                       <span id="learningRecordHelpText" class="learning-help-popover" role="tooltip">
                         <strong>学习记录说明</strong>
-                        <span>这里记录系统从对话、样例和归档画布里学到了什么，以及这些内容是否已经沉淀到稳定 skill。</span>
+                        <span>这里记录系统从对话、样例和归档画布里学到了什么，以及这些内容是否已经沉淀到正式技能。</span>
                         <strong>学习记录状态</strong>
-                        <span><b>已保存</b>已经形成学习记录</span>
-                        <span><b>已影响生成</b>正式稳定 skill 会被后续生成读取；普通学习不会自动影响生成</span>
-                        <span><b>待确认</b>还需要继续判断或补充证据</span>
+                        <span><b>已保存</b>已经形成学习记录，但不会直接改变生成</span>
+                        <span><b>已影响生成</b>已经写入正式技能，后续对应生成会读取</span>
+                        <span><b>待确认</b>还需要补范围、补样例或补纠正说明</span>
+                        <span><b>已被覆盖</b>已有更新记录替代它，不再影响生成</span>
                         <span><b>失败</b>会显示失败阶段、原因、是否影响生成和下一步</span>
                       </span>
                     </span>
-                    <strong id="learningRecordsTabCount" class="learning-tab-count">0</strong>
-                  </button>
-                  <button id="learningSkillsTab" type="button" role="tab" aria-selected="false" aria-controls="learningLibrarySkills" data-learning-library-tab="skills">
-                    <span>技能库</span>
+                  </div>
+                  <div class="learning-library-tab-group" data-learning-library-tab-group="skills">
+                    <button id="learningSkillsTab" type="button" role="tab" aria-selected="false" aria-controls="learningLibrarySkills" data-learning-library-tab="skills" aria-label="技能库">
+                      <span>技能库</span>
+                      <strong id="learningSkillsTabCount" class="learning-tab-count">0</strong>
+                    </button>
                     <span class="learning-help-wrap">
-                      <span id="learningSkillHelp" class="learning-help-button" aria-label="技能库说明" aria-describedby="learningSkillHelpText">?</span>
+                      <button id="learningSkillHelp" class="learning-help-button" type="button" aria-label="技能库说明" aria-describedby="learningSkillHelpText">?</button>
                       <span id="learningSkillHelpText" class="learning-help-popover" role="tooltip">
                         <strong>技能库说明</strong>
-                        <span>这里只说明技能库：展示系统正在使用的基础技能，以及技能学习写入的分镜沉淀。对话学习写入分镜 skill 学习沉淀后，下一次分镜生成会读取。这里不会直接编辑复杂规则。</span>
+                        <span>这里展示系统当前可调用的正式技能，以及等待人工确认的技能草案。只有正式技能会被对应生成链路读取；普通学习记录和技能草案不会自动影响生成。这里不做复杂规则编辑。</span>
                       </span>
                     </span>
-                    <strong id="learningSkillsTabCount" class="learning-tab-count">0</strong>
-                  </button>
+                  </div>
                 </div>
                 <button id="learningFailureJump" class="learning-failure-jump" type="button" hidden aria-label="定位失败学习记录">
                   <span>失败</span>
@@ -500,6 +505,6 @@
     <script src="/markdown-format.js?v=20260611-markdown-v1"></script>
     <script src="/compose-validation.js?v=20260611-compose-validation-v1"></script>
     <script src="/project-tree.js?v=20260627-canvas-icons-paws-v1"></script>
-    <script src="/app.js?v=0.5-learning-library-tabs"></script>
+    <script src="/app.js?v=0.5-learning-library-copy"></script>
   </body>
 </html>

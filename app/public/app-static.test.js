@@ -301,23 +301,23 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(indexSource, /learningSkillsTabCount/);
   assert.match(indexSource, /learningRecordHelp/);
   assert.match(indexSource, /学习记录说明/);
-  assert.match(learningPageSource, /系统会把技能学习、满意样例、纠错和归档证据记到这里。已保存不等于影响生成；当前生成只读取分镜 skill。学错了可以点“带引用去纠正”回到对话处理。/);
+  assert.match(learningPageSource, /系统会把技能学习、满意样例、纠错和归档证据记到这里。已保存不等于影响生成；生成只读取正式技能，不读取普通学习记录。学错了可以点“带引用去纠正”回到对话处理。/);
   assert.match(learningPageSource, /已保存/);
   assert.match(learningPageSource, /已影响生成/);
-  assert.match(learningPageSource, /普通学习记录会先作为学习资料保存；写入分镜 skill 学习沉淀后，下一次分镜生成会读取/);
+  assert.match(learningPageSource, /普通学习记录会先作为学习资料保存；只有写入正式技能后，下一次对应生成才会读取/);
   assert.doesNotMatch(learningPageSource, /沉淀规则/);
   assert.doesNotMatch(indexSource, /data-learning-library-tab="rules"/);
   assert.match(learningPageSource, /待确认/);
   assert.match(learningPageSource, /学错了怎么改/);
   assert.doesNotMatch(learningPageSource, /已生效/);
-  assert.match(indexSource, /data-learning-library-tab="records"[\s\S]*learningRecordHelp[\s\S]*学习记录状态[\s\S]*已保存[\s\S]*已影响生成[\s\S]*待确认[\s\S]*失败[\s\S]*<\/button>/);
+  assert.match(indexSource, /data-learning-library-tab-group="records"[\s\S]*data-learning-library-tab="records"[\s\S]*learningRecordHelp[\s\S]*学习记录状态[\s\S]*已保存[\s\S]*已影响生成[\s\S]*待确认[\s\S]*已被覆盖[\s\S]*失败[\s\S]*<\/div>/);
   assert.match(indexSource, /learningSkillHelp/);
   assert.match(indexSource, /技能库说明/);
-  assert.match(indexSource, /技能学习写入的分镜沉淀/);
-  assert.match(indexSource, /下一次分镜生成会读取/);
-  assert.match(indexSource, /不会直接编辑复杂规则/);
-  assert.match(indexSource, /data-learning-library-tab="skills"[\s\S]*learningSkillHelp[\s\S]*<\/button>/);
-  assert.doesNotMatch(indexSource, /<\/div>\s*<div class="learning-help-wrap">[\s\S]*learningSkillHelp/);
+  assert.match(indexSource, /当前可调用的正式技能/);
+  assert.match(indexSource, /普通学习记录和技能草案不会自动影响生成/);
+  assert.match(indexSource, /这里不做复杂规则编辑/);
+  assert.match(indexSource, /data-learning-library-tab-group="skills"[\s\S]*data-learning-library-tab="skills"[\s\S]*learningSkillHelp[\s\S]*<\/div>/);
+  assert.match(indexSource, /<\/button>\s*<span class="learning-help-wrap">[\s\S]*learningSkillHelp/);
   assert.match(indexSource, /learningFailureJump/);
   assert.match(indexSource, /learning-guide/);
   assert.match(indexSource, /新手说明/);
@@ -375,12 +375,12 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   const learningHelpWrapStyles = extractStyleBlock(".learning-help-wrap");
   const learningHelpPopoverStyles = extractStyleBlock(".learning-help-popover");
   assert.match(learningTabsRowStyles, /position: relative/);
-  assert.match(learningHelpWrapStyles, /position: static/);
+  assert.match(learningHelpWrapStyles, /position: relative/);
   assert.match(learningHelpPopoverStyles, /left: 0/);
   assert.match(learningHelpPopoverStyles, /z-index: 20/);
   assert.match(learningHelpPopoverStyles, /text-align: left/);
   assert.match(learningHelpPopoverStyles, /white-space: normal/);
-  assert.match(stylesSource, /\.learning-library-tabs button\[data-learning-library-tab="skills"\] \.learning-help-popover \{[\s\S]*right: 0;[\s\S]*left: auto/);
+  assert.match(stylesSource, /\[data-learning-library-tab-group="skills"\] \.learning-help-popover \{[\s\S]*right: 0;[\s\S]*left: auto/);
   assert.match(stylesSource, /\.learning-failure-jump/);
   assert.match(stylesSource, /\.learning-library-item\.focus/);
   assert.match(stylesSource, /\.learning-rule-actions/);
@@ -502,7 +502,7 @@ test("learning record renderer keeps novice fields in the default card", () => {
   assert.doesNotMatch(renderRecordSource, /formatLearningSource\(record\.sourceType\)/);
   assert.doesNotMatch(renderRecordSource, /formatLearningTokenUsage\(record\.tokenUsage\)/);
   assert.doesNotMatch(appSource, /还没有沉淀学习记录。后续在对话、样例学习或画布归档中产生的结果会出现在这里。/);
-  assert.match(appSource, /还没有学习记录；当你说以后都这样、投喂样例或归档画布后，会出现在这里/);
+  assert.match(appSource, /当前没有学习记录，也没有学习内容影响生成；当你说以后都这样、投喂样例或归档画布后，会出现在这里/);
 });
 
 test("learning visible status normalizes legacy active display text", () => {

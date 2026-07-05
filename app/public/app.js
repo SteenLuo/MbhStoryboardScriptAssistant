@@ -6148,12 +6148,13 @@ function renderLearningLibrary() {
     button.classList.toggle("active", active);
     button.setAttribute("aria-selected", String(active));
     button.tabIndex = active ? 0 : -1;
+    button.closest("[data-learning-library-tab-group]")?.classList.toggle("active", active);
   });
   document.querySelectorAll("[data-learning-library-panel]").forEach((panel) => {
     panel.hidden = panel.dataset.learningLibraryPanel !== state.learningLibraryTab;
   });
   renderLearningPanelSummary(data);
-  renderLearningLibraryList("learningLibraryRecords", data.records || [], renderLearningRecordItem, "还没有学习记录；当你说以后都这样、投喂样例或归档画布后，会出现在这里");
+  renderLearningLibraryList("learningLibraryRecords", data.records || [], renderLearningRecordItem, "当前没有学习记录，也没有学习内容影响生成；当你说以后都这样、投喂样例或归档画布后，会出现在这里");
   renderLearningLibraryList("learningLibrarySkills", skillItems, renderSkillLibraryItem, "暂无技能草案，正式技能仍可用");
 }
 
@@ -6165,7 +6166,7 @@ function renderLearningPanelSummary(data = {}) {
   if (state.learningLibraryTab === "skills") {
     summary.innerHTML = `
       <strong>技能库</strong>
-      <span>当前正式技能 ${skillCount} 个。这里展示系统会调用的基础技能；学习生成项清空时不会出现在这里。</span>
+      <span>当前正式技能 ${skillCount} 个。只有正式技能会被对应生成链路读取；学习记录和待确认草案不会自动影响生成。</span>
     `;
     return;
   }
@@ -6196,8 +6197,7 @@ function renderLearningTabCounts(data) {
   const status = $("learningStatus");
   if (!status) return;
   if (!records.length) {
-    status.textContent = "还没有学习记录；当你说以后都这样、投喂样例或归档画布后，会出现在这里";
-    status.hidden = false;
+    status.hidden = true;
     return;
   }
   status.hidden = true;

@@ -161,13 +161,13 @@ function hasUnknownProofWarning(claimText) {
 function resolveGenerationImpactText(event, displayStatus, affectsGeneration) {
   const landingType = normalizeString(event.landingType);
   if (affectsGeneration) {
-    if (landingType === "skill-reference") return "已写入分镜 skill 学习沉淀；下一次分镜生成会读取。";
+    if (landingType === "skill-reference") return "已写入对应正式技能；下一次相关生成会读取。";
     return "会被后续生成读取；是否执行成功要看本次输出校验和命中证据。";
   }
   if (displayStatus === "失败") return "学习未落地，不会影响生成。";
   if (displayStatus === "已被覆盖") return "已被后续学习覆盖，不再影响生成。";
   if (displayStatus === "待确认") return "尚未确认长期落点，暂不会直接改变生成。";
-  if (landingType === "current-rule") return "历史学习资料，不会影响生成；当前生成只读取分镜 skill。";
+  if (landingType === "current-rule") return "历史学习资料，不会影响生成；当前生成只读取正式技能。";
   return "已保存为学习资料，不会直接改变生成。";
 }
 
@@ -197,7 +197,7 @@ function resolveUsedWhereText(event, displayStatus) {
   if (displayStatus === "已影响生成") {
     if (landingType === "formal-skill") return "正式技能：后续生成会读取。";
     if (landingType === "callable-skill") return "可调用技能：后续生成可按路由使用。";
-    if (landingType === "skill-reference") return "分镜 skill 学习沉淀：后续分镜生成会读取。";
+    if (landingType === "skill-reference") return "对应正式技能：后续相关生成会读取。";
     return "生成流程：后续生成会读取。";
   }
   if (displayStatus === "待确认") return "尚未落地。";
@@ -208,10 +208,10 @@ function resolveUsedWhereText(event, displayStatus) {
 function resolveNextStepText(event, displayStatus, actionLabel) {
   const landingType = normalizeString(event.landingType);
   if (displayStatus === "失败") return "请修正学习内容或落点后重试。";
-  if (displayStatus === "已影响生成" && landingType === "skill-reference") return "下一次分镜生成会读取；如果结果不对，请从学习资料库带引用纠正。";
+  if (displayStatus === "已影响生成" && landingType === "skill-reference") return "下一次相关生成会读取；如果结果不对，请从学习资料库带引用纠正。";
   if (displayStatus === "已影响生成") return "后续生成会读取；若本次输出违规，必须自动修复或记录失败，不能静默交付。";
   if (displayStatus === "已被覆盖") return "无需处理，查看覆盖它的新学习即可。";
-  if (displayStatus === "已保存" && landingType === "current-rule") return "无需处理；如果这条仍要影响生成，请用技能学习重新沉淀到分镜 skill。";
+  if (displayStatus === "已保存" && landingType === "current-rule") return "无需处理；如果这条仍要影响生成，请用技能学习重新沉淀到正式技能。";
   if (displayStatus === "已保存") return "无需处理，可在需要时作为资料回看。";
   if (landingType === "sample-insufficient") {
     const neededSampleType = normalizeString(event.neededSampleType) || "同类样例";
@@ -276,8 +276,8 @@ function normalizeDisplayText(value) {
   const text = normalizeString(value);
   if (!text) return "";
   return text
-    .replace(/分镜输出违反稳定分镜技能硬规则，自动修正后仍失败。?/g, "分镜输出未按稳定分镜 skill 硬规则生成，已拦截。")
-    .replace(/分镜输出违反已影响生成的硬规则，自动修正后仍失败。?/g, "分镜输出未按稳定分镜 skill 硬规则生成，已拦截。")
+    .replace(/分镜输出违反稳定分镜技能硬规则，自动修正后仍失败。?/g, "分镜输出未按正式分镜技能硬规则生成，已拦截。")
+    .replace(/分镜输出违反已影响生成的硬规则，自动修正后仍失败。?/g, "分镜输出未按正式分镜技能硬规则生成，已拦截。")
     .replace(/自动台词拆分后仍存在硬规则违规。?/g, "生成结果仍存在硬规则违规，未交付为可用分镜。")
     .replace(/自动修正失败/g, "校验失败");
 }

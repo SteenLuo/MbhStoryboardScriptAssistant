@@ -72,7 +72,7 @@ test("buildLearningLibrary keeps legacy current-rule events as history even if o
   assert.strictEqual(record.displayStatus, "已保存");
   assert.strictEqual(record.affectsGeneration, false);
   assert.match(record.generationImpactText, /历史学习资料/);
-  assert.match(record.generationImpactText, /分镜 skill/);
+  assert.match(record.generationImpactText, /正式技能/);
   assert.strictEqual(record.generationProof.proofStatus, "not_applicable");
   assert.strictEqual(library.impactItems.some((item) => item.recordId === "rule:rule-invalid"), false);
   assert.equal(library.accessIssues.some((issue) => issue.area === "rules"), false);
@@ -871,7 +871,7 @@ test("buildLearningLibrary assigns stable prefixed record ids for every learning
     assert.equal(Object.hasOwn(impactRule, internalField), false);
   }
   assert.strictEqual(impactRule.affectsGeneration, false);
-  assert.match(impactRule.generationImpactText, /分镜 skill/);
+  assert.match(impactRule.generationImpactText, /正式技能/);
   assert.strictEqual(impactRule.advanced.ruleId, "rule-record");
   assert.strictEqual(impactRule.advanced.topicKey, "storyboard.general");
   assert.deepStrictEqual(impactRule.advanced.sourceEventIds, ["event-rule"]);
