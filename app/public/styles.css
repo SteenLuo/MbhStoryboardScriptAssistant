@@ -4966,7 +4966,7 @@ input.masked-key {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   border: 1px solid var(--line);
   border-radius: 8px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .learning-library-tab-group {
@@ -5044,7 +5044,7 @@ input.masked-key {
   top: calc(100% + 8px);
   left: 0;
   z-index: 20;
-  width: min(420px, 100%);
+  width: min(420px, calc(100vw - 64px));
   padding: 12px;
   border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
   border-radius: 8px;

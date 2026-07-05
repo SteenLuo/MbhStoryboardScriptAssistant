@@ -369,6 +369,7 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.doesNotMatch(stylesSource, /\.learning-status-guide/);
   assert.match(stylesSource, /\.learning-library/);
   assert.match(stylesSource, /\.learning-library-tabs/);
+  assert.match(stylesSource, /\.learning-library-tabs \{[\s\S]*overflow: visible/);
   assert.match(stylesSource, /\.learning-help-button/);
   assert.match(stylesSource, /\.learning-help-popover/);
   const learningTabsRowStyles = extractStyleBlock(".learning-library-tabs-row");
@@ -378,6 +379,7 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(learningHelpWrapStyles, /position: relative/);
   assert.match(learningHelpPopoverStyles, /left: 0/);
   assert.match(learningHelpPopoverStyles, /z-index: 20/);
+  assert.match(learningHelpPopoverStyles, /width: min\(420px, calc\(100vw - 64px\)\)/);
   assert.match(learningHelpPopoverStyles, /text-align: left/);
   assert.match(learningHelpPopoverStyles, /white-space: normal/);
   assert.match(stylesSource, /\[data-learning-library-tab-group="skills"\] \.learning-help-popover \{[\s\S]*right: 0;[\s\S]*left: auto/);
