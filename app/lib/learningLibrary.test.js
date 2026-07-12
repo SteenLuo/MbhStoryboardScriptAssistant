@@ -392,8 +392,10 @@ test("buildLearningLibrary aggregates saved skill drafts without affecting gener
   assert.deepStrictEqual(draft.sourceEventIds, ["event-a"]);
   assert.strictEqual(draft.diffSummary, "Draft only: no official skill files or routes are changed.");
   assert.strictEqual(draft.displayStatus, "已保存");
-  assert.strictEqual(draft.generationImpactText, "暂不影响生成；等待人工确认后才可能进入正式技能。");
-  assert.strictEqual(draft.nextStepText, "等待人工确认；确认前不会写入正式技能或生成上下文。");
+  assert.strictEqual(draft.name, "历史技能草案");
+  assert.strictEqual(draft.actionLabel, "历史待确认");
+  assert.strictEqual(draft.generationImpactText, "历史草案暂不影响生成；不会被生成链路读取。");
+  assert.strictEqual(draft.nextStepText, "如仍需使用，请手动处理这个历史草案；新的技能学习入口会调用 skill-creator 修改正式 skill。");
   assert.strictEqual(draft.affectsGeneration, false);
   assert.equal(library.impactItems.some((item) => item.recordId === "skill-draft:draft-a"), false);
   assert.equal(library.skillItems.some((item) => item.recordId === "skill-draft:not-a-skill-draft"), false);
@@ -410,7 +412,7 @@ test("buildLearningLibrary aggregates skill creator tasks without exposing legac
     status: "saved",
     sourceEventIds: ["event-a"],
     relatedRecordIds: ["record-a"],
-    summary: "用户主动技能学习后，由 skill-creator 形成待执行任务。",
+    summary: "旧逻辑下由 skill-creator 形成的历史待处理任务。",
     proposedFiles: ["skills/03-storyboard/storyboard-generate/SKILL.md"],
     createdAt: "2026-07-05T12:00:00.000Z",
     affectsGeneration: false,
@@ -422,8 +424,9 @@ test("buildLearningLibrary aggregates skill creator tasks without exposing legac
   assert.ok(task);
   assert.strictEqual(task.skillId, "storyboard-generate");
   assert.strictEqual(task.displayStatus, "已保存");
-  assert.strictEqual(task.generationImpactText, "暂不影响生成；需要执行 skill-creator 任务并验证后才可能进入正式技能。");
-  assert.strictEqual(task.nextStepText, "等待按 skill-creator 任务修改并验证；完成前不会写入生成上下文。");
+  assert.strictEqual(task.actionLabel, "历史待处理");
+  assert.strictEqual(task.generationImpactText, "历史 skill-creator 任务暂不影响生成；新的主动技能学习会调用 skill-creator 修改正式 skill。");
+  assert.strictEqual(task.nextStepText, "如仍需使用，请手动处理这个历史任务；新的技能学习入口不会再生成此类任务。");
   assert.strictEqual(task.affectsGeneration, false);
   assert.deepStrictEqual(task.sourceEventIds, ["event-a"]);
   assert.deepStrictEqual(task.proposedFiles, ["skills/03-storyboard/storyboard-generate/SKILL.md"]);

@@ -78,7 +78,7 @@ async function writeConversationLearningRecord(root, { conversation, userMessage
     "",
     "- 如果是否需要学习为[否]，本记录仅作为跳过依据，不进入规则升级。",
     "- 如果质量信号为[变差]，必须优先生成或关联降质和回退记录。",
-    "- 如果学习动作是[学习记录]，该内容进入学习资料库；用户主动点击技能学习且内容属于可执行生成约束时，只能生成 skill-creator 待执行任务。任务完成、正式技能被修改并验证前，不得宣称会影响生成。",
+    "- 如果学习动作是[学习记录]，普通对话学习进入学习资料库；用户主动点击技能学习且内容属于可执行生成约束时，调用 skill-creator 修改对应正式 SKILL.md，并记录为后续生成会读取。",
     "",
   ];
   await fsp.writeFile(outPath, lines.join("\r\n"), "utf8");
@@ -268,7 +268,7 @@ function nextActionFor(classification, assistantMessage) {
     return "保留记录作为跳过依据，不进入规则沉淀。";
   }
   const skill = assistantMessage?.skillRoute?.name || "相关技能";
-  return `进入学习资料库；如果本轮由用户主动点击技能学习触发且内容属于可执行生成约束，则写入对应正式技能，供 ${skill} 后续调用读取。`;
+  return `进入学习资料库；如果本轮由用户主动点击技能学习触发且内容属于可执行生成约束，则调用 skill-creator 修改对应正式技能，供 ${skill} 后续调用读取。`;
 }
 
 function relatedFilesFor(conversation, skillRoute) {

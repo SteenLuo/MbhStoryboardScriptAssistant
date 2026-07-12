@@ -21,6 +21,16 @@ const { handleNotification, listNotifications } = require("./lib/notifications")
 const { buildLearningLibrary } = require("./lib/learningLibrary");
 const { applyLearningCorrectionRequest } = require("./lib/learningCorrection");
 const { appendLearningEvent } = require("./lib/autonomousLearning");
+const {
+  CHANGE_SUMMARY_BEGIN,
+  CHANGE_SUMMARY_END,
+  readTargetSkillMarkdown,
+  UPDATED_SKILL_BEGIN,
+  UPDATED_SKILL_END,
+  VALIDATION_NOTES_BEGIN,
+  VALIDATION_NOTES_END,
+  writeSkillCreatorUpdatedSkill,
+} = require("./lib/skillCreatorLearning");
 const { recordArchiveLearningEvidence } = require("./lib/learningEvidence");
 const { analyzeCanvasArchiveReadiness } = require("./lib/canvasArchive");
 const { applyStoryboardHardRuleValidation, isStoryboardValidationResolved, validateStoryboardContent } = require("./lib/storyboardValidation");
@@ -30,6 +40,7 @@ const ACCEPTANCE_ROOT = process.env.MBH_ACCEPTANCE_ROOT ? path.resolve(process.e
 const ACCEPTANCE_MODE = Boolean(ACCEPTANCE_ROOT);
 const BUSINESS_ROOT = ACCEPTANCE_ROOT || ROOT;
 const PUBLIC_DIR = path.join(__dirname, "public");
+const DIST_DIR = path.join(ROOT, "dist");
 const RUNS_DIR = path.join(BUSINESS_ROOT, "runs");
 const CONFIG_DIR = path.join(__dirname, "config");
 const DATA_DIR = path.join(BUSINESS_ROOT, "app", "data");
@@ -39,6 +50,19 @@ const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
 const DEEPSEEK_CONFIG = path.join(CONFIG_DIR, "deepseek.local.json");
 const APP_CONFIG = path.join(CONFIG_DIR, "app.local.json");
 const PORT = Number(process.env.MBH_WEB_PORT || 17877);
+
+const CUSTOMER_PACKAGE_TYPES = Object.freeze({
+  full: {
+    label: "包含技能",
+    description: "完整初始包，包含当前 skills 目录，适合首次安装或需要同步官方技能的用户。",
+    pattern: /^MbhStoryboardScriptAssistant-CustomerTrial-Full-v(\d+)\.(\d+)\.(\d+)\.zip$/,
+  },
+  noskill: {
+    label: "不包含技能",
+    description: "更新包，不包含 skills 目录，适合已经沉淀了自有技能且不希望被覆盖的用户。",
+    pattern: /^MbhStoryboardScriptAssistant-CustomerTrial-NoSkillOverwrite-v(\d+)\.(\d+)\.(\d+)\.zip$/,
+  },
+});
 
 loadEnvFile(path.join(ROOT, ".env.local"));
 loadEnvFile(path.join(ROOT, ".env"));
@@ -51,6 +75,7 @@ const MIME = {
   ".md": "text/markdown; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml",
+  ".zip": "application/zip",
 };
 
 function loadEnvFile(filePath) {
@@ -70,6 +95,13 @@ function loadEnvFile(filePath) {
 function sendJson(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(data, null, 2));
+}
+
+function errorResponse(error) {
+  const payload = { error: error.message || String(error) };
+  if (error.code) payload.code = error.code;
+  if (error.details && typeof error.details === "object") payload.details = error.details;
+  return payload;
 }
 
 function runCommand(file, args, options = {}) {
@@ -98,6 +130,106 @@ function safeName(name) {
 function safeFileName(name) {
   const cleaned = String(name || "attachment").replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim();
   return cleaned || "attachment";
+}
+
+function comparePackageVersion(a, b) {
+  for (const key of ["major", "minor", "patch"]) {
+    const diff = Number(b.versionParts[key] || 0) - Number(a.versionParts[key] || 0);
+    if (diff !== 0) return diff;
+  }
+  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+}
+
+function publicPackageInfo(item) {
+  if (!item) return null;
+  return {
+    type: item.type,
+    label: item.label,
+    description: item.description,
+    fileName: item.fileName,
+    version: item.version,
+    size: item.size,
+    updatedAt: item.updatedAt,
+    downloadUrl: `/api/packages/download?type=${item.type}`,
+  };
+}
+
+async function listCustomerPackages() {
+  const buckets = Object.fromEntries(Object.keys(CUSTOMER_PACKAGE_TYPES).map((type) => [type, []]));
+  if (!fs.existsSync(DIST_DIR)) {
+    return {
+      distPath: DIST_DIR,
+      packages: { full: null, noskill: null },
+    };
+  }
+
+  const entries = await fsp.readdir(DIST_DIR, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    for (const [type, config] of Object.entries(CUSTOMER_PACKAGE_TYPES)) {
+      const match = entry.name.match(config.pattern);
+      if (!match) continue;
+      const filePath = path.resolve(DIST_DIR, entry.name);
+      if (!filePath.startsWith(path.resolve(DIST_DIR) + path.sep)) continue;
+      const stat = await fsp.stat(filePath);
+      buckets[type].push({
+        type,
+        label: config.label,
+        description: config.description,
+        fileName: entry.name,
+        path: filePath,
+        version: `${match[1]}.${match[2]}.${match[3]}`,
+        versionParts: {
+          major: Number(match[1]),
+          minor: Number(match[2]),
+          patch: Number(match[3]),
+        },
+        size: stat.size,
+        updatedAt: stat.mtime.toISOString(),
+      });
+    }
+  }
+
+  const latest = {};
+  for (const type of Object.keys(CUSTOMER_PACKAGE_TYPES)) {
+    buckets[type].sort(comparePackageVersion);
+    latest[type] = buckets[type][0] || null;
+  }
+
+  return {
+    distPath: DIST_DIR,
+    packages: {
+      full: publicPackageInfo(latest.full),
+      noskill: publicPackageInfo(latest.noskill),
+    },
+  };
+}
+
+async function sendPackageDownload(res, type) {
+  const normalizedType = String(type || "").trim().toLowerCase();
+  if (!CUSTOMER_PACKAGE_TYPES[normalizedType]) {
+    return sendJson(res, 400, { error: "安装包类型不合法" });
+  }
+
+  const packages = await listCustomerPackages();
+  const publicInfo = packages.packages[normalizedType];
+  if (!publicInfo) {
+    return sendJson(res, 404, { error: "未找到对应安装包，请先打包生成 dist 文件。" });
+  }
+
+  const filePath = path.resolve(DIST_DIR, publicInfo.fileName);
+  if (!filePath.startsWith(path.resolve(DIST_DIR) + path.sep) || !fs.existsSync(filePath)) {
+    return sendJson(res, 404, { error: "安装包文件不存在，请重新打包。" });
+  }
+
+  const fileName = safeFileName(publicInfo.fileName);
+  const stat = await fsp.stat(filePath);
+  res.writeHead(200, {
+    "Content-Type": "application/zip",
+    "Content-Length": stat.size,
+    "Content-Disposition": `attachment; filename="${fileName}"`,
+  });
+  fs.createReadStream(filePath).pipe(res);
 }
 
 function timestamp() {
@@ -879,6 +1011,8 @@ async function chatWithAssistant(body) {
     userMessage.learningMode = true;
   }
   conversation.messages.push(userMessage);
+  // Keep the user's sent message durable before any long model or workflow call starts.
+  await saveConversation(conversation);
 
   const workflowIntent = normalizeWorkflowIntent(body.workflowIntent);
   if (explicitLearningMode) {
@@ -899,7 +1033,7 @@ async function chatWithAssistant(body) {
       runName: conversation.runName,
       content: learningResult.assistantMessage.content,
       messages: conversation.messages,
-      usage: null,
+      usage: learningResult.assistantMessage.usage || null,
     };
   }
 
@@ -999,32 +1133,101 @@ async function chatWithAssistant(body) {
 }
 
 async function handleLearningCompose({ conversation, userMessage, chatIntent, skillRoute, provider, model }) {
-  const selectedRoute = skillRoute || findLocalSkillRoute("skill-creator");
-  const skillContext = await loadLocalSkillContext(BUSINESS_ROOT, selectedRoute);
+  const learningInput = extractExplicitRuleLearningInput({
+    conversation,
+    userMessage,
+    assistantMessage: {
+      skillRoute: skillRoute || findLocalSkillRoute("skill-creator"),
+    },
+  }) || {
+    rawTrigger: String(userMessage?.content || ""),
+    summary: String(userMessage?.content || "").slice(0, 240),
+    capability: inferCapabilityForSkillCreatorTask(String(userMessage?.content || "")),
+    sourceType: "conversation",
+    sourceEventIds: [],
+    landingIds: [],
+    outputId: "",
+    projectId: String(conversation?.projectId || ""),
+    canvasId: String(conversation?.canvasId || userMessage?.canvasId || ""),
+    conversationId: String(conversation?.id || ""),
+    learningMode: "overall",
+    tokenUsage: null,
+  };
+  const targetSkillId = inferTargetSkillIdForLearning(learningInput);
+  const targetRoute = findLocalSkillRoute(targetSkillId) || findLocalSkillRoute("skill-creator");
+  const skillContext = await loadLocalSkillContext(BUSINESS_ROOT, targetRoute);
+  const skillCreatorRoute = findLocalSkillRoute("skill-creator") || routeLocalSkill("创建技能 修改技能 skill-creator");
+  const skillCreatorContext = await loadLocalSkillContext(BUSINESS_ROOT, skillCreatorRoute);
+  const targetSkill = await readTargetSkillMarkdown(BUSINESS_ROOT, targetSkillId);
   const appSettings = await readAppSettings();
+  const now = new Date().toISOString();
+  const eventId = `skill-creator-learning-${conversationId()}`;
+
   const result = await deepseekChat({
     provider,
     model,
+    temperature: 0.2,
     messages: [
       { role: "system", content: buildChatSystemPrompt(appSettings.appName) },
-      { role: "system", content: skillContext.prompt },
-      { role: "system", content: buildSkillCreatorLearningPrompt() },
-      { role: "user", content: messageContentForModel(userMessage) },
+      { role: "system", content: skillCreatorContext.prompt },
+      { role: "system", content: buildSkillCreatorApplySystemPrompt() },
+      {
+        role: "user",
+        content: buildSkillCreatorApplyUserPrompt({
+          learningInput,
+          targetSkillId,
+          targetSkill,
+        }),
+      },
     ],
-    temperature: 0.3,
+  });
+
+  const skillUpdate = await writeSkillCreatorUpdatedSkill(BUSINESS_ROOT, {
+    ...learningInput,
+    eventId,
+    learningId: eventId,
+    skillId: targetSkillId,
+    creatorOutput: result.content,
+    createdAt: now,
   });
 
   const assistantMessage = buildAssistantMessage({
-    ...result,
+    content: "",
+    model: result.model,
+    usage: result.usage,
     chatIntent,
     skillRoute: {
       id: skillContext.id,
       name: skillContext.name,
       path: skillContext.path,
-      files: skillContext.files,
+      files: Array.from(new Set([skillUpdate.relativePath, ...(skillContext.files || [])])),
       skillRulesUsed: skillContext.skillRulesUsed || [],
     },
   });
+
+  try {
+    const learningEvent = await appendLearningEvent(BUSINESS_ROOT, {
+      ...learningInput,
+      eventId,
+      internalStatus: "validated",
+      jobStatus: "completed",
+      landingType: "formal-skill",
+      landingIds: [skillUpdate.relativePath],
+      skillId: targetSkillId,
+      generationProof: {
+        proofStatus: "pending_first_hit",
+        claimText: "已由 skill-creator 修改正式 SKILL.md；后续对应生成会读取，命中效果需要看下一次输出校验。",
+        skillRulesUsedRefs: [skillUpdate.relativePath],
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+    assistantMessage.learningEvent = learningEvent.eventId;
+    assistantMessage.learningEventStatus = "已影响生成";
+    assistantMessage.skillReferencePath = skillUpdate.relativePath;
+  } catch (error) {
+    assistantMessage.learningError = error.message || String(error);
+  }
 
   try {
     const learningRecord = await writeConversationLearningRecord(BUSINESS_ROOT, {
@@ -1039,60 +1242,60 @@ async function handleLearningCompose({ conversation, userMessage, chatIntent, sk
     assistantMessage.learningError = error.message || String(error);
   }
 
-  let learningEvent = null;
-  let skillCreatorTask = null;
-  try {
-    const taskDraft = buildSkillCreatorTaskDraft({
-      conversation,
-      userMessage,
-      assistantMessage,
-      skillContext,
-    });
-    const now = new Date().toISOString();
-    learningEvent = await appendLearningEvent(BUSINESS_ROOT, {
-      ...taskDraft.learningInput,
-      eventId: `skill-creator-${conversationId()}`,
-      internalStatus: "landed",
-      jobStatus: "completed",
-      landingType: "skill-draft",
-      landingIds: [taskDraft.relativePath],
-      skillId: taskDraft.skillId,
-      generationProof: {
-        proofStatus: "not_applicable",
-        claimText: "已生成 skill-creator 任务，完成修改和验证前不会影响生成。",
-      },
-      createdAt: now,
-      updatedAt: now,
-    });
-    skillCreatorTask = await writeSkillCreatorTaskRecord(BUSINESS_ROOT, {
-      ...taskDraft,
-      sourceEventIds: [learningEvent.eventId],
-      createdAt: now,
-      updatedAt: now,
-    });
-    assistantMessage.learningEvent = learningEvent.eventId;
-    assistantMessage.learningEventStatus = "已保存";
-    assistantMessage.skillCreatorTaskPath = skillCreatorTask.relativePath;
-  } catch (error) {
-    assistantMessage.learningError = error.message || String(error);
-  }
-
-  const lines = ["已记录为技能学习材料。"];
-  lines.push("本次由原版 skill-creator 生成技能修改任务；完成文件修改和验证前不会影响生成。");
+  const lines = ["已通过 skill-creator 修改正式技能。"];
+  lines.push(`目标技能：${skillContext.name}（${targetSkillId}）`);
+  lines.push(`已修改文件：${skillUpdate.relativePath}`);
+  lines.push(`修改摘要：${skillUpdate.changeSummary}`);
+  lines.push(`校验说明：${skillUpdate.validationNotes}`);
+  lines.push("影响生成：下一次对应生成会读取更新后的正式 skill。");
+  lines.push("状态：学习资料库会显示为“已影响生成”。");
   if (assistantMessage.learningRecord) {
-    lines.push(`本地记录：${assistantMessage.learningRecord}`);
+    lines.push(`学习记录：${assistantMessage.learningRecord}`);
   }
-  if (assistantMessage.skillCreatorTaskPath) {
-    lines.push(`skill-creator 任务：${assistantMessage.skillCreatorTaskPath}`);
-  }
-  lines.push("已保存到学习资料库；这条内容不会绕过 skill-creator 直接写入正式技能。");
   if (assistantMessage.learningError) {
     lines.push(`学习记录异常：${assistantMessage.learningError}`);
   }
-  lines.push("");
-  lines.push(result.content);
+  lines.push("如果这条学错了，可以从学习资料库点“带引用去纠正”来覆盖、停用或收窄。");
   assistantMessage.content = lines.join("\n");
   return { assistantMessage };
+}
+
+function buildSkillCreatorApplySystemPrompt() {
+  return [
+    "你正在作为 skill-creator 修改一个已存在的正式 skill。",
+    "铁律：所有 skill 的创建和修改都必须由 skill-creator 产出修改结果；不得把用户原话整段粘贴到 SKILL.md。",
+    "本次不是审批任务，也不是生成待办草案。用户已经主动点击“技能学习”，所以你需要直接产出可写入目标 skill 的完整新版 SKILL.md。",
+    "请把用户学习材料提炼成可复用、可执行、不会污染其他能力边界的技能说明，合并到目标 SKILL.md 的合适位置。",
+    "必须保留原 frontmatter.name；必须保留或改进 frontmatter.description；不要新增 README、CHANGELOG 或其它辅助说明文件。",
+    "只按指定分隔标记输出，不要输出额外解释，不要包裹 ```。",
+    `输出格式必须是：${UPDATED_SKILL_BEGIN}、完整新版 SKILL.md、${UPDATED_SKILL_END}、${CHANGE_SUMMARY_BEGIN}、修改摘要、${CHANGE_SUMMARY_END}、${VALIDATION_NOTES_BEGIN}、校验说明、${VALIDATION_NOTES_END}。`,
+  ].join("\n");
+}
+
+function buildSkillCreatorApplyUserPrompt({ learningInput = {}, targetSkillId, targetSkill }) {
+  const learningText = String(learningInput.rawTrigger || learningInput.summary || "").trim();
+  return [
+    `目标 skill id：${targetSkillId}`,
+    `目标文件：${targetSkill.relativePath}`,
+    "",
+    "用户通过“技能学习”提交的材料：",
+    "<<<USER_LEARNING_MATERIAL_BEGIN",
+    learningText || "未填写学习内容",
+    "USER_LEARNING_MATERIAL_END>>>",
+    "",
+    "当前 SKILL.md：",
+    "<<<CURRENT_SKILL_MD_BEGIN",
+    targetSkill.markdown,
+    "CURRENT_SKILL_MD_END>>>",
+    "",
+    "输出要求：",
+    `- 在 ${UPDATED_SKILL_BEGIN} 和 ${UPDATED_SKILL_END} 之间返回完整新版 SKILL.md，不要只返回 diff。`,
+    `- 在 ${CHANGE_SUMMARY_BEGIN} 和 ${CHANGE_SUMMARY_END} 之间返回一句修改摘要。`,
+    `- 在 ${VALIDATION_NOTES_BEGIN} 和 ${VALIDATION_NOTES_END} 之间返回一句校验说明。`,
+    "- 不要创建“技能学习沉淀”“用户学习规则（自动写入）”等追加区块。",
+    "- 不要把用户原文原封不动塞进去；要用 skill-creator 的判断整合成清晰规则。",
+    "- 如果用户材料与目标 skill 的边界冲突，优先用收窄表述合并，避免破坏原技能格式。",
+  ].join("\n");
 }
 
 async function applyAutonomousConversationLearning({ conversation, userMessage, assistantMessage }) {
@@ -1126,68 +1329,6 @@ async function applyAutonomousConversationLearning({ conversation, userMessage, 
   return { event };
 }
 
-function buildSkillCreatorLearningPrompt() {
-  return [
-    "你正在产品内承接“技能学习”。必须按原版 skill-creator 的方法判断是否需要创建或修改 skill。",
-    "当前网页模型不能直接操作文件系统，因此不要声称已经修改正式 skill 文件。",
-    "请输出：1. 学习结论；2. 建议修改的 skill；3. 建议修改的文件；4. SKILL.md/references/scripts/assets 的修改要点；5. 验证方式；6. 不影响生成的说明。",
-    "如果用户内容不足以改 skill，明确说明还缺什么证据或样例。",
-  ].join("\n");
-}
-
-function buildSkillCreatorTaskDraft({ conversation, userMessage, assistantMessage, skillContext }) {
-  const learningInput = extractExplicitRuleLearningInput({ conversation, userMessage, assistantMessage }) || {
-    rawTrigger: String(userMessage?.content || ""),
-    summary: String(userMessage?.content || "").slice(0, 240),
-    capability: inferCapabilityForSkillCreatorTask(String(userMessage?.content || "")),
-    sourceType: "conversation",
-    sourceEventIds: [],
-    landingIds: [],
-    outputId: String(assistantMessage?.outputId || assistantMessage?.id || ""),
-    projectId: String(conversation?.projectId || ""),
-    canvasId: String(conversation?.canvasId || userMessage?.canvasId || ""),
-    conversationId: String(conversation?.id || ""),
-    learningMode: "overall",
-    tokenUsage: assistantMessage?.usage || null,
-  };
-  const taskId = `task-${conversationId()}`;
-  const skillId = inferTargetSkillIdForLearning(learningInput);
-  const relativePath = `learning/skill-creator-tasks/skill-creator-task-${taskId}.json`;
-  return {
-    taskId,
-    relativePath,
-    skillId,
-    title: String(learningInput.summary || learningInput.rawTrigger || "技能创建任务").slice(0, 60),
-    summary: String(learningInput.summary || learningInput.rawTrigger || ""),
-    creatorOutput: String(assistantMessage?.content || ""),
-    proposedFiles: proposedSkillFilesForTask(skillId, skillContext),
-    relatedRecordIds: [],
-    learningInput,
-  };
-}
-
-async function writeSkillCreatorTaskRecord(root, task) {
-  const relativePath = task.relativePath || `learning/skill-creator-tasks/skill-creator-task-${task.taskId}.json`;
-  const targetPath = path.join(root, relativePath);
-  await fsp.mkdir(path.dirname(targetPath), { recursive: true });
-  const record = {
-    taskId: task.taskId,
-    title: task.title,
-    skillId: task.skillId,
-    status: "saved",
-    summary: task.summary,
-    creatorOutput: task.creatorOutput,
-    proposedFiles: task.proposedFiles || [],
-    sourceEventIds: task.sourceEventIds || [],
-    relatedRecordIds: task.relatedRecordIds || [],
-    affectsGeneration: false,
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt,
-  };
-  await fsp.writeFile(targetPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
-  return { ...record, path: targetPath, relativePath };
-}
-
 function inferTargetSkillIdForLearning(learningInput = {}) {
   const capability = String(learningInput.capability || "");
   if (capability === "storyboard") return "storyboard-generate";
@@ -1204,21 +1345,11 @@ function inferCapabilityForSkillCreatorTask(text) {
   return "general";
 }
 
-function proposedSkillFilesForTask(skillId, skillContext = {}) {
-  const files = Array.isArray(skillContext.files) ? skillContext.files : [];
-  const directSkillFiles = files.filter((file) => file.includes(`/${skillId}/`) || file.endsWith(`${skillId}/SKILL.md`));
-  if (directSkillFiles.length) return directSkillFiles;
-  const defaultBySkill = {
-    "storyboard-generate": ["skills/03-storyboard/storyboard-generate/SKILL.md"],
-    "script-generate": ["skills/02-script/script-generate/SKILL.md"],
-    "novel-intake": ["skills/01-input-analysis/novel-intake/SKILL.md"],
-  };
-  return defaultBySkill[skillId] || ["skills/README.md"];
-}
-
 function inferSkillLearningTopicKey(learningInput) {
   const text = `${learningInput?.summary || ""}\n${learningInput?.rawTrigger || ""}`;
   if (String(learningInput?.capability || "") === "storyboard") {
+    if (/原剧本|源剧本|没有的剧情|新增剧情|新增情节|偏离|过度丰富|悄悄补剧情|新增道具|新增动作/.test(text)) return "storyboard.source.grounding";
+    if (/拆分.*画面|长台词.*画面|相同景别|相同.*构图|重复画面|同一画面|跳接/.test(text)) return "storyboard.dialogue.split-visual-variation";
     if (/镜号/.test(text) && /台词/.test(text) && /一行|多行|第二行/.test(text)) return "storyboard.dialogue.line-count";
     if (/台词|对白/.test(text) && /20|二十|字|长度|超过|超出/.test(text)) return "storyboard.dialogue.length";
     return "storyboard.general";
@@ -1230,6 +1361,7 @@ function inferSkillLearningConflictKey(learningInput) {
   const topicKey = inferSkillLearningTopicKey(learningInput);
   if (topicKey === "storyboard.dialogue.line-count") return "storyboard.dialogue.line-count.single-line";
   if (topicKey === "storyboard.dialogue.length") return "storyboard.dialogue.length.max-chars";
+  if (topicKey === "storyboard.source.grounding") return "storyboard.source.grounding.no-invented-active-action";
   return topicKey;
 }
 
@@ -1393,14 +1525,6 @@ async function runWorkflowTask({ runDir, task, model, apiKey, force = false }) {
       useStableSkillRules: hasStoryboardDialogueHardRules(skillPrompt),
     });
     hardRuleValidation = hardRuleResult.hardRuleValidation;
-    if (hardRuleValidation.checked && !hardRuleValidation.finalOk) {
-      await recordStoryboardHardRuleFailure({
-        canvasId: path.basename(runDir),
-        outputId: config.file,
-        hardRuleValidation,
-      });
-      throw new Error("标准工作流分镜产物未按已命中的 skill 硬规则生成，已写入学习失败事件，请重新生成。");
-    }
     finalContent = hardRuleResult.content;
   }
   const output = `# ${config.title}\n\n生成时间：${new Date().toISOString()}\n\n模型：${result.model}\n\n---\n\n${finalContent}\n`;
@@ -1494,7 +1618,11 @@ async function canvasStoryboardSkillContext() {
     "【硬性输出约束】",
     "1. 字段标签使用纯文本，不要使用 Markdown 加粗、表格、项目符号或把多个字段挤在同一行。",
     "2. 每个镜号必须按文本块输出：镜号、景别、运镜、情绪/动作、音效、台词、时长；人物对白只能放在台词字段，不要写进情绪/动作。",
-    "3. 只输出分镜正文，不要寒暄、解释、标题、Markdown 分隔线或“好的，收到任务”等非分镜内容。",
+    "3. 景别字段必须同时承载必要的构图角度和拍摄视角，例如“景别：低角度侧面中景”“景别：正三四仰拍近景”“景别：侧面俯拍中景”；只有正面平视镜头才可只写“中景”“近景”等基础景别。",
+    "4. 运动镜头占比必须控制在总镜数的 30% 到 40% 之间，且禁止连续 3 个及以上运动镜头。",
+    "5. 正面平视镜头占比必须控制在总镜数的 30% 到 40% 之间。",
+    "6. 长台词因超过 20 字拆成连续镜号时，不能只复制同一段情绪/动作再改台词；画面动作必须随台词片段推进，并更换景别/构图或运镜。",
+    "7. 只输出分镜正文，不要寒暄、解释、标题、Markdown 分隔线或“好的，收到任务”等非分镜内容。",
     `## 分镜标准文档：${standardPath}\n\n${standardText}`,
   ].join("\n\n");
   return {
@@ -1505,7 +1633,7 @@ async function canvasStoryboardSkillContext() {
 }
 
 const STORYBOARD_GENERATION_MAX_ATTEMPTS = 3;
-const STORYBOARD_DIALOGUE_HARD_RULE_PATTERN = /每个镜号只能有一行|同一镜号下不得出现第二行|单条台词不得超过\s*20|台词超过\s*20|不得超过20|不能超过20|同一个镜号只能有一个说话人|只允许存在一个人物的台词/;
+const STORYBOARD_DIALOGUE_HARD_RULE_PATTERN = /每个镜号只能有一行|同一镜号下不得出现第二行|单条台词不得超过\s*20|台词超过\s*20|不得超过20|不能超过20|同一个镜号只能有一个说话人|只允许存在一个人物的台词|台词.*说话人|说话人.*台词|声音来源|人物台词必须保真|不得改写.*人物台词|禁止.*人物台词.*改动|拼回.*剧本原台词|同一说话人.*短台词|连续短台词.*合并|相邻短句.*合并|长台词.*画面|拆分.*画面|只复制同一段情绪\/动作|只改台词|画面动作.*台词片段|运动镜头占比|正面平视镜头占比|相同景别|相同.*构图|连续.*同构图|连续.*双人中景|连续\s*3\s*个及以上运动镜头|30%\s*到\s*40%|原剧本|源剧本|没有的剧情|新增剧情|新增情节|新增道具|新增动作|偏离|过度丰富|悄悄补剧情/;
 
 function hasStoryboardDialogueHardRules(prompt) {
   return STORYBOARD_DIALOGUE_HARD_RULE_PATTERN.test(String(prompt || ""));
@@ -1535,6 +1663,7 @@ async function generateStoryboardEpisodeWithValidation(input = {}) {
     usages.push(result.usage);
     hardRuleResult = applyStoryboardHardRuleValidation(result.content, {
       useStableSkillRules: input.enforceStableHardRules === true,
+      sourceScript: input.episode?.content || input.sourceNode?.content || "",
     });
     if (!hardRuleResult.hardRuleValidation.checked || hardRuleResult.hardRuleValidation.finalOk) {
       return { result, hardRuleResult, usages, attempts: attempt };
@@ -1559,12 +1688,34 @@ function buildStoryboardEpisodeGenerationInput(input = {}, retryFeedback = "") {
     `请只为以下分集生成分镜脚本：${title}`,
     "",
   ];
+  if (input.enforceStableHardRules === true) {
+    lines.push(
+      "【已命中的分镜 skill 硬规则】",
+      "1. 一个镜号只能有一个“台词”字段，不能在同一镜号内写多行台词。",
+      "2. 一个镜号只允许一个说话人；多人对话必须拆成连续镜号。",
+      "3. 非空台词必须在台词内容前标注说话人或声音来源，格式为“台词：说话人：原文台词”，例如“台词：陈建军：秀娥，你今天真好看。”；不能写成“台词：秀娥，你今天真好看。”。",
+      "4. 任意一行台词不得超过 20 个字；超过 20 个字时必须拆成新的连续镜号，不要把长台词留在同一个镜号里。",
+      "5. 按台词总字数决定拆镜数量：20-40 字拆 2 个镜号，40-60 字拆 3 个镜号，以此类推；拆完后逐条自查每行台词是否都在 20 字以内。",
+      "6. 同一说话人的连续台词总字数不超过 20 字时，禁止仅为了变化景别、角度、运镜或画面描述而拆成多个分镜；相邻短句应合并到同一镜头。",
+      "7. 例如“林秀娥：您言重了。”和“林秀娥：您以前也是按规矩办事。”合并后不超过 20 字，必须写在同一个镜号的台词字段中，不得拆成两个镜号。",
+      "8. 人物台词必须保真：不得改写、润色、同义替换、删减、扩写或新增剧本中的人物台词；长台词拆镜只能按原文切段，所有片段按顺序拼回必须与剧本原台词完全一致。",
+      "9. 长台词因超过 20 字拆成连续镜号时，拆分出的连续镜头景别和画面内容不能完全一样；后续镜头不能复制上一镜“情绪/动作”只改台词，必须结合剧本当前情节和台词信息重新设计对应画面。除此之外，只保留不重复和贴合剧本的要求，不限定后续镜头必须采用某类画面。",
+      "10. 运动镜头占比必须在总镜数的 30% 到 40% 之间；运镜字段不含“固定”的镜头按运动镜头计入，含“固定”的镜头按固定镜头计入。",
+      "11. 禁止连续 3 个及以上运动镜头；连续两个运动镜头后，下一个镜头必须使用固定类运镜。",
+      "12. 正面平视镜头占比必须在总镜数的 30% 到 40% 之间；只有基础景别且未注明构图/视角的镜头按正面平视计入。",
+      "13. 禁止连续使用相同景别/角度/构图拍摄同一画面内容；“双人中景”和“正面平视双人中景”这类只差默认正面平视省略词的写法视为同构图；如果写了“维持上一镜”“继续上一镜”“接上一镜”“同一构图”“同一机位”“画面不变”，下一镜必须更换构图或景别，或合并同一画面。",
+      "14. 例如连续多个“景别：双人中景”拍同一段对坐对白，且情绪/动作写“维持上一镜”“继续上一镜”“接上一镜”，必须改成不同景别、角度或构图，并结合剧本给出不同画面；不能只照抄同一画面。",
+      "15. 禁止新增原剧本没有的剧情、道具、动物、服装细节、人物动作或空间调度；只能把原文已有信息镜头化。人物只在“人物”表出现，或只在背景说明里被提到但正文没有当前动作或台词时，不得安排其现场反应、主动走位、拿道具或承担新情节。",
+      "16. 反应镜头必须根据当前台词含义、人物关系和场景状态写具体反应，不得套用固定模板；反应不一定要看向正在说话的人，可使用低头、停手、手指停住、肩背变化、话头停住、看向场景内已有物件或空间等低风险反应；禁止连续反应都写成“眼神一顿，轻轻抿住嘴”“A看向B，神情从迟疑转为专注”“表情随台词变化”等泛化句。",
+      "",
+    );
+  }
   if (retryFeedback) {
     lines.push(
       "【上一版未通过，请重新生成完整分镜】",
       "不要解释原因，不要只改局部片段；必须输出完整分镜正文。",
       retryFeedback,
-      "处理原则：宁可增加连续镜号，也不能让任意一行台词超过 20 个字；同一个镜号只能有一行台词字段。",
+      "处理原则：宁可增加连续镜号，也不能让任意一行台词超过 20 个字；按 20 字上限决定拆镜数量，拆完后逐条自查；非空台词必须写成“台词：说话人：原文台词”；同一说话人相邻短台词合并后不超过 20 字时必须合并回同一镜号；同一个镜号只能有一行台词字段；人物台词只能原文切段，不能改写；长台词拆镜不得复制同一段情绪/动作只改台词；拆分出的连续镜头景别和画面内容不能完全一样，必须结合剧本当前情节和台词信息重新设计对应画面，只保留不重复和贴合剧本的要求，不限定后续镜头必须采用某类画面；反应镜头必须按当前台词含义和人物关系写具体反应，不强制看向说话人，禁止套用“眼神一顿，轻轻抿住嘴”“A看向B，神情从迟疑转为专注”等固定模板；同时把运动镜头占比和正面平视镜头占比都调整到 30% 到 40%，打断连续 3 个及以上运动镜头，并修正连续相同景别/角度/构图拍同一画面的镜头；不得新增原剧本没有的情节、道具、动物、服装细节、人物主动动作或空间调度；背景提到某人不等于可以拍现场反应。",
       "",
     );
   }
@@ -1580,7 +1731,7 @@ function buildStoryboardHardRuleRetryFeedback(issues = []) {
     return `- ${lineNumber}：${reason}${lineText ? `\n  原文：${lineText}` : ""}`;
   });
   if (!normalized.length) {
-    return "- 上一版存在分镜硬规则违规，请逐镜号检查台词长度、台词字段数量和说话人数量。";
+    return "- 上一版存在分镜硬规则违规，请逐镜号检查台词长度、台词字段数量、说话人标注、说话人数量、同一说话人短台词是否被碎片化拆镜、长台词拆镜后画面是否复制、运动镜头占比、连续运动镜头、正面平视镜头占比、是否连续相同景别/角度/构图拍同一画面，以及是否新增原剧本没有的情节动作。";
   }
   return [
     "上一版存在以下硬规则违规，必须在新一版中全部消除：",
@@ -1688,14 +1839,6 @@ async function generateCanvasStoryboards(body) {
     lastModel = result.model || lastModel;
     const titleScope = { nodes: [...(canvas.nodes || []), ...generatedNodes] };
     const hardRuleResult = generation.hardRuleResult;
-    if (hardRuleResult.hardRuleValidation.checked && !hardRuleResult.hardRuleValidation.finalOk) {
-      await recordStoryboardHardRuleFailure({
-        canvasId: canvas.id,
-        outputId: plannedNode.id,
-        hardRuleValidation: hardRuleResult.hardRuleValidation,
-      });
-      throw new Error("分镜输出未按已命中的 skill 硬规则生成，已写入学习失败事件，请重新生成。");
-    }
     generatedNodes.push({
       ...plannedNode,
       title: uniqueCanvasNodeTitle(titleScope, plannedNode.title),
@@ -1728,6 +1871,12 @@ async function recordStoryboardHardRuleFailure(input = {}) {
     ? input.hardRuleValidation.appliedRules
     : [];
   const ruleRefs = appliedRules.map((rule) => rule.ruleId).filter(Boolean);
+  const skillId = "storyboard-generate";
+  const skillFileRef = "skills/03-storyboard/storyboard-generate/SKILL.md";
+  const skillRuleFileRefs = Array.from(new Set(appliedRules
+    .map((rule) => String(rule.sourceFile || "").trim())
+    .filter(Boolean)
+    .concat(skillFileRef)));
   const sourceEventIds = Array.from(new Set(appliedRules.flatMap((rule) =>
     Array.isArray(rule.sourceEventIds) ? rule.sourceEventIds : []
   ).map(String).filter(Boolean)));
@@ -1746,23 +1895,76 @@ async function recordStoryboardHardRuleFailure(input = {}) {
     canvasId: input.canvasId,
     outputId: input.outputId,
     sourceEventIds,
-    skillRulesUsedRefs: ruleRefs,
-    summary: "分镜输出未按稳定分镜 skill 硬规则生成，已拦截。",
+    skillId,
+    landingIds: [skillFileRef],
+    skillRulesUsedRefs: Array.from(new Set([...ruleRefs, ...skillRuleFileRefs])),
+    summary: "分镜输出未按稳定分镜 skill 硬规则生成，已标识。",
     error: {
       stage: "storyboard-hard-rule-post-validation",
       code: "STORYBOARD_HARD_RULE_VALIDATION_FAILED",
-      message: "生成结果仍存在硬规则违规，未交付为可用分镜。",
+      message: "生成结果仍存在硬规则违规，已保留输出并标识问题。",
       issues: input.hardRuleValidation?.finalIssues || input.hardRuleValidation?.initialIssues || [],
     },
     generationProof: {
       proofStatus: "failed",
-      skillRulesUsedRefs: ruleRefs,
+      skillRulesUsedRefs: Array.from(new Set([...ruleRefs, ...skillRuleFileRefs])),
       validationResultRefs: [String(input.outputId || "").trim()].filter(Boolean),
       failureEventIds: [eventId],
     },
     createdAt: failedAt,
     updatedAt: failedAt,
   });
+  return {
+    eventId,
+    skillId,
+    skillFileRef,
+    skillRulesUsedRefs: Array.from(new Set([...ruleRefs, ...skillRuleFileRefs])),
+  };
+}
+
+function createStoryboardHardRuleError(message, hardRuleValidation, failure = {}) {
+  const issues = Array.isArray(hardRuleValidation?.finalIssues)
+    ? hardRuleValidation.finalIssues
+    : Array.isArray(hardRuleValidation?.initialIssues)
+      ? hardRuleValidation.initialIssues
+      : [];
+  const compactIssues = issues.slice(0, 8).map((issue) => ({
+    type: String(issue.type || ""),
+    hardRuleId: String(issue.hardRuleId || ""),
+    severity: String(issue.severity || "error"),
+    lineNumber: Number(issue.lineNumber || 0),
+    message: String(issue.message || "硬规则未通过"),
+    lineText: String(issue.lineText || "").trim(),
+    dialogue: String(issue.dialogue || "").trim(),
+    suggestedLines: Array.isArray(issue.suggestedLines)
+      ? issue.suggestedLines.map((item) => String(item.text || item || "").trim()).filter(Boolean)
+      : [],
+  }));
+  const error = new Error(appendStoryboardHardRuleSummary(message, compactIssues, issues.length));
+  error.code = "STORYBOARD_HARD_RULE_VALIDATION_FAILED";
+  error.details = {
+    kind: "storyboard-hard-rule-validation",
+    skillId: failure.skillId || "storyboard-generate",
+    skillFile: failure.skillFileRef || "skills/03-storyboard/storyboard-generate/SKILL.md",
+    failureEventId: failure.eventId || "",
+    issueCount: issues.length,
+    issues: compactIssues,
+    truncated: issues.length > compactIssues.length,
+  };
+  return error;
+}
+
+function appendStoryboardHardRuleSummary(message, issues = [], total = 0) {
+  const issueCount = Number(total || issues.length || 0);
+  if (!issues.length) return message;
+  const first = issues[0] || {};
+  const position = first.lineNumber ? `第 ${first.lineNumber} 行` : "具体行号见学习资料库";
+  const reason = first.message || "硬规则未通过";
+  const lineText = first.lineText ? `：${first.lineText}` : "";
+  const suggested = Array.isArray(first.suggestedLines) && first.suggestedLines.length
+    ? `；建议拆为：${first.suggestedLines.slice(0, 3).join(" / ")}`
+    : "";
+  return `${message}（共 ${issueCount || "至少 1"} 处，${position}：${reason}${lineText}${suggested}）`;
 }
 
 function safeEventSegment(value) {
@@ -1860,14 +2062,6 @@ async function reviseCanvasNode(body) {
   const hardRuleResult = node.type === "storyboard"
     ? applyStoryboardHardRuleValidation(result.content, storyboardValidationOptions)
     : null;
-  if (hardRuleResult?.hardRuleValidation?.checked && !hardRuleResult.hardRuleValidation.finalOk) {
-    await recordStoryboardHardRuleFailure({
-      canvasId: canvas.id,
-      outputId: node.id,
-      hardRuleValidation: hardRuleResult.hardRuleValidation,
-    });
-    throw new Error("分镜修改结果未按已命中的 skill 硬规则生成，已写入学习失败事件，请重新生成。");
-  }
   const revisedValidation = hardRuleResult?.validation || null;
   const revisedContent = hardRuleResult?.content || result.content;
   const revisedAt = new Date().toISOString();
@@ -2138,14 +2332,6 @@ async function generateWithDeepSeek(body) {
       useStableSkillRules: hasStoryboardDialogueHardRules(skillPrompt),
     });
     hardRuleValidation = hardRuleResult.hardRuleValidation;
-    if (hardRuleValidation.checked && !hardRuleValidation.finalOk) {
-      await recordStoryboardHardRuleFailure({
-        canvasId: path.basename(runDir),
-        outputId: config.file,
-        hardRuleValidation,
-      });
-      throw new Error("分镜产物未按已命中的 skill 硬规则生成，已写入学习失败事件，请重新生成。");
-    }
     finalContent = hardRuleResult.content;
   }
   const target = path.join(runDir, config.file);
@@ -2378,6 +2564,12 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/learning-library") {
     return sendJson(res, 200, await buildLearningLibrary(BUSINESS_ROOT));
   }
+  if (req.method === "GET" && url.pathname === "/api/packages") {
+    return sendJson(res, 200, await listCustomerPackages());
+  }
+  if (req.method === "GET" && url.pathname === "/api/packages/download") {
+    return sendPackageDownload(res, url.searchParams.get("type"));
+  }
   if (req.method === "GET" && url.pathname === "/api/notifications") {
     return sendJson(res, 200, { notifications: await listNotifications(BUSINESS_ROOT) });
   }
@@ -2514,7 +2706,7 @@ const server = http.createServer(async (req, res) => {
       await serveStatic(req, res, url);
     }
   } catch (error) {
-    sendJson(res, 500, { error: error.message || String(error) });
+    sendJson(res, 500, errorResponse(error));
   }
 });
 

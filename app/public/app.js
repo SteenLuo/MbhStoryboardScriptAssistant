@@ -60,6 +60,7 @@ const state = {
   activeNotificationIndex: 0,
   learningLibrary: null,
   learningLibraryTab: "records",
+  packageDownloads: null,
   pendingLearningCorrection: null,
   viewedLearningFailureIds: new Set(),
   learningFailureCursor: 0,
@@ -77,6 +78,10 @@ const composeModeLabels = Object.freeze({
   learning: "技能学习",
   "script-hard-issue-review": "剧本评审",
   "script-manju-adaptation-analysis": "漫剧适配分析",
+});
+const packageDownloadUrls = Object.freeze({
+  full: "/api/packages/download?type=full",
+  noskill: "/api/packages/download?type=noskill",
 });
 const sidebarMinWidth = 252;
 const sidebarMaxWidth = 460;
@@ -212,8 +217,31 @@ async function api(path, options = {}) {
   } catch {
     data = { raw: text };
   }
-  if (!response.ok) throw new Error(data.error || text || "请求失败");
+  if (!response.ok) {
+    const error = new Error(data.error || text || "请求失败");
+    error.code = data.code || "";
+    error.details = data.details || null;
+    throw error;
+  }
   return data;
+}
+
+function formatApiErrorMessage(error) {
+  const message = error?.message || "请求失败";
+  const details = error?.details || {};
+  if (message.includes("（共 ") && details.kind === "storyboard-hard-rule-validation") return message;
+  if (details.kind !== "storyboard-hard-rule-validation") return message;
+  const issues = Array.isArray(details.issues) ? details.issues : [];
+  const issueCount = Number(details.issueCount || issues.length || 0);
+  const first = issues[0] || {};
+  const position = first.lineNumber ? `第 ${first.lineNumber} 行` : "具体行号见学习资料库";
+  const reason = first.message || "硬规则未通过";
+  const lineText = first.lineText ? `：${first.lineText}` : "";
+  const suggested = Array.isArray(first.suggestedLines) && first.suggestedLines.length
+    ? `；建议拆为：${first.suggestedLines.slice(0, 3).join(" / ")}`
+    : "";
+  const countText = issueCount > 0 ? `${issueCount} 处` : "至少 1 处";
+  return `${message}（共 ${countText}，${position}：${reason}${lineText}${suggested}）`;
 }
 
 function escapeHtml(value) {
@@ -586,8 +614,8 @@ function setComposeMode(mode) {
     button.setAttribute("aria-pressed", String(active));
     button.setAttribute("aria-label", active ? `${label}，已选中，再次点击取消` : `${label}，点击选中`);
     const learningTitle = active
-      ? "已启用技能学习，本条消息会进入技能创建器流程并保存到学习资料库"
-      : "启用后，本条消息用于技能学习，由总控调用技能创建器处理";
+      ? "已启用技能学习，本条消息会调用 skill-creator 修改对应正式 skill"
+      : "启用后，本条消息会交给 skill-creator 更新对应正式 skill";
     button.title = button.dataset.composeMode === "learning"
       ? learningTitle
       : active
@@ -1940,7 +1968,7 @@ async function sendMessage(event) {
   if (pendingCorrection) {
     waiting.textContent = "正在记录纠正说明...";
   } else if (learningMode) {
-    waiting.textContent = "正在进入技能创建器流程并保存到学习资料库...";
+    waiting.textContent = "正在调用 skill-creator 修改正式技能...";
   } else if (forcedSkillRouteId) {
     waiting.textContent = `正在调用${composeModeLabel(state.composeMode)}技能...`;
   }
@@ -5637,7 +5665,7 @@ async function generateAllStoryboardsFromNode(nodeId) {
     renderCanvas();
     canvasStatus(`已生成 ${data.nodes?.length || episodes.length} 个分镜脚本节点`);
   } catch (error) {
-    canvasStatus(error.message);
+    canvasStatus(formatApiErrorMessage(error), { lockMs: 8000 });
   } finally {
     setCanvasBusy(null);
   }
@@ -5697,7 +5725,7 @@ async function generateConfirmedStoryboards() {
     renderCanvas();
     canvasStatus(`已生成 ${data.nodes?.length || selected.length} 个分镜节点`);
   } catch (error) {
-    canvasStatus(error.message);
+    canvasStatus(formatApiErrorMessage(error), { lockMs: 8000 });
   } finally {
     setCanvasBusy(null);
   }
@@ -5990,6 +6018,7 @@ function openSettings(tab = "deepseek") {
     openLearningPage();
     return;
   }
+  closePackageDownloads();
   $("settings").classList.add("open");
   $("settings").setAttribute("aria-hidden", "false");
   switchSettingsTab(tab);
@@ -6018,6 +6047,7 @@ function openLearningLibrary() {
 
 function openLearningPage() {
   closeSettings();
+  closePackageDownloads();
   $("learningPage").classList.add("open");
   $("learningPage").setAttribute("aria-hidden", "false");
   loadLearningPanel();
@@ -6028,9 +6058,87 @@ function closeLearningPage() {
   $("learningPage").setAttribute("aria-hidden", "true");
 }
 
+function formatPackageSize(size) {
+  const bytes = Number(size || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "大小未知";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function packageUpdatedText(updatedAt) {
+  if (!updatedAt) return "";
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function setPackageDownloadCard(type, item) {
+  const card = document.querySelector(`[data-package-download-card="${type}"]`);
+  const link = document.querySelector(`[data-package-download-type="${type}"]`);
+  const meta = type === "full" ? $("packageFullMeta") : $("packageNoSkillMeta");
+  if (!card || !link || !meta) return;
+
+  if (!item) {
+    card.classList.add("missing");
+    link.setAttribute("aria-disabled", "true");
+    link.href = "#";
+    meta.textContent = "未找到安装包，请先执行打包脚本。";
+    return;
+  }
+
+  card.classList.remove("missing");
+  link.removeAttribute("aria-disabled");
+  link.href = packageDownloadUrls[type] || item.downloadUrl || "#";
+  const updatedText = packageUpdatedText(item.updatedAt);
+  meta.textContent = `版本 v${item.version} · ${formatPackageSize(item.size)}${updatedText ? ` · ${updatedText}` : ""}`;
+}
+
+function renderPackageDownloads(data = state.packageDownloads) {
+  const packages = data?.packages || {};
+  setPackageDownloadCard("full", packages.full || null);
+  setPackageDownloadCard("noskill", packages.noskill || null);
+  const status = $("packageDownloadsStatus");
+  if (!status) return;
+  const missing = ["full", "noskill"].filter((type) => !packages[type]);
+  status.textContent = missing.length
+    ? "有安装包尚未生成。需要发布时，请先运行打包脚本。"
+    : "已读取 dist 目录中的最新安装包。";
+}
+
+async function loadPackageDownloads() {
+  const status = $("packageDownloadsStatus");
+  if (status) status.textContent = "正在读取安装包...";
+  try {
+    state.packageDownloads = await api("/api/packages");
+    renderPackageDownloads();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function openPackageDownloads() {
+  closeSettings();
+  closeLearningPage();
+  $("packageDownloads").classList.add("open");
+  $("packageDownloads").setAttribute("aria-hidden", "false");
+  loadPackageDownloads();
+}
+
+function closePackageDownloads() {
+  $("packageDownloads").classList.remove("open");
+  $("packageDownloads").setAttribute("aria-hidden", "true");
+}
+
 function openCanvasArchivePage() {
   closeSettings();
   closeLearningPage();
+  closePackageDownloads();
   closeWorkbench();
   $("canvasArchivePage").classList.add("open");
   $("canvasArchivePage").setAttribute("aria-hidden", "false");
@@ -6160,7 +6268,7 @@ function renderLearningLibrary() {
   });
   renderLearningPanelSummary(data);
   renderLearningLibraryList("learningLibraryRecords", data.records || [], renderLearningRecordItem, "当前没有学习记录，也没有学习内容影响生成；当你说以后都这样、投喂样例或归档画布后，会出现在这里");
-  renderLearningLibraryList("learningLibrarySkills", skillItems, renderSkillLibraryItem, "暂无技能草案，正式技能仍可用");
+  renderLearningLibraryList("learningLibrarySkills", skillItems, renderSkillLibraryItem, "当前没有等待人工处理的历史草案，正式技能仍可用");
 }
 
 function renderLearningPanelSummary(data = {}) {
@@ -6534,11 +6642,11 @@ function renderSkillLibraryItem(skill) {
     item.className = "learning-library-item status-已保存";
     item.innerHTML = `
       <div class="learning-library-item-head">
-        <strong>技能草案</strong>
-        <span>暂无草案</span>
+        <strong>历史待处理</strong>
+        <span>暂无待处理</span>
       </div>
-      <p>暂无技能草案，正式技能仍可用。</p>
-      <p>这里仅展示已保存、等待人工确认的技能草案；确认前不会影响生成。</p>
+      <p>当前没有等待人工处理的历史草案，正式技能仍可用。</p>
+      <p>新的“技能学习”会调用 skill-creator 修改对应正式 skill；普通学习记录仍只作为资料保存。</p>
     `;
     return item;
   }
@@ -6554,7 +6662,7 @@ function renderSkillLibraryItem(skill) {
         <span>${escapeHtml(draftStatus)}</span>
       </div>
       <p><b>类型：</b>${escapeHtml(typeText)}</p>
-      <p><b>是否影响生成：</b>${escapeHtml(skill.generationImpactText || "暂不影响生成；等待人工确认后才可能进入正式技能。")}</p>
+      <p><b>是否影响生成：</b>${escapeHtml(skill.generationImpactText || "历史草案暂不影响生成；不会被生成链路读取。")}</p>
       <p><b>人工确认：</b>${escapeHtml(confirmationStatus)}</p>
       <p><b>diff 摘要：</b>${escapeHtml(diffSummary)}</p>
     `;
@@ -6564,16 +6672,16 @@ function renderSkillLibraryItem(skill) {
     const statusText = formatSkillDraftStatus(skill.taskStatus || skill.status);
     const proposedFiles = Array.isArray(skill.proposedFiles) && skill.proposedFiles.length
       ? skill.proposedFiles.slice(0, 6).join("、")
-      : "等待 skill-creator 判断具体文件";
+      : "历史任务未声明具体文件";
     item.className = "learning-library-item status-已保存";
     item.innerHTML = `
       <div class="learning-library-item-head">
-        <strong>${escapeHtml(skill.name || "skill-creator 任务")}</strong>
-        <span>${escapeHtml(skill.actionLabel || statusText || "等待执行")}</span>
+        <strong>${escapeHtml(skill.name || "历史 skill-creator 任务")}</strong>
+        <span>${escapeHtml(skill.actionLabel || statusText || "历史待处理")}</span>
       </div>
       <p><b>目标技能：</b>${escapeHtml(skill.skillId || "待判断")}</p>
-      <p><b>是否影响生成：</b>${escapeHtml(skill.generationImpactText || "暂不影响生成；执行并验证后才可能进入正式技能。")}</p>
-      <p><b>下一步：</b>${escapeHtml(skill.nextStepText || "按 skill-creator 任务修改并验证。")}</p>
+      <p><b>是否影响生成：</b>${escapeHtml(skill.generationImpactText || "历史任务暂不影响生成；新的主动技能学习会调用 skill-creator 修改正式 skill。")}</p>
+      <p><b>下一步：</b>${escapeHtml(skill.nextStepText || "如仍需使用，请手动处理这个历史任务；新的技能学习入口不会再生成此类任务。")}</p>
       <p><b>摘要：</b>${escapeHtml(skill.diffSummary || "暂无摘要。")}</p>
       <p><b>建议文件：</b>${escapeHtml(proposedFiles)}</p>
     `;
@@ -6615,14 +6723,14 @@ function formatSkillDraftStatus(status) {
 function formatSkillDraftConfirmationStatus(status) {
   const value = String(status || "").trim();
   const labels = {
-    pending: "等待人工确认",
-    waiting: "等待人工确认",
-    unconfirmed: "等待人工确认",
+    pending: "历史待确认",
+    waiting: "历史待确认",
+    unconfirmed: "历史待确认",
     confirmed: "已人工确认",
     rejected: "已驳回",
-    "等待人工确认": "等待人工确认",
+    "等待人工确认": "历史待确认",
   };
-  return labels[value] || value || "等待人工确认";
+  return labels[value] || value || "历史待确认";
 }
 
 function formatLearningTokenUsage(usage) {
@@ -6967,6 +7075,16 @@ function bindEvents() {
   $("openSettings").addEventListener("click", () => openSettings("deepseek"));
   $("openTrash").addEventListener("click", openTrash);
   $("openArchiveView").addEventListener("click", openArchiveView);
+  $("openPackageDownloads").addEventListener("click", openPackageDownloads);
+  $("closePackageDownloads").addEventListener("click", closePackageDownloads);
+  $("packageDownloads").addEventListener("click", (event) => {
+    if (event.target === $("packageDownloads")) closePackageDownloads();
+  });
+  document.querySelectorAll("[data-package-download-type]").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      if (link.getAttribute("aria-disabled") === "true") event.preventDefault();
+    });
+  });
   $("closeCanvasArchivePage").addEventListener("click", closeCanvasArchivePage);
   $("canvasArchivePage").addEventListener("click", (event) => {
     if (event.target === $("canvasArchivePage")) closeCanvasArchivePage();

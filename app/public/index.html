@@ -81,6 +81,13 @@
                 <path d="M12 5.5v13"></path>
               </svg>
             </button>
+            <button id="openPackageDownloads" class="settings-entry icon-entry" type="button" aria-label="下载应用" title="下载应用">
+              <svg class="sidebar-symbol-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 3v10"></path>
+                <path d="M8 9l4 4 4-4"></path>
+                <path d="M5 16v4h14v-4"></path>
+              </svg>
+            </button>
             <button id="openSettings" class="settings-entry icon-entry" type="button" aria-label="设置" title="设置">
               <svg class="sidebar-symbol-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z"></path>
@@ -221,12 +228,43 @@
       </div>
     </aside>
 
+    <aside id="packageDownloads" class="package-downloads" aria-hidden="true">
+      <div class="package-download-panel" role="dialog" aria-modal="true" aria-labelledby="packageDownloadsTitle">
+        <div class="package-download-head">
+          <div>
+            <h2 id="packageDownloadsTitle">下载应用</h2>
+            <p>这里读取本机 dist 目录下最新的客户安装包。发首次安装用“包含技能”，发更新且不想覆盖客户已有技能时用“不包含技能”。</p>
+          </div>
+          <button id="closePackageDownloads" class="ghost" type="button">关闭</button>
+        </div>
+        <div id="packageDownloadsStatus" class="package-download-status" aria-live="polite">正在读取安装包...</div>
+        <div id="packageDownloadsList" class="package-download-list">
+          <section class="package-download-card" data-package-download-card="full">
+            <div>
+              <h3>包含技能</h3>
+              <p>完整初始包，包含当前 skills 目录。适合首次安装或需要同步官方技能。</p>
+              <small id="packageFullMeta">等待读取 dist 目录。</small>
+            </div>
+            <a id="downloadFullPackage" data-package-download-type="full" href="/api/packages/download?type=full">下载含技能包</a>
+          </section>
+          <section class="package-download-card" data-package-download-card="noskill">
+            <div>
+              <h3>不包含技能</h3>
+              <p>更新包，不包含 skills 目录。适合客户已有自定义技能时避免覆盖。</p>
+              <small id="packageNoSkillMeta">等待读取 dist 目录。</small>
+            </div>
+            <a id="downloadNoSkillPackage" data-package-download-type="noskill" href="/api/packages/download?type=noskill">下载不含技能包</a>
+          </section>
+        </div>
+      </div>
+    </aside>
+
     <aside id="learningPage" class="learning-page" aria-hidden="true">
       <div class="learning-page-panel" role="dialog" aria-modal="true" aria-labelledby="learningPageTitle">
         <div class="learning-page-head">
           <div>
             <h2 id="learningPageTitle">学习资料库</h2>
-            <p>系统会把技能学习、满意样例、纠错和归档证据记到这里。已保存不等于影响生成；生成只读取正式技能，不读取普通学习记录。主动技能学习会进入技能创建器流程，学错了可以点“带引用去纠正”回到对话处理。</p>
+            <p>系统会把技能学习、满意样例、纠错和归档证据记到这里。普通学习记录只保存为资料；主动点击“技能学习”会调用 skill-creator 修改对应正式 skill，下一次对应生成会读取。学错了可以点“带引用去纠正”回到对话处理。</p>
           </div>
           <button id="closeLearningPage" class="ghost" type="button">关闭</button>
         </div>
@@ -240,9 +278,9 @@
               <div class="learning-capability-summary" aria-label="当前学习功能总结">
                 <strong>当前学习功能</strong>
                 <ul>
-                  <li>会保存：技能学习、满意样例、纠错说明和归档证据。</li>
-                  <li>会改技能：用户主动点技能学习或明确要求改 skill 时，总控会调用技能创建器处理。</li>
-                  <li>会影响生成：只有写入正式技能后，后续对应生成才会读取。</li>
+                  <li>会保存：满意样例、纠错说明、归档证据和普通对话学习记录。</li>
+                  <li>会改技能：用户主动点“技能学习”时，系统会调用 skill-creator 修改对应正式 skill。</li>
+                  <li>会影响生成：skill-creator 修改正式 skill 后，后续对应生成会读取更新后的 skill。</li>
                   <li>不会做：普通学习记录不会自动改生成，也没有独立当前规则层。</li>
                   <li>学错处理：从学习记录点“带引用去纠正”，回到对话覆盖、停用或收窄。</li>
                 </ul>
@@ -250,11 +288,11 @@
               <div class="learning-guide-grid">
                 <article>
                   <strong>已保存</strong>
-                  <p>技能学习、满意样例、纠错和归档证据会保存成学习记录，卡片会写清楚学到了什么和来源。</p>
+                  <p>满意样例、纠错、归档证据和普通对话学习会保存成学习记录，卡片会写清楚学到了什么和来源。</p>
                 </article>
                 <article>
                   <strong>已影响生成</strong>
-                  <p>普通学习记录会先作为学习资料保存；只有写入正式技能后，下一次对应生成才会读取。</p>
+                  <p>主动技能学习成功后会由 skill-creator 修改正式 skill；下一次对应生成会读取更新后的 skill。</p>
                 </article>
                 <article>
                   <strong>学错了怎么改</strong>
@@ -298,7 +336,7 @@
                       <button id="learningSkillHelp" class="learning-help-button" type="button" aria-label="技能库说明" aria-describedby="learningSkillHelpText">?</button>
                       <span id="learningSkillHelpText" class="learning-help-popover" role="tooltip">
                         <strong>技能库说明</strong>
-                        <span>这里展示系统当前可调用的正式技能，以及等待处理的技能草案。正式技能创建和修改由技能创建器承接；只有正式技能会被对应生成链路读取，普通学习记录和技能草案不会自动影响生成。</span>
+                        <span>这里展示系统当前可调用的正式技能。主动技能学习会调用 skill-creator 修改对应正式 skill；普通学习记录不会自动影响生成。</span>
                       </span>
                     </span>
                   </div>

@@ -301,10 +301,10 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(indexSource, /learningSkillsTabCount/);
   assert.match(indexSource, /learningRecordHelp/);
   assert.match(indexSource, /学习记录说明/);
-  assert.match(learningPageSource, /系统会把技能学习、满意样例、纠错和归档证据记到这里。已保存不等于影响生成；生成只读取正式技能，不读取普通学习记录。主动技能学习会进入技能创建器流程，学错了可以点“带引用去纠正”回到对话处理。/);
+  assert.match(learningPageSource, /系统会把技能学习、满意样例、纠错和归档证据记到这里。普通学习记录只保存为资料；主动点击“技能学习”会调用 skill-creator 修改对应正式 skill，下一次对应生成会读取。学错了可以点“带引用去纠正”回到对话处理。/);
   assert.match(learningPageSource, /已保存/);
   assert.match(learningPageSource, /已影响生成/);
-  assert.match(learningPageSource, /普通学习记录会先作为学习资料保存；只有写入正式技能后，下一次对应生成才会读取/);
+  assert.match(learningPageSource, /普通学习记录不会自动改生成，也没有独立当前规则层/);
   assert.doesNotMatch(learningPageSource, /沉淀规则/);
   assert.doesNotMatch(indexSource, /data-learning-library-tab="rules"/);
   assert.match(learningPageSource, /待确认/);
@@ -314,8 +314,8 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(indexSource, /learningSkillHelp/);
   assert.match(indexSource, /技能库说明/);
   assert.match(indexSource, /当前可调用的正式技能/);
-  assert.match(indexSource, /正式技能创建和修改由技能创建器承接/);
-  assert.match(indexSource, /普通学习记录和技能草案不会自动影响生成/);
+  assert.match(indexSource, /主动技能学习会调用 skill-creator 修改对应正式 skill/);
+  assert.match(indexSource, /普通学习记录不会自动影响生成/);
   assert.match(indexSource, /data-learning-library-tab-group="skills"[\s\S]*data-learning-library-tab="skills"[\s\S]*learningSkillHelp[\s\S]*<\/div>/);
   assert.match(indexSource, /<\/button>\s*<span class="learning-help-wrap">[\s\S]*learningSkillHelp/);
   assert.match(indexSource, /learningFailureJump/);
@@ -323,7 +323,7 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(indexSource, /learning-capability-summary/);
   assert.match(indexSource, /新手说明/);
   assert.match(indexSource, /当前学习功能/);
-  assert.match(indexSource, /用户主动点技能学习或明确要求改 skill 时，总控会调用技能创建器处理/);
+  assert.match(indexSource, /用户主动点“技能学习”时，系统会调用 skill-creator 修改对应正式 skill/);
   assert.match(indexSource, /普通学习记录不会自动改生成，也没有独立当前规则层/);
   assert.match(indexSource, /从学习记录点“带引用去纠正”/);
   assert.match(indexSource, /内部排查信息默认折叠/);
@@ -355,7 +355,7 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.doesNotMatch(appSource, /rule\.status === "active" \? "disabled" : "active"/);
   assert.match(appSource, /viewedLearningFailureIds/);
   assert.match(appSource, /function renderSkillLibraryItem/);
-  assert.match(appSource, /暂无技能草案，正式技能仍可用/);
+  assert.match(appSource, /当前没有等待人工处理的历史草案，正式技能仍可用/);
   assert.match(appSource, /draftStatus/);
   assert.match(appSource, /humanConfirmationStatus/);
   assert.match(indexSource, /<span>学习记录<\/span>/);
@@ -404,20 +404,44 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(stylesSource, /\.sidebar-icon-stack/);
 });
 
-test("skill library renderer shows saved non-generation draft cards and draft empty state", () => {
+test("customer package downloads are reachable from a dedicated sidebar modal", () => {
+  const packagePageSource = indexSource.slice(
+    indexSource.indexOf('<aside id="packageDownloads"'),
+    indexSource.indexOf('<aside id="learningPage"'),
+  );
+
+  assert.match(indexSource, /id="openPackageDownloads"/);
+  assert.match(indexSource, /id="packageDownloads"/);
+  assert.match(indexSource, /id="closePackageDownloads"/);
+  assert.match(packagePageSource, /id="packageDownloadsList"/);
+  assert.match(packagePageSource, /data-package-download-type="full"/);
+  assert.match(packagePageSource, /data-package-download-type="noskill"/);
+  assert.match(appSource, /packageDownloads/);
+  assert.match(appSource, /function openPackageDownloads/);
+  assert.match(appSource, /function closePackageDownloads/);
+  assert.match(appSource, /function loadPackageDownloads/);
+  assert.match(appSource, /\/api\/packages/);
+  assert.match(appSource, /\/api\/packages\/download\?type=full/);
+  assert.match(appSource, /\/api\/packages\/download\?type=noskill/);
+  assert.match(appSource, /\$\("openPackageDownloads"\)\.addEventListener/);
+  assert.match(stylesSource, /\.package-downloads/);
+  assert.match(stylesSource, /\.package-download-card/);
+});
+
+test("skill library renderer shows legacy non-generation draft and task cards", () => {
   const renderSkillLibrarySource = extractFunction("renderLearningLibrary");
   const renderSkillItemSource = extractFunction("renderSkillLibraryItem");
   const renderSkillLibraryItem = evaluateSkillRenderer();
   const item = renderSkillLibraryItem({
     recordType: "skill-draft",
     recordId: "skill-draft:draft-a",
-    name: "技能草案",
+    name: "历史技能草案",
     skillId: "storyboard-generate",
     skillKind: "storyboard",
     draftStatus: "saved",
     humanConfirmationStatus: "pending",
     affectsGeneration: false,
-    generationImpactText: "暂不影响生成；等待人工确认后才可能进入正式技能。",
+    generationImpactText: "历史草案暂不影响生成；不会被生成链路读取。",
     diffSummary: "Draft only: no official skill files or routes are changed.",
   });
   const officialItem = renderSkillLibraryItem({
@@ -432,18 +456,18 @@ test("skill library renderer shows saved non-generation draft cards and draft em
   const taskItem = renderSkillLibraryItem({
     recordType: "skill-creator-task",
     recordId: "skill-creator-task:task-a",
-    name: "把分镜规则交给 skill-creator",
+    name: "把分镜规则交给 skill-creator 的历史任务",
     skillId: "storyboard-generate",
     taskStatus: "saved",
-    actionLabel: "等待执行",
+    actionLabel: "历史待处理",
     affectsGeneration: false,
-    generationImpactText: "暂不影响生成；需要执行 skill-creator 任务并验证后才可能进入正式技能。",
-    nextStepText: "等待按 skill-creator 任务修改并验证；完成前不会写入生成上下文。",
-    diffSummary: "由主动技能学习生成的待执行任务。",
+    generationImpactText: "历史 skill-creator 任务暂不影响生成；新的主动技能学习会调用 skill-creator 修改正式 skill。",
+    nextStepText: "如仍需使用，请手动处理这个历史任务；新的技能学习入口不会再生成此类任务。",
+    diffSummary: "旧逻辑生成的历史待处理任务。",
     proposedFiles: ["skills/03-storyboard/storyboard-generate/SKILL.md"],
   });
 
-  assert.match(renderSkillLibrarySource, /暂无技能草案，正式技能仍可用/);
+  assert.match(renderSkillLibrarySource, /当前没有等待人工处理的历史草案，正式技能仍可用/);
   assert.match(renderSkillItemSource, /recordType === "skill-draft"/);
   assert.match(renderSkillItemSource, /recordType === "skill-creator-task"/);
   assert.match(renderSkillItemSource, /draftStatus/);
@@ -451,9 +475,9 @@ test("skill library renderer shows saved non-generation draft cards and draft em
   assert.match(item.innerHTML, /技能草案/);
   assert.match(item.innerHTML, /已保存/);
   assert.match(item.innerHTML, /暂不影响生成/);
-  assert.match(item.innerHTML, /等待人工确认/);
+  assert.match(item.innerHTML, /历史待确认|pending/);
   assert.match(item.innerHTML, /diff 摘要/);
-  assert.match(taskItem.innerHTML, /等待执行/);
+  assert.match(taskItem.innerHTML, /历史待处理/);
   assert.match(taskItem.innerHTML, /目标技能/);
   assert.match(taskItem.innerHTML, /storyboard-generate/);
   assert.match(taskItem.innerHTML, /暂不影响生成/);
@@ -722,8 +746,29 @@ test("chat composer replaces generation buttons with explicit skill learning mod
   assert.match(sendSource, /learningMode,/);
   assert.match(sendSource, /skillRouteId: forcedSkillRouteId/);
   assert.match(sendSource, /workflowIntent: learningMode \|\| forcedSkillRouteId \? "" : state\.composeMode \|\| ""/);
-  assert.match(sendSource, /正在进入技能创建器流程并保存到学习资料库/);
+  assert.match(sendSource, /正在调用 skill-creator 修改正式技能/);
   assert.match(sendSource, /正在调用\$\{composeModeLabel\(state\.composeMode\)\}技能/);
+});
+
+test("storyboard hard-rule API errors show issue count and line position", () => {
+  const { formatApiErrorMessage } = evaluateAppFunctions(["formatApiErrorMessage"]);
+  const error = new Error("已命中分镜生成 skill（storyboard-generate），但分镜输出未满足其中硬规则；已写入学习失败事件，请重新生成。");
+  error.details = {
+    kind: "storyboard-hard-rule-validation",
+    issueCount: 2,
+    issues: [{
+      lineNumber: 136,
+      message: "台词超过 20 字，需拆成新的连续镜号。",
+      lineText: "台词：旁白VO：上面来了通知，供销社体制改革。他被调到县社仓库当管理员了。",
+      suggestedLines: ["上面来了通知，供销社体制改革。", "他被调到县社仓库当管理员了。"],
+    }],
+  };
+
+  const text = formatApiErrorMessage(error);
+  assert.match(text, /共 2 处/);
+  assert.match(text, /第 136 行/);
+  assert.match(text, /台词超过 20 字/);
+  assert.match(text, /建议拆为/);
 });
 
 test("the no-project group is fixed and cannot be renamed", () => {

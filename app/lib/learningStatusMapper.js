@@ -30,6 +30,7 @@ function mapLearningDisplayRecord(event = {}, context = {}) {
   const generationProof = resolveGenerationProof(event, {
     affectsGeneration,
     displayStatus,
+    landingType: normalizeString(event.landingType),
   });
 
   return {
@@ -107,11 +108,16 @@ function resolveActionLabel(event, displayStatus) {
 function resolveGenerationProof(event, state) {
   const suppliedProof = normalizeGenerationProof(event.generationProof) || {};
   const suppliedProofStatus = normalizeString(suppliedProof.proofStatus);
+  const landingType = normalizeString(state.landingType);
   let proofStatus = GENERATION_PROOF_STATUSES.has(suppliedProofStatus)
     ? suppliedProofStatus
     : defaultProofStatus(state);
   let claimText = normalizeString(suppliedProof.claimText) ||
     defaultProofClaim(proofStatus, state.displayStatus, state.affectsGeneration);
+
+  if (!state.affectsGeneration && landingType === "skill-draft" && claimText.includes("skill-creator")) {
+    claimText = "这是旧逻辑留下的历史 skill-creator 任务记录，不影响生成；新的主动技能学习会调用 skill-creator 修改正式 skill。";
+  }
 
   if (!state.affectsGeneration && GENERATION_PASS_PROOF_STATUSES.has(proofStatus)) {
     proofStatus = "not_applicable";
@@ -212,7 +218,7 @@ function resolveNextStepText(event, displayStatus, actionLabel) {
   if (displayStatus === "已影响生成") return "后续生成会读取；若本次输出违规，必须自动修复或记录失败，不能静默交付。";
   if (displayStatus === "已被覆盖") return "无需处理，查看覆盖它的新学习即可。";
   if (displayStatus === "已保存" && landingType === "current-rule") return "无需处理；如果这条仍要影响生成，请用技能学习重新沉淀到正式技能。";
-  if (displayStatus === "已保存" && landingType === "skill-reference") return "无需处理；如果这条仍要影响生成，请用技能学习生成 skill-creator 任务，并完成正式技能修改与验证。";
+  if (displayStatus === "已保存" && landingType === "skill-reference") return "无需处理；如果这条仍要影响生成，请用技能学习调用 skill-creator 修改正式 skill。";
   if (displayStatus === "已保存") return "无需处理，可在需要时作为资料回看。";
   if (landingType === "sample-insufficient") {
     const neededSampleType = normalizeString(event.neededSampleType) || "同类样例";

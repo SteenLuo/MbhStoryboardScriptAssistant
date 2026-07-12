@@ -108,7 +108,27 @@ test("legacy skill-reference landing is saved history and does not affect genera
   assert.match(record.generationImpactText, /历史 skill reference/);
   assert.match(record.generationImpactText, /skill-creator/);
   assert.match(record.usedWhereText, /历史 skill reference/);
-  assert.match(record.nextStepText, /skill-creator 任务/);
+  assert.match(record.nextStepText, /调用 skill-creator 修改正式 skill/);
+});
+
+test("legacy skill-draft proof text is normalized as history", () => {
+  const record = mapLearningDisplayRecord({
+    eventId: "event-skill-draft",
+    landingType: "skill-draft",
+    internalStatus: "landed",
+    jobStatus: "completed",
+    summary: "把分镜规则沉淀到 skill",
+    generationProof: {
+      proofStatus: "not_applicable",
+      claimText: "已生成 skill-creator 任务，完成修改和验证前不会影响生成。",
+    },
+  });
+
+  assertKnownDisplayStatus(record);
+  assert.equal(record.displayStatus, "已保存");
+  assert.equal(record.affectsGeneration, false);
+  assert.match(record.generationProof.claimText, /历史 skill-creator 任务记录/);
+  assert.match(record.generationProof.claimText, /新的主动技能学习会调用 skill-creator 修改正式 skill/);
 });
 
 test("unfinished generation landings wait for confirmation before affecting generation", () => {

@@ -30,6 +30,12 @@ test("canvas storyboard generation loads the local storyboard skill context", ()
   assert.match(contextSource, /routeLocalSkill\("分镜"\)/);
   assert.match(contextSource, /分镜标准格式\.md/);
   assert.match(contextSource, /字段标签使用纯文本/);
+  assert.match(contextSource, /景别字段必须同时承载必要的构图角度和拍摄视角/);
+  assert.match(contextSource, /低角度侧面中景/);
+  assert.match(contextSource, /正三四仰拍近景/);
+  assert.match(contextSource, /运动镜头占比必须控制在总镜数的 30% 到 40% 之间/);
+  assert.match(contextSource, /正面平视镜头占比必须控制在总镜数的 30% 到 40% 之间/);
+  assert.match(contextSource, /长台词因超过 20 字拆成连续镜号/);
   assert.match(contextSource, /只输出分镜正文/);
   assert.match(contextSource, /enforceStableHardRules:\s*hasStoryboardDialogueHardRules\(prompt\)/);
   assert.match(serverSource, /STORYBOARD_DIALOGUE_HARD_RULE_PATTERN/);
@@ -55,41 +61,99 @@ test("canvas storyboard nodes use stable skill rule refs instead of dynamic curr
   assert.match(generateSource, /skillRulesUsed/);
 });
 
-test("canvas storyboard generation applies hard-rule validation and failure feedback", () => {
+test("canvas storyboard generation marks hard-rule issues without blocking output", () => {
   const generateSource = extractFunction("generateCanvasStoryboards");
   const generationSource = extractFunction("generateStoryboardEpisodeWithValidation");
+  const generationInputSource = extractFunction("buildStoryboardEpisodeGenerationInput");
   const reviseSource = extractFunction("reviseCanvasNode");
 
   assert.match(serverSource, /applyStoryboardHardRuleValidation/);
-  assert.match(serverSource, /recordStoryboardHardRuleFailure/);
   assert.match(generateSource, /generateStoryboardEpisodeWithValidation/);
   assert.match(generationSource, /applyStoryboardHardRuleValidation\(result\.content/);
   assert.match(generationSource, /STORYBOARD_GENERATION_MAX_ATTEMPTS/);
   assert.match(generationSource, /buildStoryboardHardRuleRetryFeedback/);
+  assert.match(generationInputSource, /已命中的分镜 skill 硬规则/);
+  assert.match(generationInputSource, /20-40 字拆 2 个镜号/);
+  assert.match(generationInputSource, /连续台词总字数不超过 20 字/);
+  assert.match(generationInputSource, /禁止仅为了变化景别/);
+  assert.match(generationInputSource, /林秀娥：您言重了/);
+  assert.match(generationInputSource, /必须写在同一个镜号/);
+  assert.match(generationInputSource, /非空台词必须在台词内容前标注说话人或声音来源/);
+  assert.match(generationInputSource, /台词：陈建军：秀娥，你今天真好看/);
+  assert.match(generationInputSource, /人物台词必须保真/);
+  assert.match(generationInputSource, /拼回必须与剧本原台词完全一致/);
+  assert.match(generationInputSource, /后续镜头不能复制上一镜“情绪\/动作”只改台词/);
+  assert.match(generationInputSource, /拆分出的连续镜头景别和画面内容不能完全一样/);
+  assert.match(generationInputSource, /必须结合剧本当前情节和台词信息重新设计对应画面/);
+  assert.doesNotMatch(generationInputSource, /说话人单人近景、双人中景、关系镜头/);
+  assert.doesNotMatch(generationInputSource, /拆台词承接时不得把下一镜说话人提前拍成反应镜头/);
+  assert.match(generationInputSource, /运动镜头占比必须在总镜数的 30% 到 40% 之间/);
+  assert.match(generationInputSource, /禁止连续 3 个及以上运动镜头/);
+  assert.match(generationInputSource, /正面平视镜头占比必须在总镜数的 30% 到 40% 之间/);
+  assert.match(generationInputSource, /禁止连续使用相同景别\/角度\/构图/);
+  assert.match(generationInputSource, /只差默认正面平视省略词的写法视为同构图/);
+  assert.match(generationInputSource, /接上一镜/);
+  assert.match(generationInputSource, /连续多个“景别：双人中景”/);
+  assert.match(generationSource, /sourceScript:\s*input\.episode\?\.content \|\| input\.sourceNode\?\.content/);
+  assert.match(generationInputSource, /拆完后逐条自查/);
+  assert.match(generationInputSource, /非空台词必须写成“台词：说话人：原文台词”/);
+  assert.match(generationInputSource, /同一说话人相邻短台词合并后不超过 20 字/);
+  assert.match(generationInputSource, /长台词拆镜不得复制同一段情绪\/动作只改台词/);
+  assert.match(generationInputSource, /只保留不重复和贴合剧本的要求/);
+  assert.match(generationInputSource, /修正连续相同景别\/角度\/构图拍同一画面的镜头/);
+  assert.match(generationInputSource, /运动镜头占比和正面平视镜头占比都调整到 30% 到 40%/);
   assert.match(generateSource, /hardRuleValidation/);
-  assert.match(generateSource, /recordStoryboardHardRuleFailure/);
+  assert.doesNotMatch(generateSource, /throw createStoryboardHardRuleError/);
+  assert.match(generateSource, /content:\s*hardRuleResult\.content/);
+  assert.match(generateSource, /validation:\s*hardRuleResult\.validation/);
   assert.match(generateSource, /generationAttempts/);
   assert.match(reviseSource, /applyStoryboardHardRuleValidation\(result\.content/);
   assert.match(reviseSource, /hardRuleValidation/);
+  assert.doesNotMatch(reviseSource, /throw createStoryboardHardRuleError/);
 });
 
-test("workflow storyboard generation applies stable skill validation without current rule trace refs", () => {
+test("workflow storyboard generation marks stable skill validation without blocking output", () => {
   const workflowSource = extractFunction("runWorkflowTask");
 
   assert.match(workflowSource, /taskSkillContext\(task\)/);
   assert.match(workflowSource, /applyStoryboardHardRuleValidation\(result\.content/);
   assert.doesNotMatch(workflowSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
   assert.match(workflowSource, /skillRulesUsed/);
-  assert.match(workflowSource, /recordStoryboardHardRuleFailure/);
+  assert.doesNotMatch(workflowSource, /throw createStoryboardHardRuleError/);
+  assert.match(workflowSource, /finalContent = hardRuleResult\.content/);
 });
 
 test("hard-rule failure event records its own event id in generation proof", () => {
   const failureSource = extractFunction("recordStoryboardHardRuleFailure");
+  const errorSource = extractFunction("createStoryboardHardRuleError");
 
   assert.match(failureSource, /const eventId = `hard-rule-validation-failed-/);
+  assert.match(failureSource, /const skillId = "storyboard-generate"/);
+  assert.match(failureSource, /skills\/03-storyboard\/storyboard-generate\/SKILL\.md/);
   assert.match(failureSource, /eventId,/);
+  assert.match(failureSource, /skillId,/);
+  assert.match(failureSource, /landingIds:\s*\[skillFileRef\]/);
   assert.match(failureSource, /failureEventIds:\s*\[eventId\]/);
   assert.match(failureSource, /sourceEventIds,/);
+  assert.match(failureSource, /return \{/);
+  assert.match(errorSource, /issueCount/);
+  assert.match(errorSource, /lineNumber/);
+  assert.match(errorSource, /lineText/);
+  assert.match(errorSource, /skillFile/);
+  assert.match(errorSource, /appendStoryboardHardRuleSummary/);
+  assert.match(errorSource, /STORYBOARD_HARD_RULE_VALIDATION_FAILED/);
+  const summarySource = extractFunction("appendStoryboardHardRuleSummary");
+  assert.match(summarySource, /共 \$\{issueCount/);
+  assert.match(summarySource, /第 \$\{first\.lineNumber\} 行/);
+});
+
+test("API errors preserve structured hard-rule details", () => {
+  const responseSource = extractFunction("errorResponse");
+  const handleSource = serverSource.slice(serverSource.indexOf("const server = http.createServer"));
+
+  assert.match(responseSource, /payload\.code = error\.code/);
+  assert.match(responseSource, /payload\.details = error\.details/);
+  assert.match(handleSource, /sendJson\(res,\s*500,\s*errorResponse\(error\)\)/);
 });
 
 test("first-pass storyboard generation paths load the local storyboard skill", () => {
@@ -114,7 +178,8 @@ test("generic storyboard generation and canvas save apply storyboard validation"
   assert.match(workbenchSource, /applyStoryboardHardRuleValidation\(result\.content/);
   assert.doesNotMatch(workbenchSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
   assert.match(workbenchSource, /skillRulesUsed/);
-  assert.match(workbenchSource, /recordStoryboardHardRuleFailure/);
+  assert.doesNotMatch(workbenchSource, /throw createStoryboardHardRuleError/);
+  assert.match(workbenchSource, /finalContent = hardRuleResult\.content/);
   assert.match(saveSource, /applyCanvasStoryboardValidation/);
   assert.doesNotMatch(saveSource, /currentStoryboardRulesUsed\(\)/);
 });
@@ -124,7 +189,7 @@ test("server prompts no longer apply script level rules", () => {
   assert.doesNotMatch(serverSource, /B级本|A级本/);
 });
 
-test("explicit skill learning mode calls bundled skill creator instead of direct skill writes", () => {
+test("explicit skill learning mode applies target skill updates through skill creator", () => {
   const chatSource = extractFunction("chatWithAssistant");
   const learningSource = extractFunction("handleLearningCompose");
   const helperSource = extractFunction("applyAutonomousConversationLearning");
@@ -134,18 +199,21 @@ test("explicit skill learning mode calls bundled skill creator instead of direct
   assert.doesNotMatch(chatSource, /routeLocalSkill\("样例 学习 入库 技能学习"\)/);
   assert.match(chatSource, /if \(explicitLearningMode\)/);
   assert.match(chatSource, /handleLearningCompose/);
-  assert.match(learningSource, /loadLocalSkillContext\(BUSINESS_ROOT,\s*selectedRoute/);
+  assert.match(serverSource, /writeSkillCreatorUpdatedSkill/);
+  assert.match(learningSource, /inferTargetSkillIdForLearning/);
+  assert.match(learningSource, /const targetRoute = findLocalSkillRoute\(targetSkillId\) \|\| findLocalSkillRoute\("skill-creator"\)/);
+  assert.match(learningSource, /loadLocalSkillContext\(BUSINESS_ROOT,\s*targetRoute/);
+  assert.match(learningSource, /loadLocalSkillContext\(BUSINESS_ROOT,\s*skillCreatorRoute/);
   assert.match(learningSource, /deepseekChat/);
-  assert.match(learningSource, /writeSkillCreatorTaskRecord/);
+  assert.match(learningSource, /buildSkillCreatorApplySystemPrompt/);
+  assert.match(learningSource, /writeSkillCreatorUpdatedSkill\(BUSINESS_ROOT/);
+  assert.match(learningSource, /landingType:\s*"formal-skill"/);
+  assert.match(learningSource, /proofStatus:\s*"pending_first_hit"/);
   assert.match(learningSource, /writeConversationLearningRecord/);
   assert.doesNotMatch(learningSource, /applyAutonomousConversationLearning/);
-  assert.match(learningSource, /原版 skill-creator/);
-  assert.match(learningSource, /已保存到学习资料库/);
-  assert.doesNotMatch(learningSource, /已写入分镜 skill 学习沉淀/);
-  assert.doesNotMatch(learningSource, /下一次分镜生成会读取/);
-  assert.doesNotMatch(learningSource, /不会自动改写生成规则/);
-  assert.doesNotMatch(learningSource, /沉淀到稳定 skill/);
-  assert.doesNotMatch(learningSource, /已同步到当前规则/);
+  assert.doesNotMatch(learningSource, /writeSkillCreatorTaskRecord/);
+  assert.doesNotMatch(learningSource, /buildSkillCreatorTaskDraft/);
+  assert.doesNotMatch(serverSource, /writeDirectSkillLearning/);
   assert.doesNotMatch(helperSource, /writeSkillLearningReference/);
 });
 
@@ -163,6 +231,23 @@ test("chat assistant skillRoute does not expose dynamic current rules trace refs
 
   assert.doesNotMatch(chatSource, /currentRulesUsed:\s*skillContext\.currentRulesUsed/);
   assert.match(chatSource, /skillRulesUsed:\s*skillContext\.skillRulesUsed/);
+});
+
+test("chat persists the user message before long assistant generation starts", () => {
+  const chatSource = extractFunction("chatWithAssistant");
+  const pushIndex = chatSource.indexOf("conversation.messages.push(userMessage);");
+  const saveIndex = chatSource.indexOf("await saveConversation(conversation);", pushIndex);
+  const workflowIntentIndex = chatSource.indexOf("const workflowIntent", pushIndex);
+  const learningCallIndex = chatSource.indexOf("await handleLearningCompose", pushIndex);
+  const workflowCallIndex = chatSource.indexOf("await runWorkflowChat", pushIndex);
+  const modelCallIndex = chatSource.indexOf("await deepseekChat", pushIndex);
+
+  assert.ok(pushIndex > -1, "chat should append the user message");
+  assert.ok(saveIndex > pushIndex, "chat should save after appending the user message");
+  assert.ok(saveIndex < workflowIntentIndex, "save should happen before routing to long-running work");
+  assert.ok(saveIndex < learningCallIndex, "save should happen before learning mode generation");
+  assert.ok(saveIndex < workflowCallIndex, "save should happen before workflow generation");
+  assert.ok(saveIndex < modelCallIndex, "save should happen before direct model generation");
 });
 
 test("canvas revision endpoint only updates revision nodes once", () => {
@@ -247,6 +332,23 @@ test("learning library API exposes fixed D7 contract fields", () => {
   assert.doesNotMatch(serverSource, /updateCurrentRuleStatus/);
 });
 
+test("package download API exposes latest full and no-skill customer packages", () => {
+  const apiSource = extractFunction("handleApi");
+
+  assert.match(serverSource, /const DIST_DIR = path\.join\(ROOT,\s*"dist"\)/);
+  assert.match(serverSource, /CUSTOMER_PACKAGE_TYPES/);
+  assert.match(serverSource, /MbhStoryboardScriptAssistant-CustomerTrial-Full-v/);
+  assert.match(serverSource, /MbhStoryboardScriptAssistant-CustomerTrial-NoSkillOverwrite-v/);
+  assert.match(serverSource, /function comparePackageVersion/);
+  assert.match(serverSource, /async function listCustomerPackages/);
+  assert.match(serverSource, /function sendPackageDownload/);
+  assert.match(serverSource, /Content-Disposition/);
+  assert.match(apiSource, /\/api\/packages/);
+  assert.match(apiSource, /listCustomerPackages\(\)/);
+  assert.match(apiSource, /\/api\/packages\/download/);
+  assert.match(apiSource, /sendPackageDownload/);
+});
+
 test("learning correction API writes referenced correction events without blind rule edits", () => {
   const apiSource = extractFunction("handleApi");
   const correctionSource = extractFunction("handleLearningCorrection");
@@ -259,28 +361,34 @@ test("learning correction API writes referenced correction events without blind 
   assert.match(correctionSource, /buildLearningLibrary/);
 });
 
-test("chat flow saves explicit learning into the learning event pipeline without direct skill writes", () => {
-  const chatSource = extractFunction("chatWithAssistant");
+test("autonomous conversation learning saves passive candidates without direct skill writes", () => {
   const helperSource = extractFunction("applyAutonomousConversationLearning");
 
   assert.match(serverSource, /extractExplicitRuleLearningInput/);
   assert.doesNotMatch(helperSource, /learnExplicitRule/);
   assert.match(helperSource, /appendLearningEvent/);
   assert.doesNotMatch(helperSource, /writeSkillLearningReference/);
+  assert.doesNotMatch(helperSource, /writeDirectSkillLearning/);
+  assert.doesNotMatch(helperSource, /writeSkillCreatorUpdatedSkill/);
   assert.doesNotMatch(serverSource, /function writeSkillLearningReference/);
   assert.doesNotMatch(serverSource, /学习沉淀要求\.md/);
   assert.match(helperSource, /landingType:\s*"skill-draft"/);
   assert.match(helperSource, /landingType:\s*"skill-draft"/);
-  assert.match(chatSource, /applyAutonomousConversationLearning/);
   assert.match(helperSource, /assistantMessage\.learningEvent/);
   assert.doesNotMatch(helperSource, /assistantMessage\.skillReferencePath/);
 });
 
-test("explicit skill learning uses bundled skill creator route", () => {
+test("explicit skill learning routes to the target formal skill through skill creator", () => {
   const chatSource = extractFunction("chatWithAssistant");
+  const learningSource = extractFunction("handleLearningCompose");
 
   assert.match(chatSource, /findLocalSkillRoute\("skill-creator"\)/);
   assert.doesNotMatch(chatSource, /routeLocalSkill\("样例 学习 入库 技能学习"\)/);
+  assert.match(learningSource, /inferTargetSkillIdForLearning/);
+  assert.match(learningSource, /readTargetSkillMarkdown/);
+  assert.match(learningSource, /buildSkillCreatorApplyUserPrompt/);
+  assert.match(learningSource, /writeSkillCreatorUpdatedSkill/);
+  assert.doesNotMatch(learningSource, /New-SkillCreatorTask|skill-creator 任务/);
 });
 
 test("chat flow no longer exposes legacy long-memory confirmation", () => {

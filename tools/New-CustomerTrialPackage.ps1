@@ -1,6 +1,7 @@
 param(
   [string]$BaseName = "MbhStoryboardScriptAssistant-CustomerTrial",
   [string]$BaseVersion = "0.1.0",
+  [string]$ReleaseVersion = "",
   [ValidateSet("Both", "Full", "NoSkillOverwrite")]
   [string]$Mode = "Both"
 )
@@ -311,8 +312,14 @@ $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $dist = Join-Path $root "dist"
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 
-$next = Get-NextPackageVersion -DistPath $dist -FallbackVersion $BaseVersion
-$version = "$($next.Major).$($next.Minor).$($next.Patch)"
+$requestedVersion = $ReleaseVersion.Trim()
+if ($requestedVersion) {
+  $release = Parse-Version -Text $requestedVersion
+  $version = "$($release.Major).$($release.Minor).$($release.Patch)"
+} else {
+  $next = Get-NextPackageVersion -DistPath $dist -FallbackVersion $BaseVersion
+  $version = "$($next.Major).$($next.Minor).$($next.Patch)"
+}
 $buildRoot = Join-Path $dist "_package-build"
 
 $targets = @()

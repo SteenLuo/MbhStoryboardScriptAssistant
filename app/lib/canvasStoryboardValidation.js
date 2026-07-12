@@ -5,12 +5,26 @@ const {
 } = require("./storyboardValidation");
 
 function applyCanvasStoryboardValidation(canvas = {}, options = {}) {
+  const nodes = Array.isArray(canvas.nodes) ? canvas.nodes : [];
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
   return {
     ...canvas,
-    nodes: Array.isArray(canvas.nodes)
-      ? canvas.nodes.map((node) => applyStoryboardNodeValidation(node, options))
+    nodes: nodes.length
+      ? nodes.map((node) => applyStoryboardNodeValidation(node, {
+        ...options,
+        sourceScript: sourceScriptForStoryboardNode(node, nodesById, options),
+      }))
       : [],
   };
+}
+
+function sourceScriptForStoryboardNode(node = {}, nodesById = new Map(), options = {}) {
+  if (node.type !== "storyboard") return options.sourceScript || "";
+  if (options.sourceScript) return options.sourceScript;
+  const sourceScriptNodeId = node.meta?.sourceScriptNodeId || node.meta?.sourceNodeId;
+  if (!sourceScriptNodeId) return "";
+  const sourceNode = nodesById.get(sourceScriptNodeId);
+  return sourceNode?.type === "script" ? String(sourceNode.content || "") : "";
 }
 
 function applyStoryboardNodeValidation(node = {}, options = {}) {
@@ -19,6 +33,7 @@ function applyStoryboardNodeValidation(node = {}, options = {}) {
 
   const hardRuleResult = applyStoryboardHardRuleValidation(node.content || "", {
     useStableSkillRules: options.useStableSkillRules === true,
+    sourceScript: options.sourceScript || "",
   });
   const validation = hardRuleResult.validation || validateStoryboardContent(hardRuleResult.content || node.content || "", {
     checkDialogueLength: false,
