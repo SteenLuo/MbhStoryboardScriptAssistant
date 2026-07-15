@@ -102,14 +102,6 @@ http://127.0.0.1:17877
 
 版本号会自动读取 `dist/` 中已有包名，取最高版本并把最后一位加一。例如已有 `v0.1.3`，下次会生成 `v0.1.4`。
 
-如果需要发布固定版本号，可直接运行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\New-CustomerTrialPackage.ps1 -Mode Both -ReleaseVersion 0.9.0
-```
-
-本地网页左下角“下载应用”入口会读取 `dist/` 中最新的两个客户包，并提供“包含技能”和“不包含技能”两个下载按钮。该入口只负责下载已生成的 zip；如果页面提示未找到安装包，需要先执行上面的打包脚本。
-
 打包脚本会排除本机私有和运行数据，包括 `.env`、`.env.local`、`app/config/deepseek.local.json`、`app/config/app.local.json`、`app/data/conversations/`、`app/runtime/`、`runs/`、既有学习记录和已有样例源文件。
 
 客户包内包含 [使用说明.md](使用说明.md)，用于指导客户解压、启动、配置模型供应商 API Key、关闭服务和理解 `Full` / `NoSkillOverwrite` 两种包。

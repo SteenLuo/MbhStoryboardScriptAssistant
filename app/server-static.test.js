@@ -35,7 +35,6 @@ test("canvas storyboard generation loads the local storyboard skill context", ()
   assert.match(contextSource, /正三四仰拍近景/);
   assert.match(contextSource, /运动镜头占比必须控制在总镜数的 30% 到 40% 之间/);
   assert.match(contextSource, /正面平视镜头占比必须控制在总镜数的 30% 到 40% 之间/);
-  assert.match(contextSource, /长台词因超过 20 字拆成连续镜号/);
   assert.match(contextSource, /只输出分镜正文/);
   assert.match(contextSource, /enforceStableHardRules:\s*hasStoryboardDialogueHardRules\(prompt\)/);
   assert.match(serverSource, /STORYBOARD_DIALOGUE_HARD_RULE_PATTERN/);
@@ -61,6 +60,30 @@ test("canvas storyboard nodes use stable skill rule refs instead of dynamic curr
   assert.match(generateSource, /skillRulesUsed/);
 });
 
+test("canvas storyboard planning rejects empty script nodes before episode splitting", () => {
+  const planSource = extractFunction("planCanvasStoryboards");
+  const generateSource = extractFunction("generateCanvasStoryboards");
+
+  assert.match(serverSource, /function canvasScriptNodeContentForStoryboard/);
+  assert.match(planSource, /const scriptContent = canvasScriptNodeContentForStoryboard\(sourceNode\)/);
+  assert.match(generateSource, /const scriptContent = canvasScriptNodeContentForStoryboard\(sourceNode\)/);
+  assert.match(planSource, /splitScriptIntoEpisodes\(scriptContent\)/);
+  assert.match(generateSource, /splitScriptIntoEpisodes\(scriptContent\)/);
+  assert.doesNotMatch(planSource, /splitScriptIntoEpisodes\(sourceNode\.content\)/);
+  assert.doesNotMatch(generateSource, /splitScriptIntoEpisodes\(sourceNode\.content\)/);
+});
+
+test("local static assets disable browser caching for iterative fixes", () => {
+  const staticSource = extractFunction("serveStatic");
+
+  assert.match(serverSource, /function sendStatic/);
+  assert.match(serverSource, /Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate"/);
+  assert.match(serverSource, /"Pragma": "no-cache"/);
+  assert.match(serverSource, /"Expires": "0"/);
+  assert.match(staticSource, /sendStatic\(res,\s*200/);
+  assert.doesNotMatch(staticSource, /sendText\(res,\s*200/);
+});
+
 test("canvas storyboard generation marks hard-rule issues without blocking output", () => {
   const generateSource = extractFunction("generateCanvasStoryboards");
   const generationSource = extractFunction("generateStoryboardEpisodeWithValidation");
@@ -82,11 +105,6 @@ test("canvas storyboard generation marks hard-rule issues without blocking outpu
   assert.match(generationInputSource, /台词：陈建军：秀娥，你今天真好看/);
   assert.match(generationInputSource, /人物台词必须保真/);
   assert.match(generationInputSource, /拼回必须与剧本原台词完全一致/);
-  assert.match(generationInputSource, /后续镜头不能复制上一镜“情绪\/动作”只改台词/);
-  assert.match(generationInputSource, /拆分出的连续镜头景别和画面内容不能完全一样/);
-  assert.match(generationInputSource, /必须结合剧本当前情节和台词信息重新设计对应画面/);
-  assert.doesNotMatch(generationInputSource, /说话人单人近景、双人中景、关系镜头/);
-  assert.doesNotMatch(generationInputSource, /拆台词承接时不得把下一镜说话人提前拍成反应镜头/);
   assert.match(generationInputSource, /运动镜头占比必须在总镜数的 30% 到 40% 之间/);
   assert.match(generationInputSource, /禁止连续 3 个及以上运动镜头/);
   assert.match(generationInputSource, /正面平视镜头占比必须在总镜数的 30% 到 40% 之间/);
@@ -98,8 +116,6 @@ test("canvas storyboard generation marks hard-rule issues without blocking outpu
   assert.match(generationInputSource, /拆完后逐条自查/);
   assert.match(generationInputSource, /非空台词必须写成“台词：说话人：原文台词”/);
   assert.match(generationInputSource, /同一说话人相邻短台词合并后不超过 20 字/);
-  assert.match(generationInputSource, /长台词拆镜不得复制同一段情绪\/动作只改台词/);
-  assert.match(generationInputSource, /只保留不重复和贴合剧本的要求/);
   assert.match(generationInputSource, /修正连续相同景别\/角度\/构图拍同一画面的镜头/);
   assert.match(generationInputSource, /运动镜头占比和正面平视镜头占比都调整到 30% 到 40%/);
   assert.match(generateSource, /hardRuleValidation/);
@@ -330,23 +346,6 @@ test("learning library API exposes fixed D7 contract fields", () => {
   }
   assert.doesNotMatch(apiSource, /\/api\/learning-rules\/status/);
   assert.doesNotMatch(serverSource, /updateCurrentRuleStatus/);
-});
-
-test("package download API exposes latest full and no-skill customer packages", () => {
-  const apiSource = extractFunction("handleApi");
-
-  assert.match(serverSource, /const DIST_DIR = path\.join\(ROOT,\s*"dist"\)/);
-  assert.match(serverSource, /CUSTOMER_PACKAGE_TYPES/);
-  assert.match(serverSource, /MbhStoryboardScriptAssistant-CustomerTrial-Full-v/);
-  assert.match(serverSource, /MbhStoryboardScriptAssistant-CustomerTrial-NoSkillOverwrite-v/);
-  assert.match(serverSource, /function comparePackageVersion/);
-  assert.match(serverSource, /async function listCustomerPackages/);
-  assert.match(serverSource, /function sendPackageDownload/);
-  assert.match(serverSource, /Content-Disposition/);
-  assert.match(apiSource, /\/api\/packages/);
-  assert.match(apiSource, /listCustomerPackages\(\)/);
-  assert.match(apiSource, /\/api\/packages\/download/);
-  assert.match(apiSource, /sendPackageDownload/);
 });
 
 test("learning correction API writes referenced correction events without blind rule edits", () => {

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>猫主子漫剧剧本分镜小助手</title>
-    <link rel="stylesheet" href="/styles.css?v=0.9-package-downloads" />
+    <link rel="stylesheet" href="/styles.css?v=1.0.1-storyboard-split-fix" />
   </head>
   <body>
     <div class="app-shell">
@@ -79,13 +79,6 @@
                 <path d="M6 5.5c1.8-.9 3.7-.9 5.5 0v13c-1.8-.9-3.7-.9-5.5 0z"></path>
                 <path d="M18 5.5c-1.8-.9-3.7-.9-5.5 0v13c1.8-.9 3.7-.9 5.5 0z"></path>
                 <path d="M12 5.5v13"></path>
-              </svg>
-            </button>
-            <button id="openPackageDownloads" class="settings-entry icon-entry" type="button" aria-label="下载应用" title="下载应用">
-              <svg class="sidebar-symbol-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M12 3v10"></path>
-                <path d="M8 9l4 4 4-4"></path>
-                <path d="M5 16v4h14v-4"></path>
               </svg>
             </button>
             <button id="openSettings" class="settings-entry icon-entry" type="button" aria-label="设置" title="设置">
@@ -225,37 +218,6 @@
           <p id="configState">未读取配置</p>
         </section>
 
-      </div>
-    </aside>
-
-    <aside id="packageDownloads" class="package-downloads" aria-hidden="true">
-      <div class="package-download-panel" role="dialog" aria-modal="true" aria-labelledby="packageDownloadsTitle">
-        <div class="package-download-head">
-          <div>
-            <h2 id="packageDownloadsTitle">下载应用</h2>
-            <p>这里读取本机 dist 目录下最新的客户安装包。发首次安装用“包含技能”，发更新且不想覆盖客户已有技能时用“不包含技能”。</p>
-          </div>
-          <button id="closePackageDownloads" class="ghost" type="button">关闭</button>
-        </div>
-        <div id="packageDownloadsStatus" class="package-download-status" aria-live="polite">正在读取安装包...</div>
-        <div id="packageDownloadsList" class="package-download-list">
-          <section class="package-download-card" data-package-download-card="full">
-            <div>
-              <h3>包含技能</h3>
-              <p>完整初始包，包含当前 skills 目录。适合首次安装或需要同步官方技能。</p>
-              <small id="packageFullMeta">等待读取 dist 目录。</small>
-            </div>
-            <a id="downloadFullPackage" data-package-download-type="full" href="/api/packages/download?type=full">下载含技能包</a>
-          </section>
-          <section class="package-download-card" data-package-download-card="noskill">
-            <div>
-              <h3>不包含技能</h3>
-              <p>更新包，不包含 skills 目录。适合客户已有自定义技能时避免覆盖。</p>
-              <small id="packageNoSkillMeta">等待读取 dist 目录。</small>
-            </div>
-            <a id="downloadNoSkillPackage" data-package-download-type="noskill" href="/api/packages/download?type=noskill">下载不含技能包</a>
-          </section>
-        </div>
       </div>
     </aside>
 
@@ -553,6 +515,6 @@
     <script src="/markdown-format.js?v=20260611-markdown-v1"></script>
     <script src="/compose-validation.js?v=20260611-compose-validation-v1"></script>
     <script src="/project-tree.js?v=20260627-canvas-icons-paws-v1"></script>
-    <script src="/app.js?v=0.9-package-downloads"></script>
+    <script src="/app.js?v=1.0.1-storyboard-split-fix"></script>
   </body>
 </html>

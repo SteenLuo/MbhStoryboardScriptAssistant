@@ -72,6 +72,28 @@ test("splitScriptIntoEpisodes does not leak the next markdown heading marker", (
   assert.strictEqual(episodes[0].content.includes("\u7b2c2\u96c6"), false);
 });
 
+test("splitScriptIntoEpisodes detects markdown bold episode headings", () => {
+  const script = [
+    "**\u7b2c\u4e00\u96c6\uff1a **",
+    "1-1 \u5185 \u8c08\u5224\u684c",
+    "\u7b2c\u4e00\u96c6\u5185\u5bb9",
+    "**\u7b2c\u4e8c\u96c6\uff1a **",
+    "2-1 \u5185 \u516c\u5bd3",
+    "\u7b2c\u4e8c\u96c6\u5185\u5bb9",
+    "**\u7b2c\u4e09\u96c6\uff1a **",
+    "3-1 \u5185 \u623f\u95f4",
+    "\u7b2c\u4e09\u96c6\u5185\u5bb9",
+  ].join("\n\n");
+
+  const episodes = splitScriptIntoEpisodes(script);
+
+  assert.deepStrictEqual(episodes.map((item) => item.number), [1, 2, 3]);
+  assert.strictEqual(episodes[0].title, "\u7b2c\u4e00\u96c6\uff1a");
+  assert.strictEqual(episodes[1].title, "\u7b2c\u4e8c\u96c6\uff1a");
+  assert.strictEqual(episodes[0].content.startsWith("1-1"), true);
+  assert.strictEqual(episodes[0].content.includes("\u7b2c\u4e8c\u96c6"), false);
+});
+
 test("buildStoryboardNodePlan positions one storyboard node per confirmed episode", () => {
   const episodes = [
     { number: 1, title: "第1集", content: "A" },

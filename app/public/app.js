@@ -60,7 +60,6 @@ const state = {
   activeNotificationIndex: 0,
   learningLibrary: null,
   learningLibraryTab: "records",
-  packageDownloads: null,
   pendingLearningCorrection: null,
   viewedLearningFailureIds: new Set(),
   learningFailureCursor: 0,
@@ -78,10 +77,6 @@ const composeModeLabels = Object.freeze({
   learning: "技能学习",
   "script-hard-issue-review": "剧本评审",
   "script-manju-adaptation-analysis": "漫剧适配分析",
-});
-const packageDownloadUrls = Object.freeze({
-  full: "/api/packages/download?type=full",
-  noskill: "/api/packages/download?type=noskill",
 });
 const sidebarMinWidth = 252;
 const sidebarMaxWidth = 460;
@@ -5499,7 +5494,13 @@ function readableTextColorForBackground(backgroundColor) {
     : darkText;
 }
 
+function isCanvasNodeModalOpen() {
+  const modal = $("canvasNodeModal");
+  return Boolean(modal?.classList?.contains("open")) && modal.getAttribute("aria-hidden") !== "true";
+}
+
 function applyActiveCanvasNodeEditorDraft() {
+  if (!isCanvasNodeModalOpen()) return false;
   const nodeId = state.activeCanvasNodeId;
   if (!nodeId || !state.currentCanvas) return false;
   const activeNode = currentCanvasNode(nodeId);
@@ -5554,6 +5555,28 @@ async function saveActiveCanvasNode() {
   await flushActiveCanvasNodeAutosave({ render: true });
 }
 
+async function persistCanvasNodeDraftForGeneration(nodeId) {
+  if (!nodeId || !state.currentCanvas) return;
+  if (nodeId === state.activeCanvasNodeId) {
+    if (state.canvasNodeAutosaveTimer) {
+      window.clearTimeout(state.canvasNodeAutosaveTimer);
+      state.canvasNodeAutosaveTimer = null;
+    }
+    applyActiveCanvasNodeEditorDraft();
+  }
+  const inlineBody = document.querySelector(canvasNodeBodySelector(nodeId));
+  if (inlineBody?.canvasNodeAutosaveTimer) {
+    window.clearTimeout(inlineBody.canvasNodeAutosaveTimer);
+    inlineBody.canvasNodeAutosaveTimer = null;
+  }
+  if (inlineBody?.dataset?.editing === "true") {
+    const nextContent = markdownEditorValue(inlineBody);
+    updateCanvasNodeDraft(nodeId, nextContent);
+    inlineBody.dataset.savedContent = nextContent;
+  }
+  await saveCurrentCanvas();
+}
+
 async function deleteCanvasNode(nodeId) {
   if (!state.currentCanvas) return;
   const node = currentCanvasNode(nodeId);
@@ -5600,7 +5623,7 @@ async function deleteSelectedCanvasNodes(nodeIds = []) {
 }
 
 async function generateScriptFromNode(nodeId = state.activeCanvasNodeId) {
-  if (nodeId === state.activeCanvasNodeId) await flushActiveCanvasNodeAutosave();
+  await persistCanvasNodeDraftForGeneration(nodeId);
   canvasStatus("正在从小说节点生成剧本...");
   setCanvasBusy(nodeId, "剧本生成中");
   try {
@@ -5620,7 +5643,7 @@ async function generateScriptFromNode(nodeId = state.activeCanvasNodeId) {
 }
 
 async function planStoryboardsFromNode(nodeId = state.activeCanvasNodeId) {
-  if (nodeId === state.activeCanvasNodeId) await flushActiveCanvasNodeAutosave();
+  await persistCanvasNodeDraftForGeneration(nodeId);
   canvasStatus("正在识别剧本分集...");
   setCanvasBusy(nodeId, "分集识别中");
   try {
@@ -5639,6 +5662,7 @@ async function planStoryboardsFromNode(nodeId = state.activeCanvasNodeId) {
 
 async function generateAllStoryboardsFromNode(nodeId) {
   if (!nodeId) return;
+  await persistCanvasNodeDraftForGeneration(nodeId);
   canvasStatus("正在识别分集并生成全部分镜...");
   setCanvasBusy(nodeId, "分镜生成中");
   try {
@@ -6018,7 +6042,6 @@ function openSettings(tab = "deepseek") {
     openLearningPage();
     return;
   }
-  closePackageDownloads();
   $("settings").classList.add("open");
   $("settings").setAttribute("aria-hidden", "false");
   switchSettingsTab(tab);
@@ -6047,7 +6070,6 @@ function openLearningLibrary() {
 
 function openLearningPage() {
   closeSettings();
-  closePackageDownloads();
   $("learningPage").classList.add("open");
   $("learningPage").setAttribute("aria-hidden", "false");
   loadLearningPanel();
@@ -6058,87 +6080,9 @@ function closeLearningPage() {
   $("learningPage").setAttribute("aria-hidden", "true");
 }
 
-function formatPackageSize(size) {
-  const bytes = Number(size || 0);
-  if (!Number.isFinite(bytes) || bytes <= 0) return "大小未知";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-}
-
-function packageUpdatedText(updatedAt) {
-  if (!updatedAt) return "";
-  const date = new Date(updatedAt);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString("zh-CN", { hour12: false });
-}
-
-function setPackageDownloadCard(type, item) {
-  const card = document.querySelector(`[data-package-download-card="${type}"]`);
-  const link = document.querySelector(`[data-package-download-type="${type}"]`);
-  const meta = type === "full" ? $("packageFullMeta") : $("packageNoSkillMeta");
-  if (!card || !link || !meta) return;
-
-  if (!item) {
-    card.classList.add("missing");
-    link.setAttribute("aria-disabled", "true");
-    link.href = "#";
-    meta.textContent = "未找到安装包，请先执行打包脚本。";
-    return;
-  }
-
-  card.classList.remove("missing");
-  link.removeAttribute("aria-disabled");
-  link.href = packageDownloadUrls[type] || item.downloadUrl || "#";
-  const updatedText = packageUpdatedText(item.updatedAt);
-  meta.textContent = `版本 v${item.version} · ${formatPackageSize(item.size)}${updatedText ? ` · ${updatedText}` : ""}`;
-}
-
-function renderPackageDownloads(data = state.packageDownloads) {
-  const packages = data?.packages || {};
-  setPackageDownloadCard("full", packages.full || null);
-  setPackageDownloadCard("noskill", packages.noskill || null);
-  const status = $("packageDownloadsStatus");
-  if (!status) return;
-  const missing = ["full", "noskill"].filter((type) => !packages[type]);
-  status.textContent = missing.length
-    ? "有安装包尚未生成。需要发布时，请先运行打包脚本。"
-    : "已读取 dist 目录中的最新安装包。";
-}
-
-async function loadPackageDownloads() {
-  const status = $("packageDownloadsStatus");
-  if (status) status.textContent = "正在读取安装包...";
-  try {
-    state.packageDownloads = await api("/api/packages");
-    renderPackageDownloads();
-  } catch (error) {
-    if (status) status.textContent = error.message;
-  }
-}
-
-function openPackageDownloads() {
-  closeSettings();
-  closeLearningPage();
-  $("packageDownloads").classList.add("open");
-  $("packageDownloads").setAttribute("aria-hidden", "false");
-  loadPackageDownloads();
-}
-
-function closePackageDownloads() {
-  $("packageDownloads").classList.remove("open");
-  $("packageDownloads").setAttribute("aria-hidden", "true");
-}
-
 function openCanvasArchivePage() {
   closeSettings();
   closeLearningPage();
-  closePackageDownloads();
   closeWorkbench();
   $("canvasArchivePage").classList.add("open");
   $("canvasArchivePage").setAttribute("aria-hidden", "false");
@@ -7075,16 +7019,6 @@ function bindEvents() {
   $("openSettings").addEventListener("click", () => openSettings("deepseek"));
   $("openTrash").addEventListener("click", openTrash);
   $("openArchiveView").addEventListener("click", openArchiveView);
-  $("openPackageDownloads").addEventListener("click", openPackageDownloads);
-  $("closePackageDownloads").addEventListener("click", closePackageDownloads);
-  $("packageDownloads").addEventListener("click", (event) => {
-    if (event.target === $("packageDownloads")) closePackageDownloads();
-  });
-  document.querySelectorAll("[data-package-download-type]").forEach((link) => {
-    link.addEventListener("click", (event) => {
-      if (link.getAttribute("aria-disabled") === "true") event.preventDefault();
-    });
-  });
   $("closeCanvasArchivePage").addEventListener("click", closeCanvasArchivePage);
   $("canvasArchivePage").addEventListener("click", (event) => {
     if (event.target === $("canvasArchivePage")) closeCanvasArchivePage();

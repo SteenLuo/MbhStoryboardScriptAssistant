@@ -34,10 +34,3 @@ test("restart launcher defaults to no browser for development restarts", () => {
 test("customer package excludes internal prototype pages", () => {
   assert.match(packageScript, /app\/public\/prototypes/);
 });
-
-test("customer package can build an explicit release version", () => {
-  assert.match(packageScript, /\[string\]\$ReleaseVersion = ""/);
-  assert.match(packageScript, /\$ReleaseVersion\.Trim\(\)/);
-  assert.match(packageScript, /Get-NextPackageVersion -DistPath \$dist -FallbackVersion \$BaseVersion/);
-  assert.match(packageScript, /Parse-Version -Text \$requestedVersion/);
-});

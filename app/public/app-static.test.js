@@ -129,6 +129,21 @@ test("storyboard generation shows and clears node busy feedback", () => {
   assert.match(stylesSource, /@keyframes canvasBusySpin/);
 });
 
+test("canvas node generation persists draft content before backend generation", () => {
+  const generateScriptSource = extractFunction("generateScriptFromNode");
+  const planStoryboardsSource = extractFunction("planStoryboardsFromNode");
+  const generateAllSource = extractFunction("generateAllStoryboardsFromNode");
+
+  assert.match(appSource, /async function persistCanvasNodeDraftForGeneration/);
+  assert.match(generateScriptSource, /await persistCanvasNodeDraftForGeneration\(nodeId\)/);
+  assert.match(planStoryboardsSource, /await persistCanvasNodeDraftForGeneration\(nodeId\)/);
+  assert.match(generateAllSource, /await persistCanvasNodeDraftForGeneration\(nodeId\)/);
+  const persistIndex = generateAllSource.indexOf("await persistCanvasNodeDraftForGeneration(nodeId);");
+  const planIndex = generateAllSource.indexOf('await api("/api/canvas/plan-storyboards"');
+  assert.ok(persistIndex > -1, "one-click storyboard generation should persist drafts");
+  assert.ok(planIndex > persistIndex, "draft persistence should happen before episode planning");
+});
+
 test("canvas long-running requests expose visible busy feedback", () => {
   const generateScriptSource = extractFunction("generateScriptFromNode");
   const planStoryboardsSource = extractFunction("planStoryboardsFromNode");
@@ -402,30 +417,6 @@ test("learning library is reachable from sidebar and renders readonly tabs", () 
   assert.match(stylesSource, /\.learning-record-advanced/);
   assert.match(stylesSource, /\.learning-record-failure/);
   assert.match(stylesSource, /\.sidebar-icon-stack/);
-});
-
-test("customer package downloads are reachable from a dedicated sidebar modal", () => {
-  const packagePageSource = indexSource.slice(
-    indexSource.indexOf('<aside id="packageDownloads"'),
-    indexSource.indexOf('<aside id="learningPage"'),
-  );
-
-  assert.match(indexSource, /id="openPackageDownloads"/);
-  assert.match(indexSource, /id="packageDownloads"/);
-  assert.match(indexSource, /id="closePackageDownloads"/);
-  assert.match(packagePageSource, /id="packageDownloadsList"/);
-  assert.match(packagePageSource, /data-package-download-type="full"/);
-  assert.match(packagePageSource, /data-package-download-type="noskill"/);
-  assert.match(appSource, /packageDownloads/);
-  assert.match(appSource, /function openPackageDownloads/);
-  assert.match(appSource, /function closePackageDownloads/);
-  assert.match(appSource, /function loadPackageDownloads/);
-  assert.match(appSource, /\/api\/packages/);
-  assert.match(appSource, /\/api\/packages\/download\?type=full/);
-  assert.match(appSource, /\/api\/packages\/download\?type=noskill/);
-  assert.match(appSource, /\$\("openPackageDownloads"\)\.addEventListener/);
-  assert.match(stylesSource, /\.package-downloads/);
-  assert.match(stylesSource, /\.package-download-card/);
 });
 
 test("skill library renderer shows legacy non-generation draft and task cards", () => {
@@ -892,6 +883,7 @@ test("canvas archive markdown and storyboard issue controls are wired", () => {
 test("canvas node body edits inline and exposes fullscreen from markdown toolbar", () => {
   const renderNodeSource = extractFunction("renderCanvasNode");
   const closeNodeModalSource = extractFunction("closeCanvasNodeModal");
+  const persistDraftSource = extractFunction("persistCanvasNodeDraftForGeneration");
 
   assert.match(appSource, /editingCanvasBodyNodeId/);
   assert.match(appSource, /function startCanvasNodeBodyEdit/);
@@ -956,7 +948,8 @@ test("canvas node body edits inline and exposes fullscreen from markdown toolbar
   assert.match(appSource, /\$\("canvasNodeTitle"\)\.addEventListener\("input", scheduleActiveCanvasNodeAutosave\)/);
   assert.match(appSource, /\$\("canvasNodeContent"\)\.addEventListener\("input", scheduleActiveCanvasNodeAutosave\)/);
   assert.match(closeNodeModalSource, /flushActiveCanvasNodeAutosave/);
-  assert.match(appSource, /if \(nodeId === state\.activeCanvasNodeId\) await flushActiveCanvasNodeAutosave\(\)/);
+  assert.match(persistDraftSource, /nodeId === state\.activeCanvasNodeId/);
+  assert.match(persistDraftSource, /applyActiveCanvasNodeEditorDraft/);
   assert.match(stylesSource, /\.canvas-node-inline-markdown-toolbar/);
   assert.match(stylesSource, /\.markdown-floating-toolbar/);
   assert.match(stylesSource, /\.markdown-toolbar-separator/);
@@ -982,4 +975,61 @@ test("canvas node body edits inline and exposes fullscreen from markdown toolbar
   assert.match(stylesSource, /\.canvas-node\.editing-body/);
   assert.match(stylesSource, /\.canvas-node-content[\s\S]*scrollbar-color: var\(--canvas-node-scrollbar-thumb\) var\(--canvas-node-scrollbar-track\)/);
   assert.match(stylesSource, /\.canvas-node-content::-webkit-scrollbar-thumb/);
+});
+
+test("inactive canvas node modal draft cannot clear inline node content", () => {
+  const sandbox = {
+    state: {
+      activeCanvasNodeId: "script-1",
+      currentCanvas: {
+        nodes: [{ id: "script-1", type: "script", title: "剧本", content: "客户剧本正文" }],
+      },
+    },
+    elements: {
+      canvasNodeModal: {
+        classList: {
+          contains() {
+            return false;
+          },
+        },
+        getAttribute() {
+          return "true";
+        },
+      },
+      canvasNodeTitle: { value: "" },
+      canvasNodeContent: { innerHTML: "" },
+    },
+    currentCanvasNode(id) {
+      return this.state.currentCanvas.nodes.find((node) => node.id === id);
+    },
+    isCanvasNodeContentEditable() {
+      return true;
+    },
+    hasCanvasNodeTitleConflict() {
+      return false;
+    },
+    markdownEditorValue() {
+      return "";
+    },
+    canvasStatus() {},
+  };
+  sandbox.$ = (id) => sandbox.elements[id];
+  const source = [
+    "const state = globalThis.state;",
+    "const $ = globalThis.$;",
+    "const currentCanvasNode = globalThis.currentCanvasNode.bind(globalThis);",
+    "const isCanvasNodeContentEditable = globalThis.isCanvasNodeContentEditable;",
+    "const hasCanvasNodeTitleConflict = globalThis.hasCanvasNodeTitleConflict;",
+    "const markdownEditorValue = globalThis.markdownEditorValue;",
+    "const canvasStatus = globalThis.canvasStatus;",
+    extractFunction("isCanvasNodeModalOpen"),
+    extractFunction("applyActiveCanvasNodeEditorDraft"),
+    "globalThis.applyActiveCanvasNodeEditorDraft = applyActiveCanvasNodeEditorDraft;",
+  ].join("\n");
+  vm.runInNewContext(source, sandbox);
+
+  const applied = sandbox.applyActiveCanvasNodeEditorDraft();
+
+  assert.equal(applied, false);
+  assert.equal(sandbox.state.currentCanvas.nodes[0].content, "客户剧本正文");
 });

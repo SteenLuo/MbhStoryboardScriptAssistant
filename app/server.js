@@ -40,7 +40,6 @@ const ACCEPTANCE_ROOT = process.env.MBH_ACCEPTANCE_ROOT ? path.resolve(process.e
 const ACCEPTANCE_MODE = Boolean(ACCEPTANCE_ROOT);
 const BUSINESS_ROOT = ACCEPTANCE_ROOT || ROOT;
 const PUBLIC_DIR = path.join(__dirname, "public");
-const DIST_DIR = path.join(ROOT, "dist");
 const RUNS_DIR = path.join(BUSINESS_ROOT, "runs");
 const CONFIG_DIR = path.join(__dirname, "config");
 const DATA_DIR = path.join(BUSINESS_ROOT, "app", "data");
@@ -50,19 +49,6 @@ const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
 const DEEPSEEK_CONFIG = path.join(CONFIG_DIR, "deepseek.local.json");
 const APP_CONFIG = path.join(CONFIG_DIR, "app.local.json");
 const PORT = Number(process.env.MBH_WEB_PORT || 17877);
-
-const CUSTOMER_PACKAGE_TYPES = Object.freeze({
-  full: {
-    label: "包含技能",
-    description: "完整初始包，包含当前 skills 目录，适合首次安装或需要同步官方技能的用户。",
-    pattern: /^MbhStoryboardScriptAssistant-CustomerTrial-Full-v(\d+)\.(\d+)\.(\d+)\.zip$/,
-  },
-  noskill: {
-    label: "不包含技能",
-    description: "更新包，不包含 skills 目录，适合已经沉淀了自有技能且不希望被覆盖的用户。",
-    pattern: /^MbhStoryboardScriptAssistant-CustomerTrial-NoSkillOverwrite-v(\d+)\.(\d+)\.(\d+)\.zip$/,
-  },
-});
 
 loadEnvFile(path.join(ROOT, ".env.local"));
 loadEnvFile(path.join(ROOT, ".env"));
@@ -75,7 +61,6 @@ const MIME = {
   ".md": "text/markdown; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml",
-  ".zip": "application/zip",
 };
 
 function loadEnvFile(filePath) {
@@ -122,6 +107,16 @@ function sendText(res, status, text, contentType = "text/plain; charset=utf-8") 
   res.end(text);
 }
 
+function sendStatic(res, status, body, contentType = "application/octet-stream") {
+  res.writeHead(status, {
+    "Content-Type": contentType,
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+  });
+  res.end(body);
+}
+
 function safeName(name) {
   const cleaned = String(name || "未命名运行").replace(/[\\/:*?"<>|]/g, "").trim();
   return cleaned || "未命名运行";
@@ -130,106 +125,6 @@ function safeName(name) {
 function safeFileName(name) {
   const cleaned = String(name || "attachment").replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim();
   return cleaned || "attachment";
-}
-
-function comparePackageVersion(a, b) {
-  for (const key of ["major", "minor", "patch"]) {
-    const diff = Number(b.versionParts[key] || 0) - Number(a.versionParts[key] || 0);
-    if (diff !== 0) return diff;
-  }
-  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-}
-
-function publicPackageInfo(item) {
-  if (!item) return null;
-  return {
-    type: item.type,
-    label: item.label,
-    description: item.description,
-    fileName: item.fileName,
-    version: item.version,
-    size: item.size,
-    updatedAt: item.updatedAt,
-    downloadUrl: `/api/packages/download?type=${item.type}`,
-  };
-}
-
-async function listCustomerPackages() {
-  const buckets = Object.fromEntries(Object.keys(CUSTOMER_PACKAGE_TYPES).map((type) => [type, []]));
-  if (!fs.existsSync(DIST_DIR)) {
-    return {
-      distPath: DIST_DIR,
-      packages: { full: null, noskill: null },
-    };
-  }
-
-  const entries = await fsp.readdir(DIST_DIR, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    for (const [type, config] of Object.entries(CUSTOMER_PACKAGE_TYPES)) {
-      const match = entry.name.match(config.pattern);
-      if (!match) continue;
-      const filePath = path.resolve(DIST_DIR, entry.name);
-      if (!filePath.startsWith(path.resolve(DIST_DIR) + path.sep)) continue;
-      const stat = await fsp.stat(filePath);
-      buckets[type].push({
-        type,
-        label: config.label,
-        description: config.description,
-        fileName: entry.name,
-        path: filePath,
-        version: `${match[1]}.${match[2]}.${match[3]}`,
-        versionParts: {
-          major: Number(match[1]),
-          minor: Number(match[2]),
-          patch: Number(match[3]),
-        },
-        size: stat.size,
-        updatedAt: stat.mtime.toISOString(),
-      });
-    }
-  }
-
-  const latest = {};
-  for (const type of Object.keys(CUSTOMER_PACKAGE_TYPES)) {
-    buckets[type].sort(comparePackageVersion);
-    latest[type] = buckets[type][0] || null;
-  }
-
-  return {
-    distPath: DIST_DIR,
-    packages: {
-      full: publicPackageInfo(latest.full),
-      noskill: publicPackageInfo(latest.noskill),
-    },
-  };
-}
-
-async function sendPackageDownload(res, type) {
-  const normalizedType = String(type || "").trim().toLowerCase();
-  if (!CUSTOMER_PACKAGE_TYPES[normalizedType]) {
-    return sendJson(res, 400, { error: "安装包类型不合法" });
-  }
-
-  const packages = await listCustomerPackages();
-  const publicInfo = packages.packages[normalizedType];
-  if (!publicInfo) {
-    return sendJson(res, 404, { error: "未找到对应安装包，请先打包生成 dist 文件。" });
-  }
-
-  const filePath = path.resolve(DIST_DIR, publicInfo.fileName);
-  if (!filePath.startsWith(path.resolve(DIST_DIR) + path.sep) || !fs.existsSync(filePath)) {
-    return sendJson(res, 404, { error: "安装包文件不存在，请重新打包。" });
-  }
-
-  const fileName = safeFileName(publicInfo.fileName);
-  const stat = await fsp.stat(filePath);
-  res.writeHead(200, {
-    "Content-Type": "application/zip",
-    "Content-Length": stat.size,
-    "Content-Disposition": `attachment; filename="${fileName}"`,
-  });
-  fs.createReadStream(filePath).pipe(res);
 }
 
 function timestamp() {
@@ -1348,8 +1243,6 @@ function inferCapabilityForSkillCreatorTask(text) {
 function inferSkillLearningTopicKey(learningInput) {
   const text = `${learningInput?.summary || ""}\n${learningInput?.rawTrigger || ""}`;
   if (String(learningInput?.capability || "") === "storyboard") {
-    if (/原剧本|源剧本|没有的剧情|新增剧情|新增情节|偏离|过度丰富|悄悄补剧情|新增道具|新增动作/.test(text)) return "storyboard.source.grounding";
-    if (/拆分.*画面|长台词.*画面|相同景别|相同.*构图|重复画面|同一画面|跳接/.test(text)) return "storyboard.dialogue.split-visual-variation";
     if (/镜号/.test(text) && /台词/.test(text) && /一行|多行|第二行/.test(text)) return "storyboard.dialogue.line-count";
     if (/台词|对白/.test(text) && /20|二十|字|长度|超过|超出/.test(text)) return "storyboard.dialogue.length";
     return "storyboard.general";
@@ -1361,7 +1254,6 @@ function inferSkillLearningConflictKey(learningInput) {
   const topicKey = inferSkillLearningTopicKey(learningInput);
   if (topicKey === "storyboard.dialogue.line-count") return "storyboard.dialogue.line-count.single-line";
   if (topicKey === "storyboard.dialogue.length") return "storyboard.dialogue.length.max-chars";
-  if (topicKey === "storyboard.source.grounding") return "storyboard.source.grounding.no-invented-active-action";
   return topicKey;
 }
 
@@ -1621,8 +1513,7 @@ async function canvasStoryboardSkillContext() {
     "3. 景别字段必须同时承载必要的构图角度和拍摄视角，例如“景别：低角度侧面中景”“景别：正三四仰拍近景”“景别：侧面俯拍中景”；只有正面平视镜头才可只写“中景”“近景”等基础景别。",
     "4. 运动镜头占比必须控制在总镜数的 30% 到 40% 之间，且禁止连续 3 个及以上运动镜头。",
     "5. 正面平视镜头占比必须控制在总镜数的 30% 到 40% 之间。",
-    "6. 长台词因超过 20 字拆成连续镜号时，不能只复制同一段情绪/动作再改台词；画面动作必须随台词片段推进，并更换景别/构图或运镜。",
-    "7. 只输出分镜正文，不要寒暄、解释、标题、Markdown 分隔线或“好的，收到任务”等非分镜内容。",
+    "6. 只输出分镜正文，不要寒暄、解释、标题、Markdown 分隔线或“好的，收到任务”等非分镜内容。",
     `## 分镜标准文档：${standardPath}\n\n${standardText}`,
   ].join("\n\n");
   return {
@@ -1633,7 +1524,7 @@ async function canvasStoryboardSkillContext() {
 }
 
 const STORYBOARD_GENERATION_MAX_ATTEMPTS = 3;
-const STORYBOARD_DIALOGUE_HARD_RULE_PATTERN = /每个镜号只能有一行|同一镜号下不得出现第二行|单条台词不得超过\s*20|台词超过\s*20|不得超过20|不能超过20|同一个镜号只能有一个说话人|只允许存在一个人物的台词|台词.*说话人|说话人.*台词|声音来源|人物台词必须保真|不得改写.*人物台词|禁止.*人物台词.*改动|拼回.*剧本原台词|同一说话人.*短台词|连续短台词.*合并|相邻短句.*合并|长台词.*画面|拆分.*画面|只复制同一段情绪\/动作|只改台词|画面动作.*台词片段|运动镜头占比|正面平视镜头占比|相同景别|相同.*构图|连续.*同构图|连续.*双人中景|连续\s*3\s*个及以上运动镜头|30%\s*到\s*40%|原剧本|源剧本|没有的剧情|新增剧情|新增情节|新增道具|新增动作|偏离|过度丰富|悄悄补剧情/;
+const STORYBOARD_DIALOGUE_HARD_RULE_PATTERN = /每个镜号只能有一行|同一镜号下不得出现第二行|单条台词不得超过\s*20|台词超过\s*20|不得超过20|不能超过20|同一个镜号只能有一个说话人|只允许存在一个人物的台词|台词.*说话人|说话人.*台词|声音来源|人物台词必须保真|不得改写.*人物台词|禁止.*人物台词.*改动|拼回.*剧本原台词|同一说话人.*短台词|连续短台词.*合并|相邻短句.*合并|运动镜头占比|正面平视镜头占比|相同景别|相同.*构图|连续.*同构图|连续.*双人中景|连续\s*3\s*个及以上运动镜头|30%\s*到\s*40%/;
 
 function hasStoryboardDialogueHardRules(prompt) {
   return STORYBOARD_DIALOGUE_HARD_RULE_PATTERN.test(String(prompt || ""));
@@ -1699,14 +1590,11 @@ function buildStoryboardEpisodeGenerationInput(input = {}, retryFeedback = "") {
       "6. 同一说话人的连续台词总字数不超过 20 字时，禁止仅为了变化景别、角度、运镜或画面描述而拆成多个分镜；相邻短句应合并到同一镜头。",
       "7. 例如“林秀娥：您言重了。”和“林秀娥：您以前也是按规矩办事。”合并后不超过 20 字，必须写在同一个镜号的台词字段中，不得拆成两个镜号。",
       "8. 人物台词必须保真：不得改写、润色、同义替换、删减、扩写或新增剧本中的人物台词；长台词拆镜只能按原文切段，所有片段按顺序拼回必须与剧本原台词完全一致。",
-      "9. 长台词因超过 20 字拆成连续镜号时，拆分出的连续镜头景别和画面内容不能完全一样；后续镜头不能复制上一镜“情绪/动作”只改台词，必须结合剧本当前情节和台词信息重新设计对应画面。除此之外，只保留不重复和贴合剧本的要求，不限定后续镜头必须采用某类画面。",
-      "10. 运动镜头占比必须在总镜数的 30% 到 40% 之间；运镜字段不含“固定”的镜头按运动镜头计入，含“固定”的镜头按固定镜头计入。",
-      "11. 禁止连续 3 个及以上运动镜头；连续两个运动镜头后，下一个镜头必须使用固定类运镜。",
-      "12. 正面平视镜头占比必须在总镜数的 30% 到 40% 之间；只有基础景别且未注明构图/视角的镜头按正面平视计入。",
-      "13. 禁止连续使用相同景别/角度/构图拍摄同一画面内容；“双人中景”和“正面平视双人中景”这类只差默认正面平视省略词的写法视为同构图；如果写了“维持上一镜”“继续上一镜”“接上一镜”“同一构图”“同一机位”“画面不变”，下一镜必须更换构图或景别，或合并同一画面。",
-      "14. 例如连续多个“景别：双人中景”拍同一段对坐对白，且情绪/动作写“维持上一镜”“继续上一镜”“接上一镜”，必须改成不同景别、角度或构图，并结合剧本给出不同画面；不能只照抄同一画面。",
-      "15. 禁止新增原剧本没有的剧情、道具、动物、服装细节、人物动作或空间调度；只能把原文已有信息镜头化。人物只在“人物”表出现，或只在背景说明里被提到但正文没有当前动作或台词时，不得安排其现场反应、主动走位、拿道具或承担新情节。",
-      "16. 反应镜头必须根据当前台词含义、人物关系和场景状态写具体反应，不得套用固定模板；反应不一定要看向正在说话的人，可使用低头、停手、手指停住、肩背变化、话头停住、看向场景内已有物件或空间等低风险反应；禁止连续反应都写成“眼神一顿，轻轻抿住嘴”“A看向B，神情从迟疑转为专注”“表情随台词变化”等泛化句。",
+      "9. 运动镜头占比必须在总镜数的 30% 到 40% 之间；运镜字段不含“固定”的镜头按运动镜头计入，含“固定”的镜头按固定镜头计入。",
+      "10. 禁止连续 3 个及以上运动镜头；连续两个运动镜头后，下一个镜头必须使用固定类运镜。",
+      "11. 正面平视镜头占比必须在总镜数的 30% 到 40% 之间；只有基础景别且未注明构图/视角的镜头按正面平视计入。",
+      "12. 禁止连续使用相同景别/角度/构图拍摄同一画面内容；“双人中景”和“正面平视双人中景”这类只差默认正面平视省略词的写法视为同构图；如果写了“维持上一镜”“继续上一镜”“接上一镜”“同一构图”“同一机位”“画面不变”，下一镜必须更换构图或景别，或合并同一画面。",
+      "13. 例如连续多个“景别：双人中景”拍同一段对坐对白，且情绪/动作写“维持上一镜”“继续上一镜”“接上一镜”，必须改为反打、过肩、近景/特写、手部/物品/反应镜头，不能连续照抄双人中景。",
       "",
     );
   }
@@ -1715,7 +1603,7 @@ function buildStoryboardEpisodeGenerationInput(input = {}, retryFeedback = "") {
       "【上一版未通过，请重新生成完整分镜】",
       "不要解释原因，不要只改局部片段；必须输出完整分镜正文。",
       retryFeedback,
-      "处理原则：宁可增加连续镜号，也不能让任意一行台词超过 20 个字；按 20 字上限决定拆镜数量，拆完后逐条自查；非空台词必须写成“台词：说话人：原文台词”；同一说话人相邻短台词合并后不超过 20 字时必须合并回同一镜号；同一个镜号只能有一行台词字段；人物台词只能原文切段，不能改写；长台词拆镜不得复制同一段情绪/动作只改台词；拆分出的连续镜头景别和画面内容不能完全一样，必须结合剧本当前情节和台词信息重新设计对应画面，只保留不重复和贴合剧本的要求，不限定后续镜头必须采用某类画面；反应镜头必须按当前台词含义和人物关系写具体反应，不强制看向说话人，禁止套用“眼神一顿，轻轻抿住嘴”“A看向B，神情从迟疑转为专注”等固定模板；同时把运动镜头占比和正面平视镜头占比都调整到 30% 到 40%，打断连续 3 个及以上运动镜头，并修正连续相同景别/角度/构图拍同一画面的镜头；不得新增原剧本没有的情节、道具、动物、服装细节、人物主动动作或空间调度；背景提到某人不等于可以拍现场反应。",
+      "处理原则：宁可增加连续镜号，也不能让任意一行台词超过 20 个字；按 20 字上限决定拆镜数量，拆完后逐条自查；非空台词必须写成“台词：说话人：原文台词”；同一说话人相邻短台词合并后不超过 20 字时必须合并回同一镜号；同一个镜号只能有一行台词字段；人物台词只能原文切段，不能改写；同时把运动镜头占比和正面平视镜头占比都调整到 30% 到 40%，打断连续 3 个及以上运动镜头，并修正连续相同景别/角度/构图拍同一画面的镜头。",
       "",
     );
   }
@@ -1731,7 +1619,7 @@ function buildStoryboardHardRuleRetryFeedback(issues = []) {
     return `- ${lineNumber}：${reason}${lineText ? `\n  原文：${lineText}` : ""}`;
   });
   if (!normalized.length) {
-    return "- 上一版存在分镜硬规则违规，请逐镜号检查台词长度、台词字段数量、说话人标注、说话人数量、同一说话人短台词是否被碎片化拆镜、长台词拆镜后画面是否复制、运动镜头占比、连续运动镜头、正面平视镜头占比、是否连续相同景别/角度/构图拍同一画面，以及是否新增原剧本没有的情节动作。";
+    return "- 上一版存在分镜硬规则违规，请逐镜号检查台词长度、台词字段数量、说话人标注、说话人数量、同一说话人短台词是否被碎片化拆镜、运动镜头占比、连续运动镜头、正面平视镜头占比，以及是否连续相同景别/角度/构图拍同一画面。";
   }
   return [
     "上一版存在以下硬规则违规，必须在新一版中全部消除：",
@@ -1797,20 +1685,32 @@ async function planCanvasStoryboards(body) {
   const canvas = await getCanvas(body.canvasId);
   const sourceNode = findCanvasNode(canvas, body.nodeId);
   if (sourceNode.type !== "script") throw new Error("只有剧本节点可以生成分镜");
+  const scriptContent = canvasScriptNodeContentForStoryboard(sourceNode);
   return {
     canvasId: canvas.id,
     scriptNodeId: sourceNode.id,
-    episodes: splitScriptIntoEpisodes(sourceNode.content),
+    episodes: splitScriptIntoEpisodes(scriptContent),
   };
+}
+
+function canvasScriptNodeContentForStoryboard(sourceNode) {
+  const scriptContent = String(sourceNode?.content || "").trim();
+  if (!scriptContent) {
+    const error = new Error("剧本节点内容为空，无法识别分集。请先把剧本保存到该节点。");
+    error.code = "CANVAS_SCRIPT_EMPTY";
+    throw error;
+  }
+  return scriptContent;
 }
 
 async function generateCanvasStoryboards(body) {
   let canvas = await getCanvas(body.canvasId);
   const sourceNode = findCanvasNode(canvas, body.nodeId);
   if (sourceNode.type !== "script") throw new Error("只有剧本节点可以生成分镜");
+  const scriptContent = canvasScriptNodeContentForStoryboard(sourceNode);
   const selectedEpisodes = Array.isArray(body.episodes) && body.episodes.length
     ? body.episodes
-    : splitScriptIntoEpisodes(sourceNode.content);
+    : splitScriptIntoEpisodes(scriptContent);
   const plan = buildStoryboardNodePlan({
     scriptNodeId: sourceNode.id,
     episodes: selectedEpisodes,
@@ -2564,12 +2464,6 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/learning-library") {
     return sendJson(res, 200, await buildLearningLibrary(BUSINESS_ROOT));
   }
-  if (req.method === "GET" && url.pathname === "/api/packages") {
-    return sendJson(res, 200, await listCustomerPackages());
-  }
-  if (req.method === "GET" && url.pathname === "/api/packages/download") {
-    return sendPackageDownload(res, url.searchParams.get("type"));
-  }
   if (req.method === "GET" && url.pathname === "/api/notifications") {
     return sendJson(res, 200, { notifications: await listNotifications(BUSINESS_ROOT) });
   }
@@ -2694,7 +2588,7 @@ async function serveStatic(req, res, url) {
     return sendText(res, 404, "Not Found");
   }
   const ext = path.extname(target);
-  sendText(res, 200, await fsp.readFile(target), MIME[ext] || "application/octet-stream");
+  sendStatic(res, 200, await fsp.readFile(target), MIME[ext] || "application/octet-stream");
 }
 
 const server = http.createServer(async (req, res) => {

@@ -24,17 +24,26 @@ function parseEpisodeNumber(value) {
   return CHINESE_NUMBERS[text] || 1;
 }
 
+function normalizeEpisodeHeadingTitle(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^\*\*/, "")
+    .replace(/\*\*$/, "")
+    .trim();
+}
+
 function splitScriptIntoEpisodes(scriptText) {
   const source = String(scriptText || "").trim();
   if (!source) return [{ number: 1, title: "第1集", content: "" }];
-  const headingPattern = /(?:^|\n)\s{0,3}(?:#{1,6}\s*)?(第\s*([0-9]+|[一二三四五六七八九十]{1,3})\s*集(?=$|\s|[：:\-—])(?:[^\n]*)?)/g;
+  const headingPattern = /(?:^|\n)\s{0,3}(?:#{1,6}\s*)?(?:\*\*)?(第\s*([0-9]+|[一二三四五六七八九十]{1,3})\s*集(?=$|\s|[：:\-—*])(?:[^\n]*?))(?:\*\*)?(?=\s*(?:\n|$))/g;
   const matches = [];
   let match;
   while ((match = headingPattern.exec(source)) !== null) {
     matches.push({
       index: match.index + match[0].indexOf(match[1]),
       blockIndex: match.index,
-      full: match[1].trim(),
+      contentIndex: match.index + match[0].length,
+      full: normalizeEpisodeHeadingTitle(match[1]),
       rawNumber: match[2],
     });
   }
@@ -46,7 +55,7 @@ function splitScriptIntoEpisodes(scriptText) {
     return {
       number: parseEpisodeNumber(item.rawNumber),
       title: item.full,
-      content: source.slice(item.index, next ? next.blockIndex : source.length).trim(),
+      content: source.slice(item.contentIndex, next ? next.blockIndex : source.length).trim(),
     };
   });
 }
