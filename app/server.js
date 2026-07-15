@@ -77,6 +77,12 @@ function loadEnvFile(filePath) {
   }
 }
 
+function readReleaseVersion() {
+  const versionFile = path.join(ROOT, "VERSION.txt");
+  if (!fs.existsSync(versionFile)) return "";
+  return stripBom(fs.readFileSync(versionFile, "utf8")).trim().replace(/^v/i, "");
+}
+
 function sendJson(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(data, null, 2));
@@ -2402,6 +2408,9 @@ async function handleApi(req, res, url) {
     const appSettings = await readAppSettings();
     return sendJson(res, 200, {
       ok: true,
+      version: readReleaseVersion(),
+      rootPath: ROOT,
+      businessRoot: BUSINESS_ROOT,
       acceptanceMode: ACCEPTANCE_MODE,
       acceptanceRoot: ACCEPTANCE_ROOT,
       appName: appSettings.appName,

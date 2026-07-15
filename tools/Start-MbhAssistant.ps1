@@ -29,6 +29,27 @@ function Test-AssistantHttp {
   }
 }
 
+function Get-AssistantStatus {
+  param([int]$TargetPort)
+  try {
+    return Invoke-RestMethod -Uri "http://127.0.0.1:$TargetPort/api/status" -UseBasicParsing -TimeoutSec 2
+  } catch {
+    return $null
+  }
+}
+
+function Normalize-PathForCompare {
+  param([string]$Path)
+  if (!$Path) {
+    return ""
+  }
+  try {
+    return ([IO.Path]::GetFullPath($Path)).TrimEnd([char[]]@("\", "/")).ToLowerInvariant()
+  } catch {
+    return ""
+  }
+}
+
 function Get-NodeCommand {
   $command = Get-Command node -ErrorAction SilentlyContinue
   if ($command) {
@@ -90,9 +111,28 @@ if (!$node) {
 Write-Step "Node.js is ready: $node"
 
 if (Test-AssistantHttp -TargetPort $Port) {
-  Write-Step "Service is already running."
-  Open-AssistantPage -TargetUrl $url
-  exit 0
+  $status = Get-AssistantStatus -TargetPort $Port
+  $serviceRoot = [string]$status.rootPath
+  $currentRoot = [string]$root
+  $serviceRootKey = Normalize-PathForCompare -Path $serviceRoot
+  $currentRootKey = Normalize-PathForCompare -Path $currentRoot
+
+  if ($serviceRootKey -and $serviceRootKey -eq $currentRootKey) {
+    Write-Step "Service is already running."
+    Open-AssistantPage -TargetUrl $url
+    exit 0
+  }
+
+  Write-Host ""
+  Write-Host "Port $Port is already running from a different or unknown package folder."
+  if ($serviceRoot) {
+    Write-Host "Running service folder: $serviceRoot"
+  } else {
+    Write-Host "Running service folder: unknown, likely an older package."
+  }
+  Write-Host "Current package folder: $currentRoot"
+  Write-Host "Please run restart service from this package, or close the old service window first."
+  exit 1
 }
 
 if (Test-PortInUse -TargetPort $Port) {

@@ -31,6 +31,15 @@ test("restart launcher defaults to no browser for development restarts", () => {
   assert.match(restartBat, /Start-MbhAssistant\.ps1" %START_ARGS%/);
 });
 
+test("startup refuses to reuse a running service from another package folder", () => {
+  assert.match(startScript, /function Get-AssistantStatus/);
+  assert.match(startScript, /function Normalize-PathForCompare/);
+  assert.match(startScript, /rootPath/);
+  assert.match(startScript, /already running from a different or unknown package folder/);
+  assert.match(startScript, /Please run .*restart.*from this package/);
+  assert.match(startScript, /exit 1/);
+});
+
 test("customer package excludes internal prototype pages", () => {
   assert.match(packageScript, /app\/public\/prototypes/);
 });

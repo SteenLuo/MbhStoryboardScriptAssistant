@@ -84,6 +84,17 @@ test("local static assets disable browser caching for iterative fixes", () => {
   assert.doesNotMatch(staticSource, /sendText\(res,\s*200/);
 });
 
+test("status endpoint exposes install identity for launcher checks", () => {
+  const statusIndex = serverSource.indexOf('url.pathname === "/api/status"');
+  assert.notEqual(statusIndex, -1, "status route should exist");
+  const statusSource = serverSource.slice(statusIndex, serverSource.indexOf('url.pathname === "/api/config"', statusIndex));
+
+  assert.match(serverSource, /function readReleaseVersion/);
+  assert.match(statusSource, /rootPath:\s*ROOT/);
+  assert.match(statusSource, /businessRoot:\s*BUSINESS_ROOT/);
+  assert.match(statusSource, /version:\s*readReleaseVersion\(\)/);
+});
+
 test("canvas storyboard generation marks hard-rule issues without blocking output", () => {
   const generateSource = extractFunction("generateCanvasStoryboards");
   const generationSource = extractFunction("generateStoryboardEpisodeWithValidation");
