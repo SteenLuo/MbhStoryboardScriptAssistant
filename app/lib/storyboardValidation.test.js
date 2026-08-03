@@ -719,6 +719,22 @@ test("applyStoryboardHardRuleValidation normalizes markdown and repairs long dia
   assert.ok(repairedDialogueLines.length > 1);
 });
 
+test("applyStoryboardHardRuleValidation merges adjacent short dialogue locally", () => {
+  const content = [
+    buildShot({ number: 1, dialogue: "林秀娥：您言重了。" }),
+    buildShot({ number: 2, dialogue: "林秀娥：我会继续努力。" }),
+  ].join("\n\n");
+
+  const repaired = applyStoryboardHardRuleValidation(content, { useStableSkillRules: true });
+  const dialogueLines = repaired.content.split(/\r?\n/).filter((line) => line.startsWith("台词："));
+
+  assert.strictEqual(repaired.hardRuleValidation.repaired, true);
+  assert.strictEqual(repaired.hardRuleValidation.finalOk, true);
+  assert.match(repaired.hardRuleValidation.repairStrategy, /merge-short-same-speaker-dialogue/);
+  assert.strictEqual(dialogueLines[0], "台词：");
+  assert.strictEqual(dialogueLines[1], "台词：林秀娥：您言重了。我会继续努力。");
+});
+
 test("applyStoryboardHardRuleValidation repairs moving shot ratio below range", () => {
   const movingIndexes = new Set([0, 6, 12, 18, 24]);
   const content = Array.from({ length: 28 }, (_, index) => buildShot({

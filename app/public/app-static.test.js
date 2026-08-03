@@ -122,11 +122,46 @@ test("storyboard generation shows and clears node busy feedback", () => {
   assert.match(appSource, /canvasBusy/);
   assert.match(appSource, /function setCanvasBusy/);
   assert.match(generateAllSource, /setCanvasBusy\(nodeId/);
-  assert.match(generateAllSource, /finally\s*{[\s\S]*setCanvasBusy\(null/);
+  assert.match(generateAllSource, /finally\s*{[\s\S]*clearCanvasBusy\(nodeId\)/);
   assert.match(generateConfirmedSource, /setCanvasBusy\(sourceNodeId/);
-  assert.match(generateConfirmedSource, /finally\s*{[\s\S]*setCanvasBusy\(null/);
+  assert.match(generateConfirmedSource, /finally\s*{[\s\S]*clearCanvasBusy\(sourceNodeId\)/);
+  assert.doesNotMatch(generateAllSource, /setCanvasBusy\(null/);
+  assert.doesNotMatch(generateConfirmedSource, /setCanvasBusy\(null/);
   assert.match(appSource, /canvas-node-busy/);
   assert.match(stylesSource, /@keyframes canvasBusySpin/);
+});
+
+test("canvas saves are queued and page exit flushes the latest draft", () => {
+  const saveSource = extractFunction("saveCurrentCanvas");
+  const exitSource = extractFunction("persistCanvasDraftOnPageExit");
+  const bindSource = extractFunction("bindEvents");
+
+  assert.match(appSource, /canvasSaveQueue:\s*Promise\.resolve\(\)/);
+  assert.match(saveSource, /const previous = state\.canvasSaveQueue \|\| Promise\.resolve\(\)/);
+  assert.match(saveSource, /previous\.catch\(\(\) => \{\}\)\.then/);
+  assert.match(saveSource, /canvasHistorySnapshot\(state\.currentCanvas\) === snapshotFingerprint/);
+  assert.match(exitSource, /applyActiveCanvasNodeEditorDraft\(\)/);
+  assert.match(exitSource, /navigator\.sendBeacon/);
+  assert.match(bindSource, /pagehide/);
+  assert.match(bindSource, /visibilitychange/);
+});
+
+test("storyboard generation restores persisted progress and blocks duplicate source requests", () => {
+  const generateAllSource = extractFunction("generateAllStoryboardsFromNode");
+  const generateConfirmedSource = extractFunction("generateConfirmedStoryboards");
+  const progressSource = extractFunction("persistentCanvasBusyState");
+
+  assert.match(appSource, /function canvasNodeGenerationState/);
+  assert.match(appSource, /function pollCanvasGenerationState/);
+  assert.match(appSource, /storyboardGeneration\?\.status === "generating"/);
+  assert.match(generateAllSource, /canvasNodeIsGenerating\(nodeId\)/);
+  assert.match(generateConfirmedSource, /canvasNodeIsGenerating\(sourceNodeId\)/);
+  assert.match(generateAllSource, /refreshCurrentCanvasAfterGeneration\(canvasId\)/);
+  assert.match(generateConfirmedSource, /refreshCurrentCanvasAfterGeneration\(canvasId\)/);
+  assert.match(progressSource, /activeEpisodeNumbers/);
+  assert.match(progressSource, /episodeAttempts/);
+  assert.match(progressSource, /maxAttempts/);
+  assert.match(progressSource, /第\$\{number\}集/);
 });
 
 test("canvas node generation persists draft content before backend generation", () => {

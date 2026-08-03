@@ -841,25 +841,76 @@ function isStoryboardStartLine(line) {
 
 function repairStoryboardDialogueIssues(content, issues = [], options = {}) {
   const maxChars = Number(options.maxDialogueChars || MAX_DIALOGUE_CHARS);
-  const repairableIssues = (Array.isArray(issues) ? issues : [])
-    .filter((issue) => issue?.type === "dialogue-too-long");
-  if (!repairableIssues.length) {
-    return {
-      content,
-      repaired: false,
-    };
+  const issueTypes = new Set((Array.isArray(issues) ? issues : [])
+    .map((issue) => issue?.type)
+    .filter(Boolean));
+  const repairStrategies = [];
+  let repairedContent = content;
+
+  if (issueTypes.has("dialogue-short-same-speaker-split")) {
+    const merged = mergeShortSameSpeakerDialogueShots(repairedContent, maxChars);
+    if (merged.changed) {
+      repairedContent = merged.content;
+      repairStrategies.push("merge-short-same-speaker-dialogue");
+    }
   }
-  const repaired = splitLongDialogueShots(content, maxChars);
-  if (!repaired.changed) {
+
+  if (issueTypes.has("dialogue-too-long")) {
+    const split = splitLongDialogueShots(repairedContent, maxChars);
+    if (split.changed) {
+      repairedContent = split.content;
+      repairStrategies.push("split-long-dialogue-into-continuous-shots");
+    }
+  }
+
+  if (!repairStrategies.length) {
     return {
       content,
       repaired: false,
     };
   }
   return {
-    content: repaired.content,
+    content: repairedContent,
     repaired: true,
-    strategy: "split-long-dialogue-into-continuous-shots",
+    strategy: repairStrategies.join("+"),
+  };
+}
+
+function mergeShortSameSpeakerDialogueShots(content, maxChars = MAX_DIALOGUE_CHARS) {
+  const lines = String(content || "").split(/\r?\n/);
+  let changed = false;
+
+  for (let attempt = 0; attempt < lines.length; attempt += 1) {
+    const currentContent = lines.join("\n");
+    const issue = validateStoryboardShortDialogueMerge(currentContent, maxChars).issues[0];
+    if (!issue) break;
+
+    const shots = parseStoryboardShots(currentContent).filter((shot) => shot.shotNumber);
+    const previousShot = shots.find((shot) => shot.shotNumber === issue.previousShotNumber);
+    const currentShot = shots.find((shot) => shot.shotNumber === issue.shotNumber);
+    const previousDialogue = shotDialogueEntry(previousShot);
+    const currentDialogue = shotDialogueEntry(currentShot);
+    if (!previousDialogue || !currentDialogue) break;
+
+    const previousParsed = parseDialogueLine(previousDialogue.lineText);
+    const currentParsed = parseDialogueLine(currentDialogue.lineText);
+    if (!previousParsed || !currentParsed) break;
+
+    const previousLineIndex = previousDialogue.lineNumber - 1;
+    const currentLineIndex = currentDialogue.lineNumber - 1;
+    lines[previousLineIndex] = previousParsed.fieldPrefix;
+    lines[currentLineIndex] = [
+      currentParsed.fieldPrefix,
+      currentParsed.speakerMarker || previousParsed.speakerMarker,
+      previousDialogue.dialogue,
+      currentDialogue.dialogue,
+    ].join("");
+    changed = true;
+  }
+
+  return {
+    content: lines.join("\n").trim(),
+    changed,
   };
 }
 

@@ -13,9 +13,17 @@ const { buildCompletenessMatrix } = require("./lib/productCompleteness");
 const { classifyChatIntent, selectHistoryForIntent } = require("./lib/chatIntent");
 const { buildArchiveRecordMarkdown, buildWorkbenchState } = require("./lib/workbench");
 const { addCanvasNode, connectCanvasNodes, createCanvas, normalizeCanvas } = require("./lib/canvasState");
+const {
+  preserveActiveStoryboardGenerationChanges,
+  reconcileInterruptedStoryboardGenerations,
+  storyboardGenerationKey,
+  storyboardGenerationState,
+  updateStoryboardGenerationState,
+} = require("./lib/canvasGeneration");
 const { applyCanvasStoryboardValidation } = require("./lib/canvasStoryboardValidation");
 const { buildStoryboardNodePlan, splitScriptIntoEpisodes } = require("./lib/episodeSplit");
 const { DEFAULT_PROJECT_ID, createProject, groupConversationsByProject, normalizeProjects, renameProject, resolveProjectId } = require("./lib/projects");
+const { modelMessagesToPlainText } = require("./lib/modelPlainText");
 const { normalizeModelSettings, publicModelSettings, resolveActiveModelSettings, updateModelSettings } = require("./lib/modelSettings");
 const { handleNotification, listNotifications } = require("./lib/notifications");
 const { buildLearningLibrary } = require("./lib/learningLibrary");
@@ -49,6 +57,9 @@ const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
 const DEEPSEEK_CONFIG = path.join(CONFIG_DIR, "deepseek.local.json");
 const APP_CONFIG = path.join(CONFIG_DIR, "app.local.json");
 const PORT = Number(process.env.MBH_WEB_PORT || 17877);
+const SERVER_INSTANCE_ID = `server-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+const activeStoryboardGenerations = new Map();
+const canvasMutationTails = new Map();
 
 loadEnvFile(path.join(ROOT, ".env.local"));
 loadEnvFile(path.join(ROOT, ".env"));
@@ -84,6 +95,7 @@ function readReleaseVersion() {
 }
 
 function sendJson(res, status, data) {
+  if (res.destroyed || res.writableEnded) return;
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(data, null, 2));
 }
@@ -424,12 +436,62 @@ async function saveCanvas(canvas, options = {}) {
   return normalized;
 }
 
+async function withCanvasMutation(canvasId, action) {
+  const key = String(canvasId || "");
+  const previous = canvasMutationTails.get(key) || Promise.resolve();
+  const operation = previous.catch(() => {}).then(action);
+  const tail = operation.catch(() => {});
+  canvasMutationTails.set(key, tail);
+  try {
+    return await operation;
+  } finally {
+    if (canvasMutationTails.get(key) === tail) canvasMutationTails.delete(key);
+  }
+}
+
+async function mutateCanvasRecord(canvasId, mutator, options = {}) {
+  return withCanvasMutation(canvasId, async () => {
+    const latest = await getCanvas(canvasId);
+    const next = await mutator(latest);
+    return saveCanvas(next, options);
+  });
+}
+
+async function saveCanvasFromClient(canvas) {
+  const canvasId = String(canvas?.id || "");
+  if (!canvasId) return saveCanvas(canvas);
+  return withCanvasMutation(canvasId, async () => {
+    const latest = await getCanvas(canvasId);
+    const protectedCanvas = preserveActiveStoryboardGenerationChanges(
+      latest,
+      canvas,
+      activeStoryboardGenerations,
+    );
+    return saveCanvas(protectedCanvas);
+  });
+}
+
 async function getCanvas(id) {
   if (!id) return saveCanvas(createCanvas("新画布"));
   const file = await canvasFile(id);
   if (!fs.existsSync(file)) throw new Error("找不到画布");
   const storyboardValidationOptions = await currentStoryboardValidationOptions();
   return normalizeCanvas(applyCanvasStoryboardValidation(await readJsonFile(file), storyboardValidationOptions));
+}
+
+async function getCanvasForClient(id) {
+  const canvas = await getCanvas(id);
+  const reconciled = reconcileInterruptedStoryboardGenerations(
+    canvas,
+    activeStoryboardGenerations,
+    SERVER_INSTANCE_ID,
+  );
+  if (!reconciled.changed) return canvas;
+  return mutateCanvasRecord(id, (latest) => reconcileInterruptedStoryboardGenerations(
+    latest,
+    activeStoryboardGenerations,
+    SERVER_INSTANCE_ID,
+  ).canvas);
 }
 
 async function listCanvases(options = {}) {
@@ -1449,7 +1511,17 @@ async function runWorkflowTask({ runDir, task, model, apiKey, force = false }) {
   };
 }
 
-async function runCanvasTask({ task, input, model, apiKey, skillPrompt = "" }) {
+async function runCanvasTask({
+  task,
+  input,
+  model,
+  apiKey,
+  skillPrompt = "",
+  temperature = 0.7,
+  thinking = "",
+  maxTokens = 0,
+  timeoutMs = 0,
+}) {
   const config = taskConfig(task);
   const resolvedSkillPrompt = skillPrompt || await taskSkillPrompt(task);
   const systemMessages = [{ role: "system", content: config.system }];
@@ -1460,7 +1532,10 @@ async function runCanvasTask({ task, input, model, apiKey, skillPrompt = "" }) {
     apiKey,
     provider: null,
     model,
-    temperature: 0.7,
+    temperature,
+    thinking,
+    maxTokens,
+    timeoutMs,
     messages: [
       ...systemMessages,
       {
@@ -1529,8 +1604,16 @@ async function canvasStoryboardSkillContext() {
   };
 }
 
-const STORYBOARD_GENERATION_MAX_ATTEMPTS = 3;
+const STORYBOARD_GENERATION_MAX_ATTEMPTS = 2;
+const STORYBOARD_GENERATION_CONCURRENCY = 2;
+const STORYBOARD_GENERATION_MAX_TOKENS = 8192;
+const STORYBOARD_GENERATION_TIMEOUT_MS = 240_000;
+const STORYBOARD_GENERATION_TEMPERATURE = 0.3;
 const STORYBOARD_DIALOGUE_HARD_RULE_PATTERN = /每个镜号只能有一行|同一镜号下不得出现第二行|单条台词不得超过\s*20|台词超过\s*20|不得超过20|不能超过20|同一个镜号只能有一个说话人|只允许存在一个人物的台词|台词.*说话人|说话人.*台词|声音来源|人物台词必须保真|不得改写.*人物台词|禁止.*人物台词.*改动|拼回.*剧本原台词|同一说话人.*短台词|连续短台词.*合并|相邻短句.*合并|运动镜头占比|正面平视镜头占比|相同景别|相同.*构图|连续.*同构图|连续.*双人中景|连续\s*3\s*个及以上运动镜头|30%\s*到\s*40%/;
+
+function isStoryboardConcurrencyLimitError(error) {
+  return /HTTP\s*429|rate.?limit|too many requests|并发|限流/i.test(String(error?.message || error || ""));
+}
 
 function hasStoryboardDialogueHardRules(prompt) {
   return STORYBOARD_DIALOGUE_HARD_RULE_PATTERN.test(String(prompt || ""));
@@ -1550,12 +1633,23 @@ async function generateStoryboardEpisodeWithValidation(input = {}) {
   let retryFeedback = "";
 
   for (let attempt = 1; attempt <= STORYBOARD_GENERATION_MAX_ATTEMPTS; attempt += 1) {
+    if (typeof input.onAttempt === "function") {
+      await input.onAttempt({
+        attempt,
+        maxAttempts: STORYBOARD_GENERATION_MAX_ATTEMPTS,
+        episodeNumber: Number(input.episode?.number || Number(input.index || 0) + 1),
+      });
+    }
     result = await runCanvasTask({
       task: "storyboard-generate",
       input: buildStoryboardEpisodeGenerationInput(input, retryFeedback),
       model: input.model,
       apiKey: input.apiKey,
       skillPrompt: input.skillPrompt,
+      temperature: STORYBOARD_GENERATION_TEMPERATURE,
+      thinking: "disabled",
+      maxTokens: STORYBOARD_GENERATION_MAX_TOKENS,
+      timeoutMs: STORYBOARD_GENERATION_TIMEOUT_MS,
     });
     usages.push(result.usage);
     hardRuleResult = applyStoryboardHardRuleValidation(result.content, {
@@ -1580,8 +1674,10 @@ function buildStoryboardEpisodeGenerationInput(input = {}, retryFeedback = "") {
   const episode = input.episode || {};
   const sourceNode = input.sourceNode || {};
   const index = Number(input.index || 0);
-  const title = episode.title || `第${episode.number || index + 1}集`;
+  const episodeNumber = Number(episode.number || index + 1);
+  const title = episode.title || `第${episodeNumber}集`;
   const lines = [
+    `分集标识：episode-${episodeNumber}`,
     `请只为以下分集生成分镜脚本：${title}`,
     "",
   ];
@@ -1710,7 +1806,7 @@ function canvasScriptNodeContentForStoryboard(sourceNode) {
 }
 
 async function generateCanvasStoryboards(body) {
-  let canvas = await getCanvas(body.canvasId);
+  const canvas = await getCanvas(body.canvasId);
   const sourceNode = findCanvasNode(canvas, body.nodeId);
   if (sourceNode.type !== "script") throw new Error("只有剧本节点可以生成分镜");
   const scriptContent = canvasScriptNodeContentForStoryboard(sourceNode);
@@ -1726,50 +1822,217 @@ async function generateCanvasStoryboards(body) {
   const usages = [];
   let lastModel = "";
   const storyboardSkillContext = await canvasStoryboardSkillContext();
+  const generationKey = storyboardGenerationKey(canvas.id, sourceNode.id);
+  if (activeStoryboardGenerations.has(generationKey)) {
+    const error = new Error("该剧本正在生成分镜，请等待当前任务完成。");
+    error.code = "CANVAS_STORYBOARD_ALREADY_RUNNING";
+    throw error;
+  }
 
-  for (let index = 0; index < selectedEpisodes.length; index += 1) {
-    const episode = selectedEpisodes[index];
-    const plannedNode = plan.nodes[index];
-    const generation = await generateStoryboardEpisodeWithValidation({
-      episode,
-      sourceNode,
-      index,
-      body,
-      model: body.model,
-      apiKey: body.apiKey,
-      skillPrompt: storyboardSkillContext.prompt,
-      enforceStableHardRules: storyboardSkillContext.enforceStableHardRules,
-    });
-    usages.push(...generation.usages);
-    const result = generation.result;
-    lastModel = result.model || lastModel;
-    const titleScope = { nodes: [...(canvas.nodes || []), ...generatedNodes] };
-    const hardRuleResult = generation.hardRuleResult;
-    generatedNodes.push({
-      ...plannedNode,
-      title: uniqueCanvasNodeTitle(titleScope, plannedNode.title),
-      content: hardRuleResult.content,
-      meta: {
-        ...plannedNode.meta,
-        model: result.model,
-        usage: result.usage,
-        generatedAt: new Date().toISOString(),
-        generationAttempts: generation.attempts,
-        skillRulesUsed: hardRuleResult.hardRuleValidation.appliedRules || [],
-        validation: hardRuleResult.validation,
-        hardRuleValidation: hardRuleResult.hardRuleValidation,
+  const requestId = `storyboard-generation-${conversationId()}`;
+  const startedAt = new Date().toISOString();
+  const task = {
+    canvasId: canvas.id,
+    sourceNodeId: sourceNode.id,
+    requestId,
+    startedAt,
+  };
+  activeStoryboardGenerations.set(generationKey, task);
+  let latestCanvas = canvas;
+
+  try {
+    latestCanvas = await mutateCanvasRecord(canvas.id, (latest) => updateStoryboardGenerationState(
+      latest,
+      sourceNode.id,
+      {
+        requestId,
+        status: "generating",
+        totalEpisodes: selectedEpisodes.length,
+        completedEpisodes: 0,
+        episodeNumbers: selectedEpisodes.map((episode) => Number(episode.number || 0)).filter(Boolean),
+        generatedNodeIds: [],
+        activeEpisodeNumbers: [],
+        episodeAttempts: {},
+        maxAttempts: STORYBOARD_GENERATION_MAX_ATTEMPTS,
+        generationConcurrency: Math.min(STORYBOARD_GENERATION_CONCURRENCY, selectedEpisodes.length),
+        serverInstanceId: SERVER_INSTANCE_ID,
+        startedAt,
+        updatedAt: startedAt,
+        completedAt: "",
+        failedAt: "",
+        error: "",
       },
-    });
-  }
+    ));
 
-  for (const node of generatedNodes) {
-    canvas = addCanvasNode(canvas, node);
+    let generationConcurrency = Math.min(STORYBOARD_GENERATION_CONCURRENCY, selectedEpisodes.length);
+    const updateAttemptProgress = async ({ episodeNumber, attempt, maxAttempts }) => {
+      const updatedAt = new Date().toISOString();
+      latestCanvas = await mutateCanvasRecord(canvas.id, (latest) => {
+        const currentSource = findCanvasNode(latest, sourceNode.id);
+        const currentState = storyboardGenerationState(currentSource) || {};
+        const activeEpisodeNumbers = Array.from(new Set([
+          ...(currentState.activeEpisodeNumbers || []),
+          episodeNumber,
+        ])).sort((left, right) => left - right);
+        return updateStoryboardGenerationState(latest, sourceNode.id, {
+          requestId,
+          status: "generating",
+          currentEpisodeNumber: episodeNumber,
+          activeEpisodeNumbers,
+          episodeAttempts: {
+            ...(currentState.episodeAttempts || {}),
+            [episodeNumber]: attempt,
+          },
+          maxAttempts,
+          generationConcurrency,
+          updatedAt,
+        });
+      });
+    };
+    const generateEntry = async ({ index, episode }) => ({
+      index,
+      episode,
+      generation: await generateStoryboardEpisodeWithValidation({
+        episode,
+        sourceNode,
+        index,
+        body,
+        model: body.model,
+        apiKey: body.apiKey,
+        skillPrompt: storyboardSkillContext.prompt,
+        enforceStableHardRules: storyboardSkillContext.enforceStableHardRules,
+        onAttempt: updateAttemptProgress,
+      }),
+    });
+    const persistEntry = async ({ index, episode, generation }) => {
+      const plannedNode = plan.nodes[index];
+      usages.push(...generation.usages);
+      const result = generation.result;
+      lastModel = result.model || lastModel;
+      const hardRuleResult = generation.hardRuleResult;
+      let savedNode = null;
+
+      latestCanvas = await mutateCanvasRecord(canvas.id, (latest) => {
+        findCanvasNode(latest, sourceNode.id);
+        const generatedAt = new Date().toISOString();
+        savedNode = {
+          ...plannedNode,
+          title: uniqueCanvasNodeTitle(latest, plannedNode.title),
+          content: hardRuleResult.content,
+          meta: {
+            ...plannedNode.meta,
+            storyboardGenerationRequestId: requestId,
+            model: result.model,
+            usage: result.usage,
+            generatedAt,
+            generationAttempts: generation.attempts,
+            skillRulesUsed: hardRuleResult.hardRuleValidation.appliedRules || [],
+            validation: hardRuleResult.validation,
+            hardRuleValidation: hardRuleResult.hardRuleValidation,
+          },
+        };
+        let next = addCanvasNode(latest, savedNode);
+        next = connectCanvasNodes(
+          next,
+          plan.edges[index].from,
+          plan.edges[index].to,
+          plan.edges[index].label,
+        );
+        const currentState = storyboardGenerationState(
+          next.nodes.find((node) => node.id === sourceNode.id),
+        ) || {};
+        const generatedNodeIds = Array.from(new Set([
+          ...(currentState.generatedNodeIds || []),
+          savedNode.id,
+        ]));
+        const episodeNumber = Number(episode.number || index + 1);
+        const activeEpisodeNumbers = (currentState.activeEpisodeNumbers || [])
+          .filter((number) => Number(number) !== episodeNumber);
+        return updateStoryboardGenerationState(next, sourceNode.id, {
+          requestId,
+          status: "generating",
+          completedEpisodes: generatedNodeIds.length,
+          totalEpisodes: selectedEpisodes.length,
+          currentEpisodeNumber: episodeNumber,
+          generatedNodeIds,
+          activeEpisodeNumbers,
+          generationConcurrency,
+          updatedAt: generatedAt,
+        });
+      });
+      generatedNodes[index] = savedNode;
+    };
+
+    for (let offset = 0; offset < selectedEpisodes.length;) {
+      const batch = selectedEpisodes
+        .slice(offset, offset + generationConcurrency)
+        .map((episode, batchIndex) => ({ index: offset + batchIndex, episode }));
+      const settled = await Promise.allSettled(batch.map(generateEntry));
+      const rateLimitedEntries = [];
+      let firstFailure = null;
+
+      for (let batchIndex = 0; batchIndex < settled.length; batchIndex += 1) {
+        const outcome = settled[batchIndex];
+        if (outcome.status === "fulfilled") {
+          await persistEntry(outcome.value);
+          continue;
+        }
+        if (generationConcurrency > 1 && isStoryboardConcurrencyLimitError(outcome.reason)) {
+          rateLimitedEntries.push(batch[batchIndex]);
+          continue;
+        }
+        firstFailure ||= outcome.reason;
+      }
+
+      if (firstFailure) throw firstFailure;
+      if (rateLimitedEntries.length) {
+        generationConcurrency = 1;
+        for (const entry of rateLimitedEntries) {
+          await persistEntry(await generateEntry(entry));
+        }
+      }
+      offset += batch.length;
+    }
+
+    const completedAt = new Date().toISOString();
+    latestCanvas = await mutateCanvasRecord(canvas.id, (latest) => updateStoryboardGenerationState(
+      latest,
+      sourceNode.id,
+      {
+        requestId,
+        status: "completed",
+        completedEpisodes: selectedEpisodes.length,
+        totalEpisodes: selectedEpisodes.length,
+        activeEpisodeNumbers: [],
+        completedAt,
+        updatedAt: completedAt,
+        error: "",
+      },
+    ));
+    return { canvas: latestCanvas, nodes: generatedNodes.filter(Boolean), model: lastModel, usage: aggregateUsage(usages) };
+  } catch (error) {
+    const failedAt = new Date().toISOString();
+    try {
+      latestCanvas = await mutateCanvasRecord(canvas.id, (latest) => {
+        const currentSource = findCanvasNode(latest, sourceNode.id);
+        const currentState = storyboardGenerationState(currentSource) || {};
+        if (currentState.requestId && currentState.requestId !== requestId) return latest;
+        return updateStoryboardGenerationState(latest, sourceNode.id, {
+          requestId,
+          status: "failed",
+          activeEpisodeNumbers: [],
+          error: error.message || "分镜生成失败",
+          failedAt,
+          updatedAt: failedAt,
+        });
+      });
+    } catch {
+      // The source node may have been intentionally deleted while generation was running.
+    }
+    throw error;
+  } finally {
+    activeStoryboardGenerations.delete(generationKey);
   }
-  for (const edge of plan.edges) {
-    canvas = connectCanvasNodes(canvas, edge.from, edge.to, edge.label);
-  }
-  canvas = await saveCanvas(canvas);
-  return { canvas, nodes: generatedNodes, model: lastModel, usage: aggregateUsage(usages) };
 }
 
 async function recordStoryboardHardRuleFailure(input = {}) {
@@ -2152,25 +2415,61 @@ async function runWorkflowChat({ conversation, userMessage, workflowIntent, mode
   };
 }
 
-async function deepseekChat({ apiKey, provider, baseUrl, model, messages, temperature = 0.7 }) {
+async function deepseekChat({
+  apiKey,
+  provider,
+  baseUrl,
+  model,
+  messages,
+  temperature = 0.7,
+  thinking = "",
+  maxTokens = 0,
+  timeoutMs = 0,
+}) {
   const config = await readDeepSeekConfig();
   const active = resolveActiveModelSettings(config, { apiKey, provider, baseUrl, model });
   const key = active.apiKey;
   if (!key) throw new Error(`缺少 ${active.providerLabel} API Key。请在网页设置里填写，或设置 ${active.apiKeyEnv}。`);
   const payload = {
     model: active.model,
-    messages,
+    messages: modelMessagesToPlainText(messages),
     temperature,
     stream: false,
   };
-  const response = await fetch(`${active.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  if (Number.isFinite(Number(maxTokens)) && Number(maxTokens) > 0) {
+    payload.max_tokens = Math.floor(Number(maxTokens));
+  }
+  if (
+    active.provider === "deepseek"
+    && /^deepseek-v4-/i.test(active.model)
+    && ["enabled", "disabled"].includes(thinking)
+  ) {
+    payload.thinking = { type: thinking };
+  }
+  const requestTimeoutMs = Math.max(0, Number(timeoutMs) || 0);
+  const controller = requestTimeoutMs > 0 ? new AbortController() : null;
+  const timeout = controller
+    ? setTimeout(() => controller.abort(), requestTimeoutMs)
+    : null;
+  let response;
+  try {
+    response = await fetch(`${active.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify(payload),
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+  } catch (error) {
+    if (error?.name === "AbortError" && requestTimeoutMs > 0) {
+      throw new Error(`${active.providerLabel} 请求超过 ${Math.round(requestTimeoutMs / 1000)} 秒，已停止本次调用。`);
+    }
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
   const text = await response.text();
   let data;
   try {
@@ -2449,7 +2748,7 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { canvases: await listCanvases({ includeDeleted: url.searchParams.get("includeDeleted") === "1" }) });
   }
   if (req.method === "GET" && url.pathname === "/api/canvas") {
-    return sendJson(res, 200, await getCanvas(url.searchParams.get("id")));
+    return sendJson(res, 200, await getCanvasForClient(url.searchParams.get("id")));
   }
   if (req.method === "GET" && url.pathname === "/api/conversation-search") {
     return sendJson(res, 200, { results: await searchConversations(url.searchParams.get("q")) });
@@ -2516,7 +2815,7 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, await createCanvasRecord(body.title || "新画布"));
   }
   if (req.method === "POST" && url.pathname === "/api/canvas/save") {
-    return sendJson(res, 200, await saveCanvas(body.canvas || body));
+    return sendJson(res, 200, await saveCanvasFromClient(body.canvas || body));
   }
   if (req.method === "POST" && url.pathname === "/api/canvas/archive-check") {
     return sendJson(res, 200, await checkCanvasArchiveReadiness(body));

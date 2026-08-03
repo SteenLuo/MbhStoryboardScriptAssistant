@@ -73,6 +73,65 @@ test("canvas storyboard planning rejects empty script nodes before episode split
   assert.doesNotMatch(generateSource, /splitScriptIntoEpisodes\(sourceNode\.content\)/);
 });
 
+test("all model request messages cross the plain-text gateway while responses stay untouched", () => {
+  const chatSource = extractFunction("deepseekChat");
+
+  assert.match(serverSource, /require\("\.\/lib\/modelPlainText"\)/);
+  assert.match(chatSource, /messages:\s*modelMessagesToPlainText\(messages\)/);
+  assert.match(chatSource, /content:\s*result\.choices\?\.\[0\]\?\.message\?\.content \|\| ""/);
+  assert.doesNotMatch(chatSource, /markdownToModelPlainText\(result/);
+});
+
+test("per-episode storyboard requests carry a stable plain-text episode marker", () => {
+  const inputSource = extractFunction("buildStoryboardEpisodeGenerationInput");
+
+  assert.match(inputSource, /分集标识：episode-\$\{episodeNumber\}/);
+  assert.match(inputSource, /请只为以下分集生成分镜脚本/);
+});
+
+test("canvas storyboard generation uses bounded fast-model settings and retry limits", () => {
+  const episodeSource = extractFunction("generateStoryboardEpisodeWithValidation");
+  const generateSource = extractFunction("generateCanvasStoryboards");
+  const chatSource = extractFunction("deepseekChat");
+
+  assert.match(serverSource, /STORYBOARD_GENERATION_MAX_ATTEMPTS = 2/);
+  assert.match(serverSource, /STORYBOARD_GENERATION_CONCURRENCY = 2/);
+  assert.match(serverSource, /STORYBOARD_GENERATION_MAX_TOKENS = 8192/);
+  assert.match(serverSource, /STORYBOARD_GENERATION_TIMEOUT_MS = 240_000/);
+  assert.match(serverSource, /STORYBOARD_GENERATION_TEMPERATURE = 0\.3/);
+  assert.match(episodeSource, /thinking:\s*"disabled"/);
+  assert.match(episodeSource, /maxTokens:\s*STORYBOARD_GENERATION_MAX_TOKENS/);
+  assert.match(episodeSource, /timeoutMs:\s*STORYBOARD_GENERATION_TIMEOUT_MS/);
+  assert.match(generateSource, /Promise\.allSettled/);
+  assert.match(generateSource, /isStoryboardConcurrencyLimitError/);
+  assert.match(generateSource, /generationConcurrency = 1/);
+  assert.match(generateSource, /activeEpisodeNumbers/);
+  assert.match(generateSource, /episodeAttempts/);
+  assert.match(chatSource, /payload\.max_tokens/);
+  assert.match(chatSource, /payload\.thinking = \{ type: thinking \}/);
+  assert.match(chatSource, /AbortController/);
+});
+
+test("canvas storyboard generation persists per episode without overwriting newer canvas changes", () => {
+  const generateSource = extractFunction("generateCanvasStoryboards");
+  const saveClientSource = extractFunction("saveCanvasFromClient");
+  const getClientSource = extractFunction("getCanvasForClient");
+  const modelIndex = generateSource.indexOf("await generateStoryboardEpisodeWithValidation");
+  const mutationIndex = generateSource.indexOf("await mutateCanvasRecord", modelIndex);
+
+  assert.match(serverSource, /activeStoryboardGenerations = new Map\(\)/);
+  assert.match(serverSource, /canvasMutationTails = new Map\(\)/);
+  assert.match(generateSource, /CANVAS_STORYBOARD_ALREADY_RUNNING/);
+  assert.ok(modelIndex > -1, "storyboard generation should call the model");
+  assert.ok(mutationIndex > modelIndex, "each completed episode should merge into the latest canvas");
+  assert.match(generateSource, /status:\s*"generating"/);
+  assert.match(generateSource, /completedEpisodes:\s*generatedNodeIds\.length/);
+  assert.match(generateSource, /status:\s*"completed"/);
+  assert.match(generateSource, /status:\s*"failed"/);
+  assert.match(saveClientSource, /preserveActiveStoryboardGenerationChanges/);
+  assert.match(getClientSource, /reconcileInterruptedStoryboardGenerations/);
+});
+
 test("local static assets disable browser caching for iterative fixes", () => {
   const staticSource = extractFunction("serveStatic");
 

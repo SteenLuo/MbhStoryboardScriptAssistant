@@ -44,6 +44,10 @@ const state = {
   editingCanvasNodeId: "",
   editingCanvasBodyNodeId: "",
   canvasNodeAutosaveTimer: null,
+  canvasSaveQueue: Promise.resolve(),
+  canvasSavePendingCount: 0,
+  canvasGenerationPollTimer: null,
+  canvasExitSaveFingerprint: "",
   canvasDrag: null,
   suppressCanvasPlusClick: false,
   suppressCanvasStageClick: false,
@@ -2180,6 +2184,7 @@ async function loadCanvas(id) {
   renderCanvasHeaderState();
   renderCanvasList();
   renderCanvas();
+  reportPersistedCanvasGenerationFailure(canvas);
 }
 
 function renderCanvasHeaderState() {
@@ -2286,14 +2291,32 @@ function isCanvasHistoryShortcutTarget(target) {
 async function saveCurrentCanvas(options = {}) {
   if (!state.currentCanvas) return null;
   if (!options.skipHistory) rememberCanvasHistoryBeforeSave();
-  const canvas = await api("/api/canvas/save", {
-    method: "POST",
-    body: JSON.stringify({ canvas: state.currentCanvas }),
+  const snapshot = cloneCanvasSnapshot(canvasHistorySnapshot());
+  if (!snapshot) return null;
+  const snapshotFingerprint = canvasHistorySnapshot(snapshot);
+  const previous = state.canvasSaveQueue || Promise.resolve();
+  const operation = previous.catch(() => {}).then(async () => {
+    state.canvasSavePendingCount += 1;
+    try {
+      const canvas = await api("/api/canvas/save", {
+        method: "POST",
+        body: JSON.stringify({ canvas: snapshot }),
+      });
+      if (
+        state.currentCanvasId === snapshot.id
+        && canvasHistorySnapshot(state.currentCanvas) === snapshotFingerprint
+      ) {
+        state.currentCanvas = canvas;
+        state.canvasHistoryBaseSnapshot = canvasHistorySnapshot(canvas);
+      }
+      updateCanvasHistoryControls();
+      return canvas;
+    } finally {
+      state.canvasSavePendingCount = Math.max(0, state.canvasSavePendingCount - 1);
+    }
   });
-  state.currentCanvas = canvas;
-  state.canvasHistoryBaseSnapshot = canvasHistorySnapshot(canvas);
-  updateCanvasHistoryControls();
-  return canvas;
+  state.canvasSaveQueue = operation.catch(() => {});
+  return operation;
 }
 
 async function runCanvasArchiveCheck(canvasId = state.currentCanvasId) {
@@ -3422,6 +3445,7 @@ function renderCanvas() {
   renderCanvasGroupBar();
   updateCanvasSelectionModeClass();
   updateCanvasViewportTools();
+  scheduleCanvasGenerationPoll();
   if (state.canvasDrag?.type === "connect") {
     canvasStatus("拖到目标节点松开");
   }
@@ -4067,6 +4091,89 @@ function canvasBusyState() {
   return state.canvasBusy;
 }
 
+function canvasNodeGenerationState(nodeId) {
+  const node = currentCanvasNode(nodeId);
+  const generation = node?.meta?.storyboardGeneration;
+  return generation && typeof generation === "object" ? generation : null;
+}
+
+function canvasNodeIsGenerating(nodeId) {
+  return Boolean(canvasBusyState()[nodeId]) || canvasNodeGenerationState(nodeId)?.status === "generating";
+}
+
+function persistentCanvasBusyState(nodeId) {
+  const generation = canvasNodeGenerationState(nodeId);
+  if (generation?.status !== "generating") return null;
+  const completed = Number(generation.completedEpisodes || 0);
+  const total = Number(generation.totalEpisodes || 0);
+  const progress = total > 0 ? ` ${Math.min(completed, total)}/${total}` : "";
+  const maxAttempts = Math.max(1, Number(generation.maxAttempts || 1));
+  const episodeAttempts = generation.episodeAttempts || {};
+  const activeEpisodes = (Array.isArray(generation.activeEpisodeNumbers)
+    ? generation.activeEpisodeNumbers
+    : []
+  ).map((number) => {
+    const attempt = Math.max(1, Number(episodeAttempts[number] || 1));
+    return `第${number}集 ${Math.min(attempt, maxAttempts)}/${maxAttempts}次`;
+  });
+  const activeProgress = activeEpisodes.length ? ` · ${activeEpisodes.join("、")}` : "";
+  return {
+    nodeId,
+    label: `分镜生成中${progress}${activeProgress}`,
+  };
+}
+
+function hasPersistedCanvasGeneration() {
+  return (state.currentCanvas?.nodes || []).some(
+    (node) => node?.meta?.storyboardGeneration?.status === "generating",
+  );
+}
+
+function reportPersistedCanvasGenerationFailure(canvas = state.currentCanvas) {
+  const failed = (canvas?.nodes || []).find(
+    (node) => node?.meta?.storyboardGeneration?.status === "failed",
+  );
+  if (!failed) return;
+  canvasStatus(
+    `${failed.title || "剧本"}分镜生成失败：${failed.meta.storyboardGeneration.error || "请重新生成"}`,
+    { lockMs: 8000 },
+  );
+}
+
+function scheduleCanvasGenerationPoll() {
+  if (state.canvasGenerationPollTimer) {
+    window.clearTimeout(state.canvasGenerationPollTimer);
+    state.canvasGenerationPollTimer = null;
+  }
+  if (!hasPersistedCanvasGeneration()) return;
+  state.canvasGenerationPollTimer = window.setTimeout(pollCanvasGenerationState, 1600);
+}
+
+async function pollCanvasGenerationState() {
+  state.canvasGenerationPollTimer = null;
+  if (!state.currentCanvasId || !hasPersistedCanvasGeneration()) return;
+  if (
+    state.canvasSavePendingCount > 0
+    || state.editingCanvasBodyNodeId
+    || isCanvasNodeModalOpen()
+    || state.canvasDrag
+  ) {
+    scheduleCanvasGenerationPoll();
+    return;
+  }
+  const canvasId = state.currentCanvasId;
+  try {
+    const canvas = await api(`/api/canvas?id=${encodeURIComponent(canvasId)}`);
+    if (state.currentCanvasId !== canvasId) return;
+    state.currentCanvas = canvas;
+    renderCanvas();
+    reportPersistedCanvasGenerationFailure(canvas);
+  } catch (error) {
+    canvasStatus(error.message || "读取分镜生成状态失败");
+    scheduleCanvasGenerationPoll();
+  }
+}
+
 function renderCanvasBusyIndicators() {
   document.querySelectorAll(".canvas-node").forEach((item) => {
     applyCanvasNodeBusy(item, item.dataset.nodeId);
@@ -4074,7 +4181,7 @@ function renderCanvasBusyIndicators() {
 }
 
 function applyCanvasNodeBusy(item, nodeId) {
-  const busyState = canvasBusyState()[nodeId];
+  const busyState = canvasBusyState()[nodeId] || persistentCanvasBusyState(nodeId);
   const isBusy = Boolean(busyState);
   const existing = Array.from(item.children).find((child) => child.classList?.contains("canvas-node-busy"));
   item.classList.toggle("is-generating", isBusy);
@@ -5551,6 +5658,29 @@ async function flushActiveCanvasNodeAutosave(options = {}) {
   }
 }
 
+function persistCanvasDraftOnPageExit() {
+  if (!state.currentCanvas || canvasIsArchived()) return;
+  if (state.canvasNodeAutosaveTimer) {
+    window.clearTimeout(state.canvasNodeAutosaveTimer);
+    state.canvasNodeAutosaveTimer = null;
+  }
+  applyActiveCanvasNodeEditorDraft();
+  const inlineBody = state.editingCanvasBodyNodeId
+    ? document.querySelector(canvasNodeBodySelector(state.editingCanvasBodyNodeId))
+    : null;
+  if (inlineBody?.dataset?.editing === "true") {
+    updateCanvasNodeDraft(state.editingCanvasBodyNodeId, markdownEditorValue(inlineBody));
+  }
+  const fingerprint = canvasHistorySnapshot();
+  if (!fingerprint || fingerprint === state.canvasExitSaveFingerprint) return;
+  const payload = new Blob([JSON.stringify({ canvas: state.currentCanvas })], {
+    type: "application/json",
+  });
+  if (navigator.sendBeacon?.("/api/canvas/save", payload)) {
+    state.canvasExitSaveFingerprint = fingerprint;
+  }
+}
+
 async function saveActiveCanvasNode() {
   await flushActiveCanvasNodeAutosave({ render: true });
 }
@@ -5632,7 +5762,7 @@ async function generateScriptFromNode(nodeId = state.activeCanvasNodeId) {
       body: JSON.stringify({ canvasId: state.currentCanvasId, nodeId }),
     });
     state.currentCanvas = data.canvas;
-    closeCanvasNodeModal();
+    await closeCanvasNodeModal();
     renderCanvas();
     canvasStatus("剧本节点已生成");
   } catch (error) {
@@ -5642,7 +5772,21 @@ async function generateScriptFromNode(nodeId = state.activeCanvasNodeId) {
   }
 }
 
+async function refreshCurrentCanvasAfterGeneration(canvasId) {
+  if (!canvasId || state.currentCanvasId !== canvasId) return null;
+  const canvas = await api(`/api/canvas?id=${encodeURIComponent(canvasId)}`);
+  if (state.currentCanvasId !== canvasId) return null;
+  state.currentCanvas = canvas;
+  renderCanvas();
+  reportPersistedCanvasGenerationFailure(canvas);
+  return canvas;
+}
+
 async function planStoryboardsFromNode(nodeId = state.activeCanvasNodeId) {
+  if (canvasNodeIsGenerating(nodeId)) {
+    canvasStatus("该剧本正在生成分镜，请等待当前任务完成。");
+    return;
+  }
   await persistCanvasNodeDraftForGeneration(nodeId);
   canvasStatus("正在识别剧本分集...");
   setCanvasBusy(nodeId, "分集识别中");
@@ -5662,13 +5806,18 @@ async function planStoryboardsFromNode(nodeId = state.activeCanvasNodeId) {
 
 async function generateAllStoryboardsFromNode(nodeId) {
   if (!nodeId) return;
+  if (canvasNodeIsGenerating(nodeId)) {
+    canvasStatus("该剧本正在生成分镜，请等待当前任务完成。");
+    return;
+  }
+  const canvasId = state.currentCanvasId;
   await persistCanvasNodeDraftForGeneration(nodeId);
   canvasStatus("正在识别分集并生成全部分镜...");
   setCanvasBusy(nodeId, "分镜生成中");
   try {
     const plan = await api("/api/canvas/plan-storyboards", {
       method: "POST",
-      body: JSON.stringify({ canvasId: state.currentCanvasId, nodeId }),
+      body: JSON.stringify({ canvasId, nodeId }),
     });
     const episodes = Array.isArray(plan.episodes) ? plan.episodes : [];
     if (!episodes.length) {
@@ -5678,20 +5827,26 @@ async function generateAllStoryboardsFromNode(nodeId) {
     const data = await api("/api/canvas/generate-storyboards", {
       method: "POST",
       body: JSON.stringify({
-        canvasId: state.currentCanvasId,
+        canvasId,
         nodeId: plan.scriptNodeId || nodeId,
         episodes,
       }),
     });
+    if (state.currentCanvasId !== canvasId) return;
     state.currentCanvas = data.canvas;
     state.pendingEpisodes = null;
-    closeCanvasNodeModal();
+    await closeCanvasNodeModal();
     renderCanvas();
     canvasStatus(`已生成 ${data.nodes?.length || episodes.length} 个分镜脚本节点`);
   } catch (error) {
+    try {
+      await refreshCurrentCanvasAfterGeneration(canvasId);
+    } catch {
+      // Preserve the original generation error as the user-facing message.
+    }
     canvasStatus(formatApiErrorMessage(error), { lockMs: 8000 });
   } finally {
-    setCanvasBusy(null);
+    clearCanvasBusy(nodeId);
   }
 }
 
@@ -5722,6 +5877,12 @@ function closeEpisodeConfirm() {
 
 async function generateConfirmedStoryboards() {
   if (!state.pendingEpisodes) return;
+  const sourceNodeId = state.pendingEpisodes.scriptNodeId;
+  if (canvasNodeIsGenerating(sourceNodeId)) {
+    canvasStatus("该剧本正在生成分镜，请等待当前任务完成。");
+    return;
+  }
+  const canvasId = state.currentCanvasId;
   const selected = Array.from($("episodeConfirmList").querySelectorAll("input[type='checkbox']"))
     .filter((input) => input.checked)
     .map((input) => state.pendingEpisodes.episodes[Number(input.dataset.index)])
@@ -5731,27 +5892,32 @@ async function generateConfirmedStoryboards() {
     return;
   }
   closeEpisodeConfirm();
-  closeCanvasNodeModal();
-  const sourceNodeId = state.pendingEpisodes.scriptNodeId;
+  await closeCanvasNodeModal();
   canvasStatus(`正在生成 ${selected.length} 个分镜节点...`);
   setCanvasBusy(sourceNodeId, "分镜生成中");
   try {
     const data = await api("/api/canvas/generate-storyboards", {
       method: "POST",
       body: JSON.stringify({
-        canvasId: state.currentCanvasId,
+        canvasId,
         nodeId: sourceNodeId,
         episodes: selected,
       }),
     });
+    if (state.currentCanvasId !== canvasId) return;
     state.currentCanvas = data.canvas;
     state.pendingEpisodes = null;
     renderCanvas();
     canvasStatus(`已生成 ${data.nodes?.length || selected.length} 个分镜节点`);
   } catch (error) {
+    try {
+      await refreshCurrentCanvasAfterGeneration(canvasId);
+    } catch {
+      // Preserve the original generation error as the user-facing message.
+    }
     canvasStatus(formatApiErrorMessage(error), { lockMs: 8000 });
   } finally {
-    setCanvasBusy(null);
+    clearCanvasBusy(sourceNodeId);
   }
 }
 
@@ -6916,6 +7082,10 @@ function bindEvents() {
     button.addEventListener("click", () => addNodeToCanvas(button.dataset.addNode));
   });
   window.addEventListener("pointermove", updateCanvasPointer);
+  window.addEventListener("pagehide", persistCanvasDraftOnPageExit);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") persistCanvasDraftOnPageExit();
+  });
   window.addEventListener("pointermove", updateSidebarResize);
   window.addEventListener("pointerup", endCanvasPointer);
   window.addEventListener("pointerup", endSidebarResize);
