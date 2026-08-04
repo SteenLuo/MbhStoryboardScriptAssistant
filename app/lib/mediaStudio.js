@@ -183,6 +183,35 @@ function findMediaModel(type, modelId) {
   return MEDIA_MODELS[nodeType].find((model) => model.id === modelId) || MEDIA_MODELS[nodeType][0];
 }
 
+function normalizeReferenceSnapshot(items, maxReferences) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      assetId: String(item?.assetId || ""),
+      assetTitle: String(item?.assetTitle || ""),
+      elementId: String(item?.elementId || ""),
+      title: String(item?.title || ""),
+      mediaType: String(item?.mediaType || "image"),
+      source: cleanDataUrl(item?.source),
+    }))
+    .filter((item) => item.assetId && item.elementId && item.source)
+    .slice(0, maxReferences || 0);
+}
+
+function normalizeMediaTask(task = {}) {
+  if (!task || typeof task !== "object") return null;
+  const taskId = String(task.taskId || "").trim();
+  if (!taskId) return null;
+  return {
+    taskId,
+    providerId: String(task.providerId || "apimart"),
+    submittedAt: String(task.submittedAt || ""),
+    checkedAt: String(task.checkedAt || ""),
+    status: String(task.status || "submitted"),
+    message: String(task.message || ""),
+    referenceSnapshot: normalizeReferenceSnapshot(task.referenceSnapshot, 20),
+  };
+}
+
 function normalizeMediaNodeConfig(type, value = {}) {
   const nodeType = cleanNodeType(type);
   const model = findMediaModel(nodeType, value.model);
@@ -203,7 +232,10 @@ function normalizeMediaNodeConfig(type, value = {}) {
     count,
     referenceAssetIds: Array.isArray(value.referenceAssetIds) ? value.referenceAssetIds.map(String).filter(Boolean).slice(0, model.maxReferences || 0) : [],
     referenceElementIds: Array.isArray(value.referenceElementIds) ? value.referenceElementIds.map(String).filter(Boolean).slice(0, model.maxReferences || 0) : [],
+    referenceSnapshot: normalizeReferenceSnapshot(value.referenceSnapshot, model.maxReferences || 0),
     audioReferenceElementId: model.supportsAudioReference ? String(value.audioReferenceElementId || "") : "",
+    outputUrls: (Array.isArray(value.outputUrls) ? value.outputUrls : []).map(cleanDataUrl).filter(Boolean).slice(0, 12),
+    lastTask: normalizeMediaTask(value.lastTask),
   };
 }
 
@@ -292,6 +324,8 @@ module.exports = {
   normalizeAsset,
   normalizeAssets,
   normalizeMediaNodeConfig,
+  normalizeMediaTask,
+  normalizeReferenceSnapshot,
   normalizeMediaSettings,
   publicMediaSettings,
   updateMediaSettings,

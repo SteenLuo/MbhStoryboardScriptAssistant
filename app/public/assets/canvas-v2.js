@@ -116,6 +116,10 @@
 
   function modelFor(node, id) { return (catalog?.models?.[node.type] || []).find((model) => model.id === id) || catalog?.models?.[node.type]?.[0]; }
   function selectOptions(values, selected, formatter = (x) => x) { return (values || []).map((value) => { const raw = typeof value === "object" ? value.id : value; return `<option value="${esc(raw)}"${String(raw) === String(selected) ? " selected" : ""}>${esc(formatter(value))}</option>`; }).join(""); }
+  function snapshotReferences(assetIds, maxReferences) {
+    const selected = new Set(assetIds || []);
+    return assets.filter((asset) => selected.has(asset.id)).flatMap((asset) => (asset.elements || []).map((element) => ({ assetId: asset.id, assetTitle: asset.title, elementId: element.id, title: element.title, mediaType: element.mediaType, source: element.source }))).filter((element) => element.source).slice(0, maxReferences || 0);
+  }
 
   async function openMediaInspector(id) {
     ensureChrome();
@@ -130,7 +134,8 @@
     panel.dataset.nodeId = node.id;
     const individual = node.type === "image" ? providerSettings.imageProviders : node.type === "video" ? providerSettings.videoProviders : [];
     const providers = [{ id: "apimart", label: `APIMart 统一 API${providerSettings.apimart?.hasApiKey ? "（已配置）" : "（待配置）"}` }, ...individual.map((item) => ({ id: item.id, label: `${item.label}${item.hasApiKey ? "（已配置）" : "（待配置）"}` }))];
-    panel.innerHTML = `<header><div><span>${typeLabel}节点</span><h2>${esc(node.title || "未命名节点")}</h2></div><button type="button" data-v2-close-inspector>×</button></header><div class="media-inspector-body"><label>API 接入<select data-media-field="providerId">${selectOptions(providers, config.providerId || "apimart", (item) => item.label)}</select></label><label>模型<select data-media-field="model">${selectOptions(catalog.models[node.type], config.model, (item) => item.label)}</select></label><label>生成方式<select data-media-field="mode">${selectOptions(model.modes, config.mode, (item) => ({ "text-to-image": "文生图", "image-to-image": "参考图生图", "multi-angle": "多角度", "nine-grid": "九宫格", "text-to-video": "文生视频", "reference-to-video": "全能参考图生视频", "first-last-frame": "首尾帧视频", "text-to-speech": "文本转语音" })[item] || item)}</select></label><label>提示词<textarea data-media-field="prompt" placeholder="描述你要生成的内容">${esc(config.prompt || "")}</textarea></label>${model.ratios ? `<label>比例<select data-media-field="ratio">${selectOptions(model.ratios, config.ratio)}</select></label>` : ""}${model.resolutions ? `<label>清晰度<select data-media-field="resolution">${selectOptions(model.resolutions, config.resolution)}</select></label>` : ""}${model.counts ? `<label>生成数量<select data-media-field="count">${selectOptions(model.counts, config.count, (item) => `${item} 张`)}</select></label>` : ""}${model.durations ? `<label>视频时长<select data-media-field="duration">${selectOptions(model.durations, config.duration, (item) => `${item} 秒`)}</select></label>` : ""}<fieldset><legend>引用资产（最多 ${model.maxReferences || 0} 个）</legend>${assets.length ? assets.map((asset) => `<label class="asset-check"><input type="checkbox" data-media-asset="${esc(asset.id)}" ${config.referenceAssetIds?.includes(asset.id) ? "checked" : ""}/><span>${esc(asset.title)} <small>${asset.elements.length} 个元素</small></span></label>`).join("") : `<p class="v2-muted">还没有可引用资产。请先在资产库中创建。</p>`}</fieldset><p class="media-capability-note">当前模型支持：${esc((model.modes || []).join(" / "))}${model.supportsAudioReference ? "；支持声音参考" : ""}</p><div class="media-inspector-actions"><button type="button" data-v2-save-media class="v2-primary">保存节点配置</button><button type="button" data-v2-run-media>开始生成</button></div><p id="v2MediaRunState" class="v2-muted"></p></div>`;
+    const task = config.lastTask;
+    panel.innerHTML = `<header><div><span>${typeLabel}节点</span><h2>${esc(node.title || "未命名节点")}</h2></div><button type="button" data-v2-close-inspector>×</button></header><div class="media-inspector-body"><label>API 接入<select data-media-field="providerId">${selectOptions(providers, config.providerId || "apimart", (item) => item.label)}</select></label><label>模型<select data-media-field="model">${selectOptions(catalog.models[node.type], config.model, (item) => item.label)}</select></label><label>生成方式<select data-media-field="mode">${selectOptions(model.modes, config.mode, (item) => ({ "text-to-image": "文生图", "image-to-image": "参考图生图", "multi-angle": "多角度", "nine-grid": "九宫格", "text-to-video": "文生视频", "reference-to-video": "全能参考图生视频", "first-last-frame": "首尾帧视频", "text-to-speech": "文本转语音" })[item] || item)}</select></label><label>提示词<textarea data-media-field="prompt" placeholder="描述你要生成的内容">${esc(config.prompt || "")}</textarea></label>${model.ratios ? `<label>比例<select data-media-field="ratio">${selectOptions(model.ratios, config.ratio)}</select></label>` : ""}${model.resolutions ? `<label>清晰度<select data-media-field="resolution">${selectOptions(model.resolutions, config.resolution)}</select></label>` : ""}${model.counts ? `<label>生成数量<select data-media-field="count">${selectOptions(model.counts, config.count, (item) => `${item} 张`)}</select></label>` : ""}${model.durations ? `<label>视频时长<select data-media-field="duration">${selectOptions(model.durations, config.duration, (item) => `${item} 秒`)}</select></label>` : ""}<fieldset><legend>引用资产（最多 ${model.maxReferences || 0} 个）</legend>${assets.length ? assets.map((asset) => `<label class="asset-check"><input type="checkbox" data-media-asset="${esc(asset.id)}" ${config.referenceAssetIds?.includes(asset.id) ? "checked" : ""}/><span>${esc(asset.title)} <small>${asset.elements.length} 个元素</small></span></label>`).join("") : `<p class="v2-muted">还没有可引用资产。请先在资产库中创建。</p>`}</fieldset><p class="media-capability-note">当前模型支持：${esc((model.modes || []).join(" / "))}${model.supportsAudioReference ? "；支持声音参考" : ""}${config.referenceSnapshot?.length ? `；已冻结 ${config.referenceSnapshot.length} 个引用元素` : ""}</p>${task ? `<p class="media-task-state">最近任务：${esc(task.status || "submitted")} ${task.message ? `· ${esc(task.message)}` : ""}</p>` : ""}<div class="media-inspector-actions"><button type="button" data-v2-save-media class="v2-primary">保存节点配置</button><button type="button" data-v2-run-media>开始生成</button>${task?.taskId ? `<button type="button" data-v2-refresh-task>刷新任务</button>` : ""}</div><p id="v2MediaRunState" class="v2-muted"></p></div>`;
   }
 
   async function saveMediaInspector({ run = false } = {}) {
@@ -138,13 +143,22 @@
     if (!node) return;
     const value = Object.fromEntries([...panel.querySelectorAll("[data-media-field]")].map((field) => [field.dataset.mediaField, field.value]));
     value.referenceAssetIds = [...panel.querySelectorAll("[data-media-asset]:checked")].map((field) => field.dataset.mediaAsset);
+    value.referenceSnapshot = snapshotReferences(value.referenceAssetIds, modelFor(node, value.model)?.maxReferences || 0);
     node.meta = { ...(node.meta || {}), media: { ...(node.meta?.media || {}), ...value } };
     node.content = value.prompt;
     await app().saveCurrentCanvas();
     app().renderCanvas(); renderWorkspace();
     if (!run) { $("v2MediaRunState").textContent = "节点配置已保存。"; return; }
     const result = await app().api("/api/media/tasks", { method: "POST", body: JSON.stringify({ canvasId: canvas().id, nodeId: node.id }) });
+    await app().loadCanvas(canvas().id);
     $("v2MediaRunState").textContent = result.message || "任务已提交。";
+  }
+
+  async function refreshMediaTask() {
+    const node = mediaNode($("canvasMediaInspector")?.dataset.nodeId); if (!node) return;
+    const result = await app().api("/api/media/tasks/status", { method: "POST", body: JSON.stringify({ canvasId: canvas().id, nodeId: node.id }) });
+    await app().loadCanvas(canvas().id); await openMediaInspector(node.id);
+    $("v2MediaRunState").textContent = result.message || "任务状态已刷新。";
   }
 
   function fileToDataUrl(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || "")); reader.onerror = reject; reader.readAsDataURL(file); }); }
@@ -183,6 +197,7 @@
     if (target.matches("[data-v2-close-asset-editor]")) { $("canvasAssetEditor").hidden = true; return; }
     if (target.matches("[data-v2-save-media]")) { await saveMediaInspector(); return; }
     if (target.matches("[data-v2-run-media]")) { await saveMediaInspector({ run: true }); return; }
+    if (target.matches("[data-v2-refresh-task]")) { await refreshMediaTask(); return; }
     if (target.matches("[data-v2-create-asset]")) { await editAsset(); return; }
     if (target.matches("[data-v2-edit-asset]")) { await editAsset(target.dataset.v2EditAsset); return; }
     if (target.matches("[data-v2-save-asset]")) { await saveAssetEditor(); return; }

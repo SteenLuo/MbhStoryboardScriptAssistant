@@ -3790,7 +3790,15 @@ function renderCanvasNode(node, options = {}) {
   setMarkdownEditorValue(body, node.content || "");
   if (isMediaNode) {
     body.classList.add("canvas-media-node-body");
-    body.innerHTML = `<div class="canvas-media-kind">${escapeHtml(canvasTypeLabels[node.type] || "媒体")} · ${escapeHtml(mediaConfig.model || "待选模型")}</div><div class="canvas-media-mode">${escapeHtml(mediaConfig.mode || "在右侧配置生成方式")}</div><div class="canvas-media-prompt">${escapeHtml(mediaConfig.prompt || node.content || "填写提示词后生成")}</div><button type="button" class="canvas-media-configure">配置节点</button>`;
+    const previewUrl = Array.isArray(mediaConfig.outputUrls) ? mediaConfig.outputUrls[0] : "";
+    const preview = previewUrl
+      ? node.type === "image"
+        ? `<img class="canvas-media-output image" src="${escapeHtml(previewUrl)}" alt="生成图片" />`
+        : node.type === "video"
+          ? `<video class="canvas-media-output" src="${escapeHtml(previewUrl)}" controls preload="metadata"></video>`
+          : `<audio class="canvas-media-output" src="${escapeHtml(previewUrl)}" controls></audio>`
+      : "";
+    body.innerHTML = `<div class="canvas-media-kind">${escapeHtml(canvasTypeLabels[node.type] || "媒体")} · ${escapeHtml(mediaConfig.model || "待选模型")}</div>${preview}<div class="canvas-media-mode">${escapeHtml(mediaConfig.lastTask?.status || mediaConfig.mode || "在右侧配置生成方式")}</div><div class="canvas-media-prompt">${escapeHtml(mediaConfig.prompt || node.content || "填写提示词后生成")}</div><button type="button" class="canvas-media-configure">配置节点</button>`;
   }
   body.dataset.placeholder = "点击编辑节点内容。";
   body.setAttribute("aria-label", `${node.title || "节点"}内容`);

@@ -145,12 +145,15 @@ test("local static assets disable browser caching for iterative fixes", () => {
 
 test("multimedia canvas API keeps model capabilities and a no-key preflight boundary", () => {
   const taskSource = extractFunction("submitMediaTask");
+  const statusSource = extractFunction("refreshMediaTask");
   assert.match(serverSource, /\/api\/media\/models/);
   assert.match(serverSource, /\/api\/media\/settings/);
   assert.match(serverSource, /\/api\/media\/tasks/);
+  assert.match(serverSource, /\/api\/media\/tasks\/status/);
   assert.match(taskSource, /MEDIA_PROVIDER_NOT_CONFIGURED/);
   assert.match(taskSource, /referenceSnapshot/);
   assert.match(taskSource, /Authorization: `Bearer \$\{provider\.apiKey\}`/);
+  assert.match(statusSource, /\/tasks\/\$\{encodeURIComponent\(config\.lastTask\.taskId\)\}/);
 });
 
 test("status endpoint exposes install identity for launcher checks", () => {

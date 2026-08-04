@@ -447,6 +447,24 @@ function mediaRequestPayload(type, config, references) {
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined && value !== ""));
 }
 
+function mediaOutputUrls(value, depth = 0, result = []) {
+  if (depth > 5 || result.length >= 12 || value === null || value === undefined) return result;
+  if (typeof value === "string") {
+    if (/^(https?:|data:)/i.test(value) && !result.includes(value)) result.push(value);
+    return result;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => mediaOutputUrls(item, depth + 1, result));
+    return result;
+  }
+  if (typeof value === "object") {
+    ["url", "urls", "image_url", "image_urls", "video_url", "video_urls", "audio_url", "audio_urls", "output", "outputs", "result", "results", "data"].forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(value, key)) mediaOutputUrls(value[key], depth + 1, result);
+    });
+  }
+  return result;
+}
+
 async function submitMediaTask(body = {}) {
   const canvasId = String(body.canvasId || "");
   const nodeId = String(body.nodeId || "");
@@ -468,14 +486,14 @@ async function submitMediaTask(body = {}) {
     throw error;
   }
   const model = findMediaModel(sourceNode.type, config.model);
-  const references = mediaReferenceSnapshot(config, await listAssets({ canvasId })).slice(0, model.maxReferences || 20);
+  const references = (config.referenceSnapshot.length ? config.referenceSnapshot : mediaReferenceSnapshot(config, await listAssets({ canvasId }))).slice(0, model.maxReferences || 20);
   const endpoint = model.endpoint;
   let upstream;
   try {
     const response = await fetch(`${String(provider.baseUrl || "").replace(/\/$/, "")}${endpoint}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${provider.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify(mediaRequestPayload(sourceNode.type, config, references)),
+      body: JSON.stringify(mediaRequestPayload(sourceNode.type, { ...config, model: provider.model || config.model }, references)),
     });
     const raw = await response.text();
     try { upstream = JSON.parse(raw); } catch { upstream = { raw }; }
@@ -495,10 +513,52 @@ async function submitMediaTask(body = {}) {
     ...latest,
     nodes: latest.nodes.map((node) => node.id !== nodeId ? node : {
       ...node,
-      meta: { ...(node.meta || {}), media: { ...config, lastTask: { taskId, providerId: provider.id, submittedAt: new Date().toISOString(), status: upstream?.status || "submitted", referenceSnapshot: references } } },
+      meta: { ...(node.meta || {}), media: { ...config, outputUrls: mediaOutputUrls(upstream), lastTask: { taskId, providerId: provider.id, submittedAt: new Date().toISOString(), status: upstream?.status || "submitted", message: String(upstream?.message || ""), referenceSnapshot: references } } },
     }),
   }));
   return { ok: true, taskId, status: upstream?.status || "submitted", message: taskId ? "生成任务已提交，结果将以任务状态为准。" : "生成请求已发送；上游未返回任务 ID。" };
+}
+
+async function refreshMediaTask(body = {}) {
+  const canvasId = String(body.canvasId || "");
+  const nodeId = String(body.nodeId || "");
+  const sourceCanvas = await getCanvas(canvasId);
+  const sourceNode = (sourceCanvas.nodes || []).find((node) => node.id === nodeId);
+  if (!sourceNode || !["image", "video", "audio"].includes(sourceNode.type)) throw new Error("找不到多媒体节点");
+  const config = normalizeMediaNodeConfig(sourceNode.type, sourceNode.meta?.media || {});
+  if (!config.lastTask?.taskId) {
+    const error = new Error("当前节点没有可查询的生成任务");
+    error.code = "MEDIA_TASK_NOT_FOUND";
+    throw error;
+  }
+  const settings = await readMediaSettings();
+  const provider = mediaProviderFor(sourceNode.type, config.lastTask.providerId, settings);
+  if (!provider.apiKey) {
+    const error = new Error("查询任务状态需要对应的 API Key");
+    error.code = "MEDIA_PROVIDER_NOT_CONFIGURED";
+    throw error;
+  }
+  const response = await fetch(`${String(provider.baseUrl || "").replace(/\/$/, "")}/tasks/${encodeURIComponent(config.lastTask.taskId)}?language=zh`, {
+    headers: { Authorization: `Bearer ${provider.apiKey}` },
+  });
+  const raw = await response.text();
+  let upstream;
+  try { upstream = JSON.parse(raw); } catch { upstream = { raw }; }
+  if (!response.ok) {
+    const error = new Error(upstream?.error?.message || upstream?.message || `上游任务查询失败（HTTP ${response.status}）`);
+    error.code = "MEDIA_TASK_STATUS_FAILED";
+    throw error;
+  }
+  const status = String(upstream?.status || upstream?.data?.status || "unknown");
+  const outputUrls = mediaOutputUrls(upstream);
+  await mutateCanvasRecord(canvasId, (latest) => ({
+    ...latest,
+    nodes: latest.nodes.map((node) => node.id !== nodeId ? node : {
+      ...node,
+      meta: { ...(node.meta || {}), media: { ...config, outputUrls: outputUrls.length ? outputUrls : config.outputUrls, lastTask: { ...config.lastTask, status, checkedAt: new Date().toISOString(), message: String(upstream?.message || upstream?.data?.message || "") } } },
+    }),
+  }));
+  return { ok: true, taskId: config.lastTask.taskId, status, outputCount: outputUrls.length, message: outputUrls.length ? "任务状态已更新，生成结果已放入节点。" : `任务状态：${status}` };
 }
 
 async function listRuns() {
@@ -3046,6 +3106,9 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/media/tasks") {
     return sendJson(res, 200, await submitMediaTask(body));
+  }
+  if (req.method === "POST" && url.pathname === "/api/media/tasks/status") {
+    return sendJson(res, 200, await refreshMediaTask(body));
   }
   if (req.method === "POST" && url.pathname === "/api/canvas/archive-check") {
     return sendJson(res, 200, await checkCanvasArchiveReadiness(body));
