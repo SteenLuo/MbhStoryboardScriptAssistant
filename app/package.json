@@ -1,0 +1,18 @@
+{
+  "name": "mbh-storyboard-canvas-client",
+  "private": true,
+  "version": "1.0.3",
+  "scripts": {
+    "build:canvas": "vite build --config canvas.vite.config.mjs",
+    "test:canvas": "node --test public/canvas-flow.test.js public/canvas-performance.test.js"
+  },
+  "dependencies": {
+    "@xyflow/react": "12.11.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.0.5",
+    "vite": "8.2.0"
+  }
+}

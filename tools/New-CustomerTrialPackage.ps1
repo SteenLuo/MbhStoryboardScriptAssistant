@@ -235,6 +235,7 @@ function New-CustomerPackage {
     "app/config/deepseek.local.json",
     "app/config/app.local.json",
     "app/data",
+    "app/node_modules",
     "app/public/prototypes",
     "app/runtime"
   )

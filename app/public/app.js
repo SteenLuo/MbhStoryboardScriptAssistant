@@ -60,6 +60,11 @@ const state = {
   canvasRedoStack: [],
   canvasHistoryBaseSnapshot: "",
   canvasHistoryApplying: false,
+  canvasFlow: null,
+  canvasFlowBridge: null,
+  canvasFlowListeners: new Set(),
+  canvasFlowRevision: 0,
+  canvasPerformanceSamples: [],
   notifications: [],
   activeNotificationIndex: 0,
   learningLibrary: null,
@@ -3160,6 +3165,10 @@ function animateCanvasViewportTo({ zoom, left, top, duration = canvasFitAnimatio
 }
 
 function setCanvasZoom(nextZoom, options = {}) {
+  if (canvasFlowEnabled() && state.canvasFlowBridge) {
+    state.canvasFlowBridge.zoomTo(nextZoom);
+    return;
+  }
   const stage = $("canvasStage");
   cancelCanvasViewportAnimation();
   const previousZoom = canvasZoom();
@@ -3237,6 +3246,10 @@ function canvasExpandedZoomForBounds(bounds) {
 }
 
 function centerCanvasOnNode(nodeId = state.selectedCanvasNodeId) {
+  if (canvasFlowEnabled() && state.canvasFlowBridge) {
+    state.canvasFlowBridge.focus(nodeId);
+    return;
+  }
   const node = currentCanvasNode(nodeId);
   const stage = $("canvasStage");
   if (!node || !stage) return;
@@ -3252,6 +3265,10 @@ function centerCanvasOnNode(nodeId = state.selectedCanvasNodeId) {
 }
 
 function focusCanvasNodeToViewport(nodeId) {
+  if (canvasFlowEnabled() && state.canvasFlowBridge) {
+    state.canvasFlowBridge.focus(nodeId);
+    return;
+  }
   const node = currentCanvasNode(nodeId);
   const stage = $("canvasStage");
   if (!node || !stage) return;
@@ -3267,6 +3284,10 @@ function focusCanvasNodeToViewport(nodeId) {
 }
 
 function fitCanvasToContent() {
+  if (canvasFlowEnabled() && state.canvasFlowBridge) {
+    state.canvasFlowBridge.fit();
+    return;
+  }
   const stage = $("canvasStage");
   if (!stage || !state.currentCanvas) return;
   const bounds = canvasContentBounds(160);
@@ -3284,6 +3305,10 @@ function fitCanvasToContent() {
 }
 
 function toggleCanvasMiniMap() {
+  if (canvasFlowEnabled() && state.canvasFlowBridge) {
+    state.canvasFlowBridge.toggleMiniMap();
+    return;
+  }
   const panel = $("canvasMiniMap");
   const button = $("toggleCanvasMiniMap");
   if (!panel) return;
@@ -3437,6 +3462,14 @@ function renderCanvas() {
     return;
   }
   renderCanvasHeaderState();
+  if (canvasFlowEnabled()) {
+    renderReactFlowCanvas();
+    renderCanvasGroupBar();
+    updateCanvasSelectionModeClass();
+    updateCanvasViewportTools();
+    scheduleCanvasGenerationPoll();
+    return;
+  }
   applyCanvasSurfaceSize(canvas);
   for (const node of canvas.nodes || []) {
     layer.appendChild(renderCanvasNode(node));
@@ -3449,6 +3482,142 @@ function renderCanvas() {
   if (state.canvasDrag?.type === "connect") {
     canvasStatus("拖到目标节点松开");
   }
+}
+
+function canvasFlowEnabled() {
+  return Boolean(window.MbhCanvasFlow?.createCanvasFlow && $("canvasReactRoot"));
+}
+
+function canvasFlowNodeRevision(nodeId) {
+  const node = currentCanvasNode(nodeId);
+  if (!node) return "missing";
+  return JSON.stringify({
+    id: node.id,
+    title: node.title,
+    content: node.content,
+    type: node.type,
+    width: node.width,
+    height: node.height,
+    meta: node.meta,
+    selected: isCanvasNodeSelected(node.id),
+    busy: canvasBusyState()[node.id] || null,
+  });
+}
+
+function createCanvasFlowBridge() {
+  const listeners = state.canvasFlowListeners;
+  const bridge = {
+    snapshot() {
+      const canvas = state.currentCanvas || { nodes: [], edges: [] };
+      return {
+        nodes: canvas.nodes || [],
+        edges: canvas.edges || [],
+        nodeRevision: state.canvasFlowRevision,
+      };
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    subscribeViewport(listener) {
+      bridge.viewportListener = listener;
+      return () => { bridge.viewportListener = null; };
+    },
+    nodeRevision: canvasFlowNodeRevision,
+    isReadOnly: canvasIsArchived,
+    mountNode(nodeId, host) {
+      const node = currentCanvasNode(nodeId);
+      if (!node || !host) return () => {};
+      const element = renderCanvasNode(node, { flowManaged: true });
+      host.replaceChildren(element);
+      return () => {
+        if (host.firstChild === element) host.replaceChildren();
+      };
+    },
+    async commitNodePosition(nodeId, position) {
+      const node = currentCanvasNode(nodeId);
+      if (!node || canvasIsArchived()) return;
+      const x = Number(position?.x || 0);
+      const y = Number(position?.y || 0);
+      if (Math.abs(Number(node.x || 0) - x) < 0.01 && Math.abs(Number(node.y || 0) - y) < 0.01) return;
+      state.currentCanvas.nodes = state.currentCanvas.nodes.map((item) => item.id === nodeId ? { ...item, x, y } : item);
+      await saveCurrentCanvas();
+      renderCanvas();
+    },
+    async commitNodeSize(nodeId, width, height) {
+      const node = currentCanvasNode(nodeId);
+      if (!node || canvasIsArchived()) return;
+      const nextWidth = Math.max(220, Math.round(Number(width || node.width)));
+      const nextHeight = Math.max(120, Math.round(Number(height || node.height)));
+      if (nextWidth === Number(node.width) && nextHeight === Number(node.height)) return;
+      state.currentCanvas.nodes = state.currentCanvas.nodes.map((item) => item.id === nodeId
+        ? { ...item, width: nextWidth, height: nextHeight }
+        : item);
+      await saveCurrentCanvas();
+      renderCanvas();
+    },
+    selectNode(nodeId) { selectCanvasNode(nodeId); },
+    syncNodeSelection(nodeIds = []) {
+      const selected = Array.isArray(nodeIds) ? nodeIds : [];
+      setCanvasMultiSelection(selected, selected.at(-1) || "");
+    },
+    selectEdge(edgeId, event) {
+      if (event) openCanvasEdgeMenu(event, edgeId);
+      else selectCanvasEdge(edgeId);
+    },
+    clearSelection() { clearCanvasSelection(); },
+    async connect(connection) {
+      const from = connection?.source;
+      const to = connection?.target;
+      if (!from || !to || !canConnectCanvasNodes(from, to)) return;
+      if ((state.currentCanvas.edges || []).some((edge) => edge.from === from && edge.to === to)) return;
+      state.currentCanvas.edges = [...state.currentCanvas.edges, {
+        id: `edge-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+        from,
+        to,
+        label: "",
+        fromSide: connection.sourceHandle === "left" ? "left" : "right",
+        toSide: connection.targetHandle === "right" ? "right" : "left",
+      }];
+      await saveCurrentCanvas();
+      renderCanvas();
+    },
+    commitViewport(viewport) {
+      state.canvasZoom = Number(viewport?.zoom || 1);
+      updateCanvasZoomLabel();
+    },
+    setViewportActions(actions) { bridge.viewportActions = actions; },
+    fit() { bridge.viewportActions?.fit?.(); },
+    focus(nodeId) { bridge.viewportActions?.focus?.(nodeId); },
+    zoomTo(nextZoom) { bridge.viewportActions?.zoomTo?.(nextZoom); },
+    toggleMiniMap() { bridge.viewportActions?.toggleMiniMap?.(); },
+    project(point) { return bridge.viewportActions?.project?.(point) || point; },
+    reportPerformance(sample) {
+      const root = $("canvasReactRoot");
+      if (!root) return;
+      const samples = Array.isArray(state.canvasPerformanceSamples) ? state.canvasPerformanceSamples : [];
+      samples.push({ ...sample, at: new Date().toISOString() });
+      state.canvasPerformanceSamples = samples.slice(-20);
+      root.dataset.canvasPerformance = JSON.stringify(state.canvasPerformanceSamples);
+    },
+  };
+  return bridge;
+}
+
+function renderReactFlowCanvas() {
+  const root = $("canvasReactRoot");
+  if (!root) return;
+  root.hidden = false;
+  $("canvasNodes").hidden = true;
+  $("canvasEdges").hidden = true;
+  $("canvasSelectionBox").hidden = true;
+  if (!state.canvasFlowBridge) state.canvasFlowBridge = createCanvasFlowBridge();
+  if (!state.canvasFlow) {
+    state.canvasFlow = window.MbhCanvasFlow.createCanvasFlow(root, state.canvasFlowBridge);
+  }
+  state.canvasFlowRevision += 1;
+  const snapshot = state.canvasFlowBridge.snapshot();
+  for (const listener of state.canvasFlowListeners) listener(snapshot);
 }
 
 function applyCanvasSurfaceSize(canvas) {
@@ -3488,19 +3657,22 @@ function ensureCanvasViewportOrigin(canvas) {
   });
 }
 
-function renderCanvasNode(node) {
+function renderCanvasNode(node, options = {}) {
+  const flowManaged = options.flowManaged === true;
   const editableBody = isCanvasNodeContentEditable(node);
   const editingBody = editableBody && state.editingCanvasBodyNodeId === node.id;
   const item = document.createElement("article");
   item.className = `canvas-node ${node.type || "label"}${isCanvasRevisionNode(node) ? " revision" : ""}${isCanvasMergedNode(node) ? " merged" : ""}${isCanvasNodeSelected(node.id) ? " selected" : ""}${editingBody ? " editing-body" : ""}`;
   item.dataset.nodeId = node.id;
   item.tabIndex = 0;
-  item.style.left = `${canvasScreenX(node.x)}px`;
-  item.style.top = `${canvasScreenY(node.y)}px`;
-  item.style.width = `${Number(node.width || 320)}px`;
-  item.style.height = `${Number(node.height || 220)}px`;
-  item.style.transform = `scale(${canvasZoom()})`;
-  item.style.transformOrigin = "top left";
+  if (!flowManaged) {
+    item.style.left = `${canvasScreenX(node.x)}px`;
+    item.style.top = `${canvasScreenY(node.y)}px`;
+    item.style.width = `${Number(node.width || 320)}px`;
+    item.style.height = `${Number(node.height || 220)}px`;
+    item.style.transform = `scale(${canvasZoom()})`;
+    item.style.transformOrigin = "top left";
+  }
   const nodeBackgroundColor = sanitizeMarkdownColor(node.meta?.backgroundColor || "");
   if (nodeBackgroundColor) {
     item.style.setProperty("--canvas-node-custom-bg", nodeBackgroundColor);
@@ -3539,11 +3711,12 @@ function renderCanvasNode(node) {
       editCanvasNodeTitle(node.id);
       return;
     }
-    event.stopPropagation();
+    if (!flowManaged) event.stopPropagation();
     selectCanvasNode(node.id);
   });
   head.addEventListener("pointerup", (event) => {
     if (event.button !== 0) return;
+    if (flowManaged) return;
     event.preventDefault();
     event.stopPropagation();
     if (state.suppressCanvasTitleClick) return;
@@ -3616,7 +3789,7 @@ function renderCanvasNode(node) {
       : "单击选中，双击在节点内编辑 Markdown"
     : "只读节点";
   body.addEventListener("pointerdown", (event) => {
-    event.stopPropagation();
+    if (!flowManaged) event.stopPropagation();
     if (event.button !== 0) return;
     selectCanvasNode(node.id);
     if (canvasIsArchived()) return;
@@ -3625,10 +3798,10 @@ function renderCanvasNode(node) {
       event.preventDefault();
       return;
     }
-    startCanvasNodeDrag(event, node.id, { pending: true, textarea: body });
+    if (!flowManaged) startCanvasNodeDrag(event, node.id, { pending: true, textarea: body });
   });
   body.addEventListener("click", (event) => {
-    event.stopPropagation();
+    if (!flowManaged) event.stopPropagation();
     selectCanvasNode(node.id);
   });
   body.addEventListener("dblclick", (event) => {
@@ -3714,14 +3887,16 @@ function renderCanvasNode(node) {
 
   const plusSides = node.type === "novel" ? ["right"] : ["left", "right"];
   for (const side of plusSides) {
-    item.appendChild(canvasHoverBridge(side));
-    item.appendChild(canvasPlusButton(node.id, side));
+    if (!flowManaged) item.appendChild(canvasHoverBridge(side));
+    item.appendChild(canvasPlusButton(node.id, side, { flowManaged }));
   }
 
-  const resize = document.createElement("div");
-  resize.className = "canvas-resize";
-  resize.addEventListener("pointerdown", (event) => startCanvasNodeResize(event, node.id));
-  item.appendChild(resize);
+  if (!flowManaged) {
+    const resize = document.createElement("div");
+    resize.className = "canvas-resize";
+    resize.addEventListener("pointerdown", (event) => startCanvasNodeResize(event, node.id));
+    item.appendChild(resize);
+  }
   return item;
 }
 
@@ -4285,6 +4460,7 @@ function setCanvasMultiSelection(nodeIds = [], primaryNodeId = "") {
 }
 
 function handleCanvasStageClick(event) {
+  if (canvasFlowEnabled()) return;
   if (state.suppressCanvasStageClick) {
     state.suppressCanvasStageClick = false;
     return;
@@ -4363,14 +4539,18 @@ function canvasHoverBridge(side) {
   return bridge;
 }
 
-function canvasPlusButton(nodeId, side) {
+function canvasPlusButton(nodeId, side, options = {}) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `canvas-node-plus ${side}`;
   button.textContent = "+";
   button.title = side === "left" ? "拖拽连接到其他节点右侧" : "单击生成，拖拽连接到其他节点左侧";
   button.setAttribute("aria-label", button.title);
-  button.addEventListener("pointerdown", (event) => beginCanvasEdgeDraft(event, nodeId, side));
+  if (!options.flowManaged) {
+    button.addEventListener("pointerdown", (event) => beginCanvasEdgeDraft(event, nodeId, side));
+  } else {
+    button.addEventListener("pointerdown", (event) => event.stopPropagation());
+  }
   button.addEventListener("click", (event) => {
     event.stopPropagation();
     if (state.suppressCanvasPlusClick) {
@@ -4995,6 +5175,9 @@ async function copyCanvasNodeText(nodeId) {
 }
 
 function canvasStagePoint(clientX, clientY) {
+  if (canvasFlowEnabled() && state.canvasFlowBridge?.project) {
+    return state.canvasFlowBridge.project({ x: clientX, y: clientY });
+  }
   const stage = $("canvasStage");
   const rect = stage?.getBoundingClientRect();
   if (!stage || !rect) return { x: clientX, y: clientY };
@@ -5193,6 +5376,7 @@ function activateCanvasPan(drag) {
 }
 
 function startCanvasSelection(event) {
+  if (canvasFlowEnabled()) return;
   if (!state.currentCanvas || event.button !== 0) return;
   if (event.target?.closest?.(".canvas-node, .canvas-edge, .canvas-context-menu, .canvas-action-menu, .canvas-view-tools, .canvas-group-bar, button, input, textarea, select")) return;
   event.preventDefault();
@@ -5385,6 +5569,7 @@ function startCanvasNodeResize(event, nodeId) {
 }
 
 function beginCanvasPan(event) {
+  if (canvasFlowEnabled()) return;
   if (!state.currentCanvas || event.button !== 1) return;
   if (event.target?.closest?.(".canvas-context-menu, .canvas-action-menu, .modal, button, input, textarea, select")) return;
   event.preventDefault();
