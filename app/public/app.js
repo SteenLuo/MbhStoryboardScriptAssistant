@@ -130,6 +130,9 @@ const canvasTypeLabels = {
   script: "剧本",
   storyboard: "分镜脚本",
   label: "标识",
+  image: "图片",
+  video: "视频",
+  audio: "音频",
 };
 const canvasRevisionNodeTypes = new Set(["novel", "script", "storyboard"]);
 const canvasMergeNodeTypes = new Set(["novel", "script", "storyboard"]);
@@ -143,6 +146,9 @@ const canvasTypeIconPaths = {
   script: '<path d="M7 4h9l3 3v13H7z"/><path d="M16 4v4h4"/><path d="M10 11h6"/><path d="M10 14h6"/><path d="M10 17h4"/>',
   storyboard: '<path d="M4 6h16v12H4z"/><path d="M8 6v12"/><path d="M16 6v12"/><path d="M4 10h16"/><path d="M4 14h16"/>',
   label: '<path d="M5 6.5A2.5 2.5 0 0 1 7.5 4H18v10.5L12.5 20 5 12.5z"/><circle cx="9" cy="8" r="1.2"/>',
+  image: '<rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m6 17 4-4 3 3 2-2 3 3"/>',
+  video: '<rect x="3.5" y="6" width="12.5" height="12" rx="2"/><path d="m16 10 4-2v8l-4-2z"/><path d="m9 10 3 2-3 2z"/>',
+  audio: '<path d="M4 13h3l4 4V7l-4 4H4z"/><path d="M15 10a3 3 0 0 1 0 4"/><path d="M17.5 7.5a6.5 6.5 0 0 1 0 9"/>',
 };
 const providerDefaults = {
   deepseek: {
@@ -2037,6 +2043,7 @@ function setAppMode(mode, options = {}) {
   $("sessionList").hidden = state.appMode !== "chat";
   $("canvasList").hidden = state.appMode !== "canvas";
   $("conversationOverview").hidden = state.appMode !== "chat";
+  document.body.classList.toggle("canvas-v2-mode", state.appMode === "canvas");
   $("newChat").title = state.appMode === "canvas" ? "新建画布" : "新建对话";
   $("newChat").setAttribute("aria-label", state.appMode === "canvas" ? "新建画布" : "新建对话");
   $("openConversationSearch").title = state.appMode === "canvas" ? "搜索当前画布" : "搜索全部对话";
@@ -2050,7 +2057,7 @@ function setAppMode(mode, options = {}) {
     modeSwitch.title = canvasActive ? "切换到对话" : "切换到画布";
   }
   if (state.appMode === "canvas") {
-    loadCanvases();
+    loadCanvases({ openFirst: false }).then(() => window.MbhCanvasV2?.showHome());
   } else {
     renderConversationList();
   }
@@ -2064,11 +2071,11 @@ async function handlePrimaryCreate() {
   openNewConversationModal();
 }
 
-async function loadCanvases() {
+async function loadCanvases(options = {}) {
   const data = await api("/api/canvases");
   state.canvases = data.canvases || [];
   renderCanvasList();
-  if (!state.currentCanvasId) {
+  if (options.openFirst !== false && !state.currentCanvasId) {
     if (state.canvases.length) {
       await loadCanvas(state.canvases[0].id);
     } else {
@@ -2170,8 +2177,9 @@ async function newCanvas(defaultTitle = "") {
   });
   state.currentCanvasId = canvas.id;
   state.currentCanvas = canvas;
-  await loadCanvases();
+  await loadCanvases({ openFirst: false });
   await loadCanvas(canvas.id);
+  window.MbhCanvasV2?.openWorkspace?.();
 }
 
 async function loadCanvas(id) {
@@ -2190,6 +2198,7 @@ async function loadCanvas(id) {
   renderCanvasList();
   renderCanvas();
   reportPersistedCanvasGenerationFailure(canvas);
+  window.MbhCanvasV2?.onCanvasLoaded?.(canvas);
 }
 
 function renderCanvasHeaderState() {
@@ -3441,8 +3450,8 @@ async function addNodeToCanvas(type, position = null) {
     content: "",
     x: Number(point.x || 0),
     y: Number(point.y || 0),
-    width: cleanType === "label" ? 260 : 360,
-    height: cleanType === "label" ? 140 : 240,
+    width: cleanType === "label" ? 260 : cleanType === "image" ? 420 : cleanType === "video" ? 440 : cleanType === "audio" ? 380 : 360,
+    height: cleanType === "label" ? 140 : cleanType === "image" ? 360 : cleanType === "video" ? 390 : cleanType === "audio" ? 300 : 240,
     meta: {},
   };
   state.currentCanvas.nodes = [...nodes, node];
@@ -3776,7 +3785,13 @@ function renderCanvasNode(node, options = {}) {
 
   const body = document.createElement("div");
   body.className = "canvas-node-body markdown-editor markdown-body";
+  const isMediaNode = ["image", "video", "audio"].includes(node.type);
+  const mediaConfig = node.meta?.media || {};
   setMarkdownEditorValue(body, node.content || "");
+  if (isMediaNode) {
+    body.classList.add("canvas-media-node-body");
+    body.innerHTML = `<div class="canvas-media-kind">${escapeHtml(canvasTypeLabels[node.type] || "媒体")} · ${escapeHtml(mediaConfig.model || "待选模型")}</div><div class="canvas-media-mode">${escapeHtml(mediaConfig.mode || "在右侧配置生成方式")}</div><div class="canvas-media-prompt">${escapeHtml(mediaConfig.prompt || node.content || "填写提示词后生成")}</div><button type="button" class="canvas-media-configure">配置节点</button>`;
+  }
   body.dataset.placeholder = "点击编辑节点内容。";
   body.setAttribute("aria-label", `${node.title || "节点"}内容`);
   body.setAttribute("role", "textbox");
@@ -3788,6 +3803,14 @@ function renderCanvasNode(node, options = {}) {
       ? "正在编辑，Markdown 工具条在节点上方。"
       : "单击选中，双击在节点内编辑 Markdown"
     : "只读节点";
+  if (isMediaNode) {
+    body.title = "配置图片、视频或音频节点";
+    body.addEventListener("click", (event) => {
+      const configure = event.target.closest(".canvas-media-configure");
+      if (configure) event.preventDefault();
+      window.MbhCanvasV2?.openMediaInspector?.(node.id);
+    });
+  }
   body.addEventListener("pointerdown", (event) => {
     if (!flowManaged) event.stopPropagation();
     if (event.button !== 0) return;
@@ -3808,6 +3831,10 @@ function renderCanvasNode(node, options = {}) {
     event.preventDefault();
     event.stopPropagation();
     focusCanvasNodeToViewport(node.id);
+    if (isMediaNode) {
+      window.MbhCanvasV2?.openMediaInspector?.(node.id);
+      return;
+    }
     startCanvasNodeBodyEdit(node.id);
   });
   body.addEventListener("wheel", (event) => {
@@ -6454,7 +6481,7 @@ function switchSettingsTab(tab) {
     openLearningPage();
     return;
   }
-  const target = "deepseek";
+  const target = tab === "media" ? "media" : "deepseek";
   document.querySelectorAll("[data-settings-tab]").forEach((button) => {
     const active = button.dataset.settingsTab === target;
     button.classList.toggle("active", active);
@@ -6465,7 +6492,50 @@ function switchSettingsTab(tab) {
     panel.classList.toggle("active", active);
     panel.hidden = !active;
   });
-  loadConfig();
+  if (target === "media") loadMediaSettings();
+  else loadConfig();
+}
+
+function renderMediaProviderSettings(settings = {}) {
+  const list = $("mediaProviderSettingsList");
+  if (!list) return;
+  const render = (type, providers) => (providers || []).map((provider) => `<div class="media-provider-row" data-media-provider-type="${type}" data-media-provider-id="${escapeHtml(provider.id)}"><strong>${type === "image" ? "图片" : "视频"} API</strong><input data-provider-field="label" value="${escapeHtml(provider.label || "")}" placeholder="名称" /><input data-provider-field="baseUrl" value="${escapeHtml(provider.baseUrl || "")}" placeholder="Base URL" /><input data-provider-field="model" value="${escapeHtml(provider.model || "")}" placeholder="默认模型（可选）" /><input data-provider-field="apiKey" type="password" placeholder="${provider.hasApiKey ? "已保存 Key；留空不覆盖" : "API Key"}" /><button type="button" data-remove-media-provider>移除</button></div>`).join("");
+  list.innerHTML = `${render("image", settings.imageProviders)}${render("video", settings.videoProviders)}` || `<p class="settings-hint">尚未添加独立 API。使用 APIMart 统一 Key 时无需在这里逐个配置。</p>`;
+}
+
+async function loadMediaSettings() {
+  const data = await api("/api/media/settings");
+  $("mediaApimartBaseUrl").value = data.apimart?.baseUrl || "https://api.apimart.ai/v1";
+  $("mediaApimartApiKey").value = "";
+  $("mediaApimartSavedBadge").textContent = data.apimart?.hasApiKey ? "已保存 APIMart API Key" : "未保存 API Key";
+  renderMediaProviderSettings(data);
+  $("mediaSettingsState").textContent = "已读取多媒体 API 配置";
+}
+
+function mediaProvidersPayload(type) {
+  return [...document.querySelectorAll(`.media-provider-row[data-media-provider-type="${type}"]`)].map((row, index) => ({
+    id: row.dataset.mediaProviderId || `${type}-${Date.now()}-${index}`,
+    label: row.querySelector('[data-provider-field="label"]')?.value || "",
+    baseUrl: row.querySelector('[data-provider-field="baseUrl"]')?.value || "",
+    model: row.querySelector('[data-provider-field="model"]')?.value || "",
+    apiKey: row.querySelector('[data-provider-field="apiKey"]')?.value || "",
+  }));
+}
+
+async function saveMediaSettings() {
+  const stateNode = $("mediaSettingsState");
+  stateNode.textContent = "保存中…";
+  try {
+    const result = await api("/api/media/settings", { method: "POST", body: JSON.stringify({
+      apimart: { baseUrl: $("mediaApimartBaseUrl").value, apiKey: $("mediaApimartApiKey").value },
+      imageProviders: mediaProvidersPayload("image"),
+      videoProviders: mediaProvidersPayload("video"),
+    }) });
+    $("mediaApimartApiKey").value = "";
+    $("mediaApimartSavedBadge").textContent = result.apimart?.hasApiKey ? "已保存 APIMart API Key" : "未保存 API Key";
+    renderMediaProviderSettings(result);
+    stateNode.textContent = "多媒体 API 配置已保存。";
+  } catch (error) { stateNode.textContent = error.message; }
 }
 
 async function loadConfig() {
@@ -7371,7 +7441,7 @@ function bindEvents() {
   $("workbench").addEventListener("click", (event) => {
     if (event.target === $("workbench")) closeWorkbench();
   });
-  $("openSettings").addEventListener("click", () => openSettings("deepseek"));
+  $("openSettings").addEventListener("click", () => openSettings(state.appMode === "canvas" ? "media" : "deepseek"));
   $("openTrash").addEventListener("click", openTrash);
   $("openArchiveView").addEventListener("click", openArchiveView);
   $("closeCanvasArchivePage").addEventListener("click", closeCanvasArchivePage);
@@ -7402,6 +7472,18 @@ function bindEvents() {
   $("closeSettings").addEventListener("click", closeSettings);
   $("saveConfig").addEventListener("click", saveConfig);
   $("testApi").addEventListener("click", testApi);
+  $("saveMediaSettings")?.addEventListener("click", saveMediaSettings);
+  $("addImageProvider")?.addEventListener("click", () => {
+    const list = $("mediaProviderSettingsList");
+    list.insertAdjacentHTML("beforeend", `<div class="media-provider-row" data-media-provider-type="image" data-media-provider-id="image-${Date.now()}"><strong>图片 API</strong><input data-provider-field="label" placeholder="名称" /><input data-provider-field="baseUrl" placeholder="Base URL" /><input data-provider-field="model" placeholder="默认模型（可选）" /><input data-provider-field="apiKey" type="password" placeholder="API Key" /><button type="button" data-remove-media-provider>移除</button></div>`);
+  });
+  $("addVideoProvider")?.addEventListener("click", () => {
+    const list = $("mediaProviderSettingsList");
+    list.insertAdjacentHTML("beforeend", `<div class="media-provider-row" data-media-provider-type="video" data-media-provider-id="video-${Date.now()}"><strong>视频 API</strong><input data-provider-field="label" placeholder="名称" /><input data-provider-field="baseUrl" placeholder="Base URL" /><input data-provider-field="model" placeholder="默认模型（可选）" /><input data-provider-field="apiKey" type="password" placeholder="API Key" /><button type="button" data-remove-media-provider>移除</button></div>`);
+  });
+  $("mediaProviderSettingsList")?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-remove-media-provider]")) event.target.closest(".media-provider-row")?.remove();
+  });
   document.querySelectorAll("[data-compose-mode]").forEach((button) => {
     button.addEventListener("click", () => setComposeMode(button.dataset.composeMode));
   });
@@ -7518,6 +7600,21 @@ function bindEvents() {
     }
   });
 }
+
+window.MbhCanvasApp = {
+  state,
+  api,
+  loadCanvases,
+  loadCanvas,
+  newCanvas,
+  addNodeToCanvas,
+  saveCurrentCanvas,
+  renderCanvas,
+  focusCanvasNodeToViewport,
+  fitCanvasToContent,
+  openSettings,
+  escapeHtml,
+};
 
 async function init() {
   loadTheme();

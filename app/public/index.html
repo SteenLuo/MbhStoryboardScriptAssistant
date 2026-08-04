@@ -6,6 +6,7 @@
     <title>猫主子漫剧剧本分镜小助手</title>
     <link rel="stylesheet" href="/styles.css?v=1.0.1-storyboard-split-fix" />
     <link rel="stylesheet" href="/assets/canvas-flow.css?v=20260804-react-flow-v2" />
+    <link rel="stylesheet" href="/assets/canvas-v2.css?v=20260804-v2" />
   </head>
   <body>
     <div class="app-shell">
@@ -145,6 +146,7 @@
           <div id="canvasSelectionBox" class="canvas-selection-box" hidden></div>
           <div id="canvasReactRoot" class="canvas-react-root" hidden></div>
         </section>
+
         <div id="canvasGroupBar" class="canvas-group-bar" hidden>
           <span id="canvasGroupCount">已选 0 个</span>
           <label>
@@ -218,6 +220,23 @@
           </div>
 
           <p id="configState">未读取配置</p>
+        </section>
+
+        <section id="settingsPanelMedia" class="settings-tab-panel" aria-labelledby="settingsTitle" data-settings-panel="media" hidden>
+          <h3>画布多媒体模型</h3>
+          <p class="settings-hint">文字模型仍在原设置页；图片、视频、音频节点在画布内选择模型与参数。本页只保存 API 接入。</p>
+          <label>APIMart Base URL</label>
+          <input id="mediaApimartBaseUrl" value="https://api.apimart.ai/v1" />
+          <label>APIMart API Key</label>
+          <div id="mediaApimartSavedBadge" class="saved-badge">未保存 API Key</div>
+          <input id="mediaApimartApiKey" type="password" autocomplete="off" placeholder="已保存时可留空；明日填入后统一模型可用" />
+          <div class="settings-actions"><button id="saveMediaSettings" type="button">保存多媒体配置</button></div>
+          <section class="media-provider-settings">
+            <h4>单独图片 / 视频 API</h4><p>可增加多个供应商；节点内可切换使用。Key 保存后不会回显。</p>
+            <div id="mediaProviderSettingsList"></div>
+            <div class="settings-actions"><button id="addImageProvider" type="button">添加图片 API</button><button id="addVideoProvider" type="button">添加视频 API</button></div>
+          </section>
+          <p id="mediaSettingsState">未读取多媒体配置</p>
         </section>
 
       </div>
@@ -518,6 +537,7 @@
     <script src="/compose-validation.js?v=20260611-compose-validation-v1"></script>
     <script src="/project-tree.js?v=20260627-canvas-icons-paws-v1"></script>
     <script src="/assets/canvas-flow.js?v=20260804-react-flow-v2"></script>
-    <script src="/app.js?v=1.0.4-react-flow-canvas"></script>
+    <script src="/app.js?v=20260804-v2"></script>
+    <script src="/assets/canvas-v2.js?v=20260804-v2"></script>
   </body>
 </html>

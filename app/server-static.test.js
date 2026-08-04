@@ -143,6 +143,16 @@ test("local static assets disable browser caching for iterative fixes", () => {
   assert.doesNotMatch(staticSource, /sendText\(res,\s*200/);
 });
 
+test("multimedia canvas API keeps model capabilities and a no-key preflight boundary", () => {
+  const taskSource = extractFunction("submitMediaTask");
+  assert.match(serverSource, /\/api\/media\/models/);
+  assert.match(serverSource, /\/api\/media\/settings/);
+  assert.match(serverSource, /\/api\/media\/tasks/);
+  assert.match(taskSource, /MEDIA_PROVIDER_NOT_CONFIGURED/);
+  assert.match(taskSource, /referenceSnapshot/);
+  assert.match(taskSource, /Authorization: `Bearer \$\{provider\.apiKey\}`/);
+});
+
 test("status endpoint exposes install identity for launcher checks", () => {
   const statusIndex = serverSource.indexOf('url.pathname === "/api/status"');
   assert.notEqual(statusIndex, -1, "status route should exist");

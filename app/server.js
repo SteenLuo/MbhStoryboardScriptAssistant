@@ -42,6 +42,18 @@ const {
 const { recordArchiveLearningEvidence } = require("./lib/learningEvidence");
 const { analyzeCanvasArchiveReadiness } = require("./lib/canvasArchive");
 const { applyStoryboardHardRuleValidation, isStoryboardValidationResolved, validateStoryboardContent } = require("./lib/storyboardValidation");
+const {
+  assetPack,
+  findMediaModel,
+  importAssetPack,
+  mediaModelCatalog,
+  normalizeAsset,
+  normalizeAssets,
+  normalizeMediaSettings,
+  normalizeMediaNodeConfig,
+  publicMediaSettings,
+  updateMediaSettings,
+} = require("./lib/mediaStudio");
 
 const ROOT = path.resolve(__dirname, "..");
 const ACCEPTANCE_ROOT = process.env.MBH_ACCEPTANCE_ROOT ? path.resolve(process.env.MBH_ACCEPTANCE_ROOT) : "";
@@ -54,6 +66,8 @@ const DATA_DIR = path.join(BUSINESS_ROOT, "app", "data");
 const CONVERSATIONS_DIR = path.join(DATA_DIR, "conversations");
 const CANVASES_DIR = path.join(DATA_DIR, "canvases");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
+const ASSETS_FILE = path.join(DATA_DIR, "assets.json");
+const MEDIA_SETTINGS_FILE = path.join(DATA_DIR, "media-model-settings.json");
 const DEEPSEEK_CONFIG = path.join(CONFIG_DIR, "deepseek.local.json");
 const APP_CONFIG = path.join(CONFIG_DIR, "app.local.json");
 const PORT = Number(process.env.MBH_WEB_PORT || 17877);
@@ -299,6 +313,192 @@ async function writeAppSettings(body) {
   const next = normalizeAppSettings({ appName: body.appName });
   await fsp.writeFile(APP_CONFIG, JSON.stringify(next, null, 2), "utf8");
   return next;
+}
+
+async function readAssets() {
+  await ensureConversationDirs();
+  if (!fs.existsSync(ASSETS_FILE)) return [];
+  try {
+    return normalizeAssets(await readJsonFile(ASSETS_FILE));
+  } catch {
+    return [];
+  }
+}
+
+async function writeAssets(assets) {
+  await ensureConversationDirs();
+  const next = normalizeAssets(assets);
+  await fsp.writeFile(ASSETS_FILE, JSON.stringify({ assets: next }, null, 2), "utf8");
+  return next;
+}
+
+async function listAssets(options = {}) {
+  const canvasId = String(options.canvasId || "");
+  const assets = await readAssets();
+  return assets.filter((asset) => asset.scope === "global" || (canvasId && asset.scope === "project" && asset.canvasId === canvasId));
+}
+
+async function saveAssetRecord(input = {}) {
+  const assets = await readAssets();
+  const normalized = normalizeAsset(input);
+  const index = assets.findIndex((asset) => asset.id === normalized.id);
+  const next = index >= 0
+    ? assets.map((asset, assetIndex) => assetIndex === index ? { ...normalized, createdAt: asset.createdAt, updatedAt: new Date().toISOString() } : asset)
+    : [...assets, normalized];
+  await writeAssets(next);
+  return next.find((asset) => asset.id === normalized.id);
+}
+
+async function deleteAssetRecord(id) {
+  const assets = await readAssets();
+  const next = assets.filter((asset) => asset.id !== String(id || ""));
+  await writeAssets(next);
+  return { ok: next.length !== assets.length };
+}
+
+async function promoteAssetRecord(id) {
+  const assets = await readAssets();
+  const targetId = String(id || "");
+  const next = assets.map((asset) => asset.id === targetId
+    ? { ...asset, scope: "global", canvasId: "", updatedAt: new Date().toISOString() }
+    : asset);
+  const asset = next.find((item) => item.id === targetId);
+  if (!asset) throw new Error("找不到要提升的项目资产");
+  await writeAssets(next);
+  return asset;
+}
+
+async function exportAssetRecord(id) {
+  const assets = await readAssets();
+  const asset = assets.find((item) => item.id === String(id || ""));
+  if (!asset) throw new Error("找不到要导出的资产");
+  return assetPack(asset);
+}
+
+async function importAssetRecord(body = {}) {
+  const imported = importAssetPack(body.pack || body, {
+    scope: body.scope || body.pack?.asset?.scope,
+    canvasId: body.canvasId || "",
+  });
+  return saveAssetRecord(imported);
+}
+
+async function readMediaSettings() {
+  await ensureConversationDirs();
+  if (!fs.existsSync(MEDIA_SETTINGS_FILE)) return normalizeMediaSettings();
+  try {
+    return normalizeMediaSettings(await readJsonFile(MEDIA_SETTINGS_FILE));
+  } catch {
+    return normalizeMediaSettings();
+  }
+}
+
+async function writeMediaSettings(body = {}) {
+  const current = await readMediaSettings();
+  const next = updateMediaSettings(current, body);
+  await fsp.writeFile(MEDIA_SETTINGS_FILE, JSON.stringify(next, null, 2), "utf8");
+  return publicMediaSettings(next);
+}
+
+function mediaProviderFor(type, providerId, settings) {
+  if (!providerId || providerId === "apimart") return { id: "apimart", label: "APIMart", ...settings.apimart };
+  const providers = type === "image" ? settings.imageProviders : type === "video" ? settings.videoProviders : [];
+  const provider = providers.find((item) => item.id === providerId);
+  if (!provider) {
+    const error = new Error("找不到节点选择的多媒体 API 配置");
+    error.code = "MEDIA_PROVIDER_NOT_FOUND";
+    throw error;
+  }
+  return provider;
+}
+
+function mediaReferenceSnapshot(config, availableAssets) {
+  const selected = new Set(config.referenceAssetIds || []);
+  const max = Number(config.maxReferences || 0) || 20;
+  return availableAssets
+    .filter((asset) => selected.has(asset.id))
+    .flatMap((asset) => asset.elements.map((element) => ({
+      assetId: asset.id,
+      assetTitle: asset.title,
+      elementId: element.id,
+      title: element.title,
+      mediaType: element.mediaType,
+      source: element.source,
+    })))
+    .filter((element) => element.source)
+    .slice(0, max);
+}
+
+function mediaRequestPayload(type, config, references) {
+  const imageReferences = references.filter((item) => item.mediaType === "image").map((item) => item.source);
+  const audioReference = references.find((item) => item.mediaType === "audio")?.source || "";
+  const payload = {
+    model: config.model,
+    prompt: config.prompt,
+    aspect_ratio: config.ratio || undefined,
+    resolution: config.resolution || undefined,
+    n: config.count || undefined,
+    duration: config.duration || undefined,
+    reference_images: imageReferences.length ? imageReferences : undefined,
+    input_images: imageReferences.length ? imageReferences : undefined,
+    reference_audio: audioReference || undefined,
+  };
+  if (type === "audio") return { model: config.model, input: config.prompt, voice: "alloy", response_format: "mp3" };
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined && value !== ""));
+}
+
+async function submitMediaTask(body = {}) {
+  const canvasId = String(body.canvasId || "");
+  const nodeId = String(body.nodeId || "");
+  if (!canvasId || !nodeId) throw new Error("缺少画布或多媒体节点");
+  const sourceCanvas = await getCanvas(canvasId);
+  const sourceNode = (sourceCanvas.nodes || []).find((node) => node.id === nodeId);
+  if (!sourceNode || !["image", "video", "audio"].includes(sourceNode.type)) throw new Error("找不到可生成的图片、视频或音频节点");
+  const config = normalizeMediaNodeConfig(sourceNode.type, sourceNode.meta?.media || {});
+  if (!config.prompt.trim()) {
+    const error = new Error("请先在节点内填写提示词");
+    error.code = "MEDIA_PROMPT_REQUIRED";
+    throw error;
+  }
+  const settings = await readMediaSettings();
+  const provider = mediaProviderFor(sourceNode.type, config.providerId, settings);
+  if (!provider.apiKey) {
+    const error = new Error(provider.id === "apimart" ? "尚未配置 APIMart API Key。可先保存节点配置，明日填入 Key 后再生成。" : `尚未配置 ${provider.label} 的 API Key。`);
+    error.code = "MEDIA_PROVIDER_NOT_CONFIGURED";
+    throw error;
+  }
+  const model = findMediaModel(sourceNode.type, config.model);
+  const references = mediaReferenceSnapshot(config, await listAssets({ canvasId })).slice(0, model.maxReferences || 20);
+  const endpoint = model.endpoint;
+  let upstream;
+  try {
+    const response = await fetch(`${String(provider.baseUrl || "").replace(/\/$/, "")}${endpoint}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${provider.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(mediaRequestPayload(sourceNode.type, config, references)),
+    });
+    const raw = await response.text();
+    try { upstream = JSON.parse(raw); } catch { upstream = { raw }; }
+    if (!response.ok) {
+      const error = new Error(upstream?.error?.message || upstream?.message || `上游生成请求失败（HTTP ${response.status}）`);
+      error.code = "MEDIA_UPSTREAM_REQUEST_FAILED";
+      error.details = { status: response.status };
+      throw error;
+    }
+  } catch (error) {
+    if (error.code) throw error;
+    error.code = "MEDIA_UPSTREAM_UNREACHABLE";
+    throw error;
+  }
+  const taskId = String(upstream?.task_id || upstream?.taskId || upstream?.id || "");
+  await mutateCanvasRecord(canvasId, (latest) => ({
+    ...latest,
+    nodes: latest.nodes.map((node) => node.id !== nodeId ? node : {
+      ...node,
+      meta: { ...(node.meta || {}), media: { ...config, lastTask: { taskId, providerId: provider.id, submittedAt: new Date().toISOString(), status: upstream?.status || "submitted", referenceSnapshot: references } } },
+    }),
+  }));
+  return { ok: true, taskId, status: upstream?.status || "submitted", message: taskId ? "生成任务已提交，结果将以任务状态为准。" : "生成请求已发送；上游未返回任务 ID。" };
 }
 
 async function listRuns() {
@@ -2750,6 +2950,18 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/canvas") {
     return sendJson(res, 200, await getCanvasForClient(url.searchParams.get("id")));
   }
+  if (req.method === "GET" && url.pathname === "/api/assets") {
+    return sendJson(res, 200, { assets: await listAssets({ canvasId: url.searchParams.get("canvasId") }) });
+  }
+  if (req.method === "GET" && url.pathname === "/api/assets/export") {
+    return sendJson(res, 200, await exportAssetRecord(url.searchParams.get("id")));
+  }
+  if (req.method === "GET" && url.pathname === "/api/media/models") {
+    return sendJson(res, 200, { models: mediaModelCatalog() });
+  }
+  if (req.method === "GET" && url.pathname === "/api/media/settings") {
+    return sendJson(res, 200, publicMediaSettings(await readMediaSettings()));
+  }
   if (req.method === "GET" && url.pathname === "/api/conversation-search") {
     return sendJson(res, 200, { results: await searchConversations(url.searchParams.get("q")) });
   }
@@ -2816,6 +3028,24 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/canvas/save") {
     return sendJson(res, 200, await saveCanvasFromClient(body.canvas || body));
+  }
+  if (req.method === "POST" && url.pathname === "/api/assets") {
+    return sendJson(res, 200, { asset: await saveAssetRecord(body.asset || body) });
+  }
+  if (req.method === "POST" && url.pathname === "/api/assets/delete") {
+    return sendJson(res, 200, await deleteAssetRecord(body.id));
+  }
+  if (req.method === "POST" && url.pathname === "/api/assets/promote") {
+    return sendJson(res, 200, { asset: await promoteAssetRecord(body.id) });
+  }
+  if (req.method === "POST" && url.pathname === "/api/assets/import") {
+    return sendJson(res, 200, { asset: await importAssetRecord(body) });
+  }
+  if (req.method === "POST" && url.pathname === "/api/media/settings") {
+    return sendJson(res, 200, await writeMediaSettings(body));
+  }
+  if (req.method === "POST" && url.pathname === "/api/media/tasks") {
+    return sendJson(res, 200, await submitMediaTask(body));
   }
   if (req.method === "POST" && url.pathname === "/api/canvas/archive-check") {
     return sendJson(res, 200, await checkCanvasArchiveReadiness(body));

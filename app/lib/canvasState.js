@@ -1,9 +1,14 @@
-const CANVAS_NODE_TYPES = ["novel", "script", "storyboard", "label"];
+const { MEDIA_NODE_TYPES, normalizeMediaNodeConfig } = require("./mediaStudio");
+
+const CANVAS_NODE_TYPES = ["novel", "script", "storyboard", "label", ...MEDIA_NODE_TYPES];
 const NODE_DEFAULTS = {
   novel: { title: "小说", width: 340, height: 220 },
   script: { title: "剧本", width: 360, height: 240 },
   storyboard: { title: "分镜脚本", width: 360, height: 260 },
   label: { title: "标识", width: 260, height: 140 },
+  image: { title: "图片生成", width: 420, height: 360 },
+  video: { title: "视频生成", width: 440, height: 390 },
+  audio: { title: "音频", width: 380, height: 300 },
 };
 
 function nowIso() {
@@ -97,6 +102,12 @@ function normalizeNode(node = {}, index = 0) {
     height: clampNumber(node.height, defaults.height, 120, 900),
     meta: normalizeNodeMeta(node.meta),
   };
+  if (MEDIA_NODE_TYPES.includes(type)) {
+    normalized.meta = {
+      ...normalized.meta,
+      media: normalizeMediaNodeConfig(type, normalized.meta.media || node.media || {}),
+    };
+  }
   if (isMergedCanvasNode(normalized) && !normalized.content) {
     const primary = normalized.meta.versions.find((version) => version.id === normalized.meta.primaryVersionId);
     normalized.content = primary?.content || primary?.chatResponse || "";
