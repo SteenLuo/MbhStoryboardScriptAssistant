@@ -7620,6 +7620,7 @@ function bindEvents() {
 window.MbhCanvasApp = {
   state,
   api,
+  setAppMode,
   loadCanvases,
   loadCanvas,
   newCanvas,

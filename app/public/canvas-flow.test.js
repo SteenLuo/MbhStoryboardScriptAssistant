@@ -28,6 +28,9 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.doesNotMatch(clientStyles, /canvas-node-plus,[\s\S]*canvas-node-hover-bridge,[\s\S]*display: none/);
   assert.match(canvasV2Styles, /canvas-group-bar \{/);
   assert.doesNotMatch(canvasV2Styles, /canvas-top, body\.canvas-v2-mode #canvasGroupBar/);
+  assert.match(canvasV2Styles, /body\.canvas-v2-mode \.sessions \{ display: block;/);
+  assert.match(canvasV2Styles, /--v2-surface: color-mix/);
+  assert.match(appSource, /window\.MbhCanvasApp = \{[\s\S]*setAppMode,/);
 });
 
 test("React Flow bridge persists a drag only after its stop event", () => {
