@@ -35,7 +35,7 @@
     const left = document.createElement("aside");
     left.id = "canvasV2Left";
     left.className = "canvas-v2-left";
-    left.innerHTML = `<div class="v2-left-head"><button type="button" class="v2-project-back" data-v2-back-home title="返回项目">‹</button><div><strong id="v2CanvasTitle">画布</strong><span id="v2CanvasMeta">0 个元素</span></div></div><div class="v2-tabs"><button type="button" data-v2-tab="nodes" class="active">画布</button><button type="button" data-v2-tab="assets">资产</button></div><div id="v2LeftContent" class="v2-left-content"></div><button id="canvasV2ToggleLeft" type="button" class="v2-left-collapse" title="收起画布侧栏">‹</button>`;
+    left.innerHTML = `<div class="v2-left-head"><button type="button" class="v2-project-back" data-v2-back-home title="返回项目">‹</button><div><strong id="v2CanvasTitle">画布</strong><span id="v2CanvasMeta">0 个元素</span></div></div><div class="v2-tabs"><button type="button" data-v2-tab="nodes" class="active">画布</button><button type="button" data-v2-tab="assets">资产</button></div><div id="v2LeftContent" class="v2-left-content"></div><footer class="v2-left-footer"><button id="canvasV2ToggleLeft" type="button" class="v2-left-collapse" title="收起画布侧栏">‹</button><span id="v2CanvasNodeCount">共 0 节点</span></footer>`;
     const utility = document.createElement("div");
     utility.id = "canvasV2UtilityDock";
     utility.className = "canvas-v2-utility-dock";
@@ -111,6 +111,7 @@
     if (!active) return;
     $("v2CanvasTitle").textContent = active.title || "未命名项目";
     $("v2CanvasMeta").textContent = `${currentNodes().length} 个元素`;
+    $("v2CanvasNodeCount").textContent = `共 ${currentNodes().length} 节点`;
     renderLeft();
     renderAddPalette();
   }
@@ -124,7 +125,7 @@
       return;
     }
     const nodes = currentNodes();
-    target.innerHTML = nodes.length ? `<div class="v2-node-toolbar"><span>画布元素</span><small>共 ${nodes.length} 节点</small></div><div class="v2-node-list">${nodes.map((node) => `<button type="button" data-v2-focus-node="${esc(node.id)}"><span class="v2-node-dot ${esc(node.type)}"></span><span><strong>${esc(node.title || "未命名元素")}</strong><small>${esc(node.type === "label" ? "备注" : ({ novel: "小说", script: "剧本", storyboard: "分镜脚本", image: "图片", video: "视频", audio: "音频" }[node.type] || "元素"))}</small></span><i>⌖</i></button>`).join("")}</div>` : `<div class="v2-empty"><b>画布还是空的</b><span>从底部“添加”放入文本、图片、视频或音频元素。</span></div>`;
+    target.innerHTML = nodes.length ? `<div class="v2-node-toolbar"><span>画布元素</span></div><div class="v2-node-list">${nodes.map((node) => `<button type="button" data-v2-focus-node="${esc(node.id)}"><span class="v2-node-dot ${esc(node.type)}"></span><span><strong>${esc(node.title || "未命名元素")}</strong><small>${esc(node.type === "label" ? "备注" : ({ novel: "小说", script: "剧本", storyboard: "分镜脚本", image: "图片", video: "视频", audio: "音频" }[node.type] || "元素"))}</small></span><i>⌖</i></button>`).join("")}</div>` : `<div class="v2-empty"><b>画布还是空的</b><span>从底部“添加”放入文本、图片、视频或音频元素。</span></div>`;
   }
 
   function renderAssets() {
