@@ -8,12 +8,14 @@
   border: 0;
   background: transparent;
   box-shadow: none;
+  overflow: visible;
 }
 
 .mbh-react-flow .mbh-flow-node-host,
 .mbh-react-flow .canvas-node {
   width: 100%;
   height: 100%;
+  overflow: visible;
 }
 
 .mbh-react-flow .mbh-flow-handle {
@@ -30,8 +32,6 @@
   opacity: 1;
 }
 
-.mbh-react-flow .canvas-node-plus,
-.mbh-react-flow .canvas-node-hover-bridge,
 .mbh-react-flow .canvas-resize {
   display: none !important;
 }
@@ -43,9 +43,21 @@
   transform: none !important;
 }
 
+/* The canvas-plus action menu predates React Flow. It is deliberately kept:
+   the React Flow handles still own drag-to-connect, while each + opens the
+   existing node action menu. */
+.mbh-react-flow .react-flow__node.selected .canvas-node-plus,
+.mbh-react-flow .react-flow__node:hover .canvas-node-plus {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) scale(1);
+}
+
 .mbh-react-flow .react-flow__edge-path {
-  stroke: color-mix(in srgb, var(--accent) 68%, var(--ink));
-  stroke-width: 2;
+  stroke: color-mix(in srgb, var(--accent) 46%, var(--muted));
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  filter: drop-shadow(0 1px 1px color-mix(in srgb, #000 18%, transparent));
 }
 
 .mbh-react-flow .react-flow__edge.selected .react-flow__edge-path {

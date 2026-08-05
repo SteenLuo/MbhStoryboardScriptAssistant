@@ -67,7 +67,10 @@ function canvasEdgeToFlowEdge(edge, bridge) {
     sourceHandle: edge.fromSide || "right",
     targetHandle: edge.toSide || "left",
     label: edge.label || "",
-    type: "smoothstep",
+    // Preserve the original canvas' soft cubic connection language. The
+    // orthogonal smoothstep route reads like a CAD diagram and obscures dense
+    // story relationships when multiple edges leave the same node.
+    type: "bezier",
     animated: false,
     selectable: true,
     data: { bridge },
@@ -165,8 +168,11 @@ function CanvasSurface({ bridge }) {
       minZoom={0.25}
       maxZoom={4}
       onlyRenderVisibleElements
-      panOnDrag
-      selectionOnDrag={false}
+      // Dragging blank space with the primary button draws a selection box,
+      // matching the previous canvas. Viewport panning stays on middle/right
+      // mouse buttons so multi-select and grouping remain discoverable.
+      panOnDrag={[1, 2]}
+      selectionOnDrag
       selectionKeyCode="Shift"
       selectionMode="partial"
       nodesDraggable={!bridge.isReadOnly()}
