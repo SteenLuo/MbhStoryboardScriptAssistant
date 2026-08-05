@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
 const learningLibrarySource = fs.readFileSync(path.join(__dirname, "lib", "learningLibrary.js"), "utf8");
+const canvasClientSource = fs.readFileSync(path.join(__dirname, "public", "app.js"), "utf8");
 
 function extractFunction(name) {
   const asyncMarker = `async function ${name}`;
@@ -154,6 +155,13 @@ test("multimedia canvas API keeps model capabilities and a no-key preflight boun
   assert.match(taskSource, /referenceSnapshot/);
   assert.match(taskSource, /Authorization: `Bearer \$\{provider\.apiKey\}`/);
   assert.match(statusSource, /\/tasks\/\$\{encodeURIComponent\(config\.lastTask\.taskId\)\}/);
+});
+
+test("React Flow canvas resets legacy scrolling instead of leaving the viewport offscreen", () => {
+  const canvasV2Css = fs.readFileSync(path.join(__dirname, "public", "assets", "canvas-v2.css"), "utf8");
+  assert.match(canvasClientSource, /function renderReactFlowCanvas\(\)[\s\S]*stage\.scrollLeft = 0/);
+  assert.match(canvasClientSource, /function renderReactFlowCanvas\(\)[\s\S]*stage\.scrollTop = 0/);
+  assert.match(canvasV2Css, /canvas-stage[^\{]*\{[^}]*overflow: hidden/);
 });
 
 test("status endpoint exposes install identity for launcher checks", () => {

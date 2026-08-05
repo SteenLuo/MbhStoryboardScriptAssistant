@@ -3615,7 +3615,15 @@ function createCanvasFlowBridge() {
 
 function renderReactFlowCanvas() {
   const root = $("canvasReactRoot");
+  const stage = $("canvasStage");
   if (!root) return;
+  // React Flow owns viewport movement through its transform. The legacy canvas
+  // uses canvasStage scrolling, so an old scroll offset would move the complete
+  // React Flow root outside the viewport and leave an apparently blank canvas.
+  if (stage && (stage.scrollLeft || stage.scrollTop)) {
+    stage.scrollLeft = 0;
+    stage.scrollTop = 0;
+  }
   root.hidden = false;
   $("canvasNodes").hidden = true;
   $("canvasEdges").hidden = true;
