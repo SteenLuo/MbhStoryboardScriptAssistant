@@ -44,7 +44,7 @@
     const dock = document.createElement("div");
     dock.id = "canvasV2Dock";
     dock.className = "canvas-v2-dock";
-    dock.innerHTML = `<div class="v2-add-wrap"><button type="button" data-v2-toggle-add>＋ 添加</button><div id="v2AddPalette" class="v2-add-palette" hidden></div></div><span></span><button type="button" data-v2-open-assets>▦ 资产库</button><button type="button" data-v2-media-settings title="图片和视频 API 配置">⚙ 模型 API</button>`;
+    dock.innerHTML = `<div class="v2-add-wrap"><button type="button" class="v2-dock-icon" data-v2-toggle-add aria-label="添加画布元素" title="添加画布元素">＋</button><div id="v2AddPalette" class="v2-add-palette" hidden></div></div><span></span><button type="button" class="v2-dock-icon" data-v2-open-assets aria-label="资产库" title="资产库">▦</button><button type="button" class="v2-dock-icon" data-v2-media-settings aria-label="模型 API 配置" title="模型 API 配置">⚙</button>`;
     const inspector = document.createElement("aside");
     inspector.id = "canvasMediaInspector";
     inspector.className = "canvas-media-inspector";
@@ -133,8 +133,12 @@
   function renderAssets() {
     const list = $("v2AssetList");
     if (!list) return;
-    if (!assets.length) { list.innerHTML = `<div class="v2-empty"><b>尚未建立资产</b><span>人物、物品、场景都可保存多张参考图、声音或细节图。</span></div>`; return; }
-    list.innerHTML = assets.map((asset) => `<article class="v2-asset-card"><div><span class="asset-kind ${esc(asset.kind)}">${({ person: "人物", item: "物品", scene: "场景" })[asset.kind] || "资产"}</span><span class="asset-scope">${asset.scope === "global" ? "全局" : "项目"}</span></div><strong>${esc(asset.title)}</strong><small>${asset.elements.length} 个元素</small><div class="v2-asset-actions"><button type="button" data-v2-edit-asset="${esc(asset.id)}">编辑</button><button type="button" data-v2-export-asset="${esc(asset.id)}">导出</button>${asset.scope === "project" ? `<button type="button" data-v2-promote-asset="${esc(asset.id)}">提升全局</button>` : ""}</div></article>`).join("");
+    const kinds = [{ id: "person", label: "角色", icon: "♙", hint: "人物三视图、表情与声音参考" }, { id: "item", label: "物品", icon: "◇", hint: "三视图、局部与材质细节" }, { id: "scene", label: "场景", icon: "⌂", hint: "俯视图、3D 效果与场景参考" }];
+    const card = (asset) => `<article class="v2-asset-card"><div><span class="asset-scope">${asset.scope === "global" ? "全局" : "项目"}</span></div><strong>${esc(asset.title)}</strong><small>${asset.elements.length} 个元素</small><div class="v2-asset-actions"><button type="button" data-v2-edit-asset="${esc(asset.id)}">编辑</button><button type="button" data-v2-export-asset="${esc(asset.id)}">导出</button>${asset.scope === "project" ? `<button type="button" data-v2-promote-asset="${esc(asset.id)}">提升全局</button>` : ""}</div></article>`;
+    list.innerHTML = kinds.map((kind) => {
+      const entries = assets.filter((asset) => asset.kind === kind.id);
+      return `<section class="v2-asset-group"><header><span>${kind.icon}</span><strong>${kind.label}</strong><small>${entries.length}</small></header>${entries.length ? entries.map(card).join("") : `<p class="v2-asset-empty">${kind.hint}</p>`}</section>`;
+    }).join("");
   }
 
   function renderAddPalette() {
