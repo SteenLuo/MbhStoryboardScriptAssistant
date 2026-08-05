@@ -58,6 +58,8 @@
     if (!document.body.classList.contains("canvas-v2-mode")) return;
     $("canvasProjectHome").hidden = false;
     $("canvasStage").hidden = true;
+    document.querySelector(".canvas-view-tools").hidden = true;
+    $("canvasMiniMap").hidden = true;
     $("canvasV2Left").hidden = true;
     $("canvasV2Dock").hidden = true;
     $("canvasMediaInspector").hidden = true;
@@ -68,6 +70,7 @@
     ensureChrome();
     $("canvasProjectHome").hidden = true;
     $("canvasStage").hidden = false;
+    document.querySelector(".canvas-view-tools").hidden = false;
     $("canvasV2Left").hidden = false;
     $("canvasV2Dock").hidden = false;
     renderWorkspace();
