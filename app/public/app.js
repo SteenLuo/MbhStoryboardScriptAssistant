@@ -3547,6 +3547,51 @@ async function addAssetToCanvas(asset) {
   return imported;
 }
 
+async function addGeneratedMediaToCanvas(media) {
+  if (!state.currentCanvas || canvasIsArchived()) return null;
+  const safeMedia = media && typeof media === "object" ? media : null;
+  const type = ["image", "video", "audio"].includes(safeMedia?.mediaType) ? safeMedia.mediaType : "";
+  const source = String(safeMedia?.source || "").trim();
+  if (!type || !source) {
+    canvasStatus("这条生成历史没有可添加的媒体结果");
+    return null;
+  }
+  const existing = state.currentCanvas.nodes || [];
+  const node = {
+    id: `history-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    type,
+    title: uniqueCanvasNodeTitle(safeMedia.title || `历史${canvasTypeLabels[type] || "媒体"}`),
+    content: safeMedia.prompt || "",
+    x: 180 + (existing.length % 4) * 110,
+    y: 180 + (existing.length % 3) * 84,
+    width: type === "video" ? 440 : type === "audio" ? 380 : 420,
+    height: type === "video" ? 390 : type === "audio" ? 300 : 360,
+    meta: {
+      generationHistorySnapshot: {
+        canvasId: safeMedia.canvasId || "",
+        canvasTitle: safeMedia.canvasTitle || "",
+        nodeId: safeMedia.nodeId || "",
+        nodeTitle: safeMedia.nodeTitle || "",
+        selectedAt: new Date().toISOString(),
+      },
+      media: {
+        model: safeMedia.model || "生成历史",
+        prompt: safeMedia.prompt || "",
+        outputUrls: [source],
+        mode: "generation-history",
+      },
+    },
+  };
+  state.currentCanvas.nodes = [...existing, node];
+  state.selectedCanvasNodeId = node.id;
+  state.selectedCanvasNodeIds = new Set([node.id]);
+  state.selectedCanvasEdgeId = "";
+  await saveCurrentCanvas();
+  renderCanvas();
+  canvasStatus(`已从生成历史添加「${node.title}」`);
+  return node;
+}
+
 function renderCanvas() {
   const canvas = state.currentCanvas;
   const layer = $("canvasNodes");
@@ -7734,6 +7779,7 @@ window.MbhCanvasApp = {
   newCanvas,
   addNodeToCanvas,
   addAssetToCanvas,
+  addGeneratedMediaToCanvas,
   saveCurrentCanvas,
   renderCanvas,
   focusCanvasNodeToViewport,

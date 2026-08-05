@@ -780,6 +780,39 @@ async function listCanvases(options = {}) {
   return canvases;
 }
 
+async function listMediaHistory() {
+  await ensureConversationDirs();
+  const entries = await fsp.readdir(CANVASES_DIR, { withFileTypes: true });
+  const history = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    try {
+      const canvas = normalizeCanvas(await readJsonFile(path.join(CANVASES_DIR, entry.name)));
+      if (canvas.deletedAt) continue;
+      for (const node of canvas.nodes || []) {
+        if (!["image", "video", "audio"].includes(node.type)) continue;
+        const media = node.meta?.media || {};
+        const outputUrls = Array.isArray(media.outputUrls) ? media.outputUrls.filter(Boolean) : [];
+        outputUrls.forEach((source, index) => history.push({
+          id: `${canvas.id}:${node.id}:${index}`,
+          canvasId: canvas.id,
+          canvasTitle: canvas.title,
+          nodeId: node.id,
+          nodeTitle: node.title || `${node.type} 节点`,
+          mediaType: node.type,
+          source,
+          model: media.model || "生成历史",
+          prompt: media.prompt || node.content || "",
+          createdAt: media.lastTask?.submittedAt || media.lastTask?.checkedAt || canvas.updatedAt || "",
+        }));
+      }
+    } catch {
+      continue;
+    }
+  }
+  return history.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 200);
+}
+
 async function buildCanvasArchiveCheck(canvas) {
   const storyboardValidationOptions = await currentStoryboardValidationOptions();
   const readiness = analyzeCanvasArchiveReadiness(canvas);
@@ -3103,6 +3136,9 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/media/settings") {
     return sendJson(res, 200, await writeMediaSettings(body));
+  }
+  if (req.method === "GET" && url.pathname === "/api/media/history") {
+    return sendJson(res, 200, { items: await listMediaHistory() });
   }
   if (req.method === "POST" && url.pathname === "/api/media/tasks") {
     return sendJson(res, 200, await submitMediaTask(body));

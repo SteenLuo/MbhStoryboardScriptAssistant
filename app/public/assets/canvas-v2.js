@@ -4,6 +4,7 @@
   const mediaTypes = new Set(["image", "video", "audio"]);
   let catalog = null;
   let assets = [];
+  let generatedHistory = [];
   let activeTab = "nodes";
   let activeAssetKind = "";
 
@@ -58,9 +59,13 @@
     assetLibrary.id = "canvasAssetLibrary";
     assetLibrary.className = "canvas-asset-library";
     assetLibrary.hidden = true;
+    const historyLibrary = document.createElement("section");
+    historyLibrary.id = "canvasGeneratedHistory";
+    historyLibrary.className = "canvas-asset-library canvas-generated-history";
+    historyLibrary.hidden = true;
     const viewTools = document.querySelector(".canvas-view-tools");
     if (viewTools) utility.append(viewTools);
-    shell.append(home, left, utility, dock, inspector, assetEditor, assetLibrary);
+    shell.append(home, left, utility, dock, inspector, assetEditor, assetLibrary, historyLibrary);
     shell.addEventListener("click", handleClick);
   }
 
@@ -91,6 +96,7 @@
     $("canvasV2Dock").hidden = true;
     $("canvasMediaInspector").hidden = true;
     $("canvasAssetLibrary").hidden = true;
+    $("canvasGeneratedHistory").hidden = true;
     renderProjects();
   }
 
@@ -157,7 +163,7 @@
     const palette = $("v2AddPalette");
     if (!palette) return;
     const entries = [["novel", "小说", "☰"], ["script", "剧本", "▤"], ["storyboard", "分镜脚本", "▦"], ["label", "备注", "◇"], ["image", "图片", "▧"], ["video", "视频", "▷"], ["audio", "音频", "♪"]];
-    palette.innerHTML = `<h4>添加节点</h4>${entries.map(([type, label, icon]) => `<button type="button" data-v2-add-node="${type}"><b>${icon}</b><span>${label}</span></button>`).join("")}<div class="v2-palette-divider"></div><h4>添加资源</h4><button type="button" data-v2-open-assets-manager><b>▦</b><span>资产管理</span></button>`;
+    palette.innerHTML = `<h4>添加节点</h4>${entries.map(([type, label, icon]) => `<button type="button" data-v2-add-node="${type}"><b>${icon}</b><span>${label}</span></button>`).join("")}<div class="v2-palette-divider"></div><h4>添加资源</h4><button type="button" data-v2-create-asset><b>＋</b><span>新建资产</span></button><button type="button" data-v2-open-generated-history><b>◷</b><span>从生成历史选择</span></button>`;
   }
 
   function interactionIcon(mode) {
@@ -206,6 +212,35 @@
     }
     const previews = (selected.elements || []).slice(0, 4);
     panel.innerHTML = `<div class="v2-library-modal"><header><h2>${definition.label}资产库</h2><button type="button" data-v2-close-asset-library aria-label="关闭">×</button></header><section class="v2-library-feature"><div class="v2-library-feature-title"><strong>${esc(selected.title)}</strong><span>${esc(selected.scope === "global" ? "全局资产" : "项目资产")}</span></div><div class="v2-library-preview-grid">${previews.length ? previews.map((element) => `<figure>${assetElementPreview(element)}<figcaption>${esc(element.title || "参考元素")}</figcaption></figure>`).join("") : `<div class="v2-library-preview-empty">暂无可预览元素</div>`}</div><p>${esc(selected.description || definition.hint)}</p><button type="button" class="v2-library-apply" data-v2-apply-library-asset="${esc(selected.id)}">＋ 应用至画布</button></section><section class="v2-library-list"><div><strong>${definition.label}选择</strong><small>${items.length} 个资产</small></div><div class="v2-library-cards">${items.map((asset) => { const cover = (asset.elements || []).find((element) => element.mediaType === "image" && element.source) || asset.elements?.[0]; return `<button type="button" class="${asset.id === selected.id ? "active" : ""}" data-v2-select-library-asset="${esc(asset.id)}">${cover ? assetElementPreview(cover) : `<span class="v2-library-media-icon">${definition.icon}</span>`}<span>${esc(asset.title)}</span></button>`; }).join("")}</div></section></div>`;
+  }
+
+  function generatedHistoryPreview(item) {
+    if (item.mediaType === "image") return `<img src="${esc(item.source)}" alt="${esc(item.nodeTitle || "生成图片")}" />`;
+    if (item.mediaType === "video") return `<video src="${esc(item.source)}" muted preload="metadata"></video>`;
+    return `<span class="v2-library-media-icon">${item.mediaType === "audio" ? "♪" : "▧"}</span>`;
+  }
+
+  async function openGeneratedHistory() {
+    ensureChrome();
+    const panel = $("canvasGeneratedHistory");
+    panel.hidden = false;
+    const result = await app().api("/api/media/history");
+    generatedHistory = result.items || [];
+    panel.dataset.historyId = generatedHistory[0]?.id || "";
+    renderGeneratedHistory();
+  }
+
+  function renderGeneratedHistory() {
+    const panel = $("canvasGeneratedHistory");
+    if (!panel || panel.hidden) return;
+    const selected = generatedHistory.find((item) => item.id === panel.dataset.historyId) || generatedHistory[0];
+    panel.dataset.historyId = selected?.id || "";
+    if (!selected) {
+      panel.innerHTML = `<div class="v2-library-modal"><header><h2>从生成历史选择</h2><button type="button" data-v2-close-generated-history aria-label="关闭">×</button></header><div class="v2-library-empty"><b>还没有可用的生成结果</b><p>图片、视频和音频生成完成后，会在这里供你重新放入任意画布。</p></div></div>`;
+      return;
+    }
+    const typeLabel = { image: "图片", video: "视频", audio: "音频" }[selected.mediaType] || "媒体";
+    panel.innerHTML = `<div class="v2-library-modal"><header><h2>从生成历史选择</h2><button type="button" data-v2-close-generated-history aria-label="关闭">×</button></header><section class="v2-library-feature"><div class="v2-library-feature-title"><strong>${esc(selected.nodeTitle || `历史${typeLabel}`)}</strong><span>${typeLabel}</span></div><div class="v2-history-preview">${generatedHistoryPreview(selected)}</div><p>${esc(selected.prompt || `${selected.canvasTitle || "画布"}中的生成结果`)}</p><button type="button" class="v2-library-apply" data-v2-add-history="${esc(selected.id)}">＋ 添加到当前画布</button></section><section class="v2-library-list"><div><strong>生成历史</strong><small>${generatedHistory.length} 个结果</small></div><div class="v2-library-cards">${generatedHistory.map((item) => `<button type="button" class="${item.id === selected.id ? "active" : ""}" data-v2-select-history="${esc(item.id)}">${generatedHistoryPreview(item)}<span>${esc(item.nodeTitle || "未命名结果")}</span></button>`).join("")}</div></section></div>`;
   }
 
   function modelFor(node, id) { return (catalog?.models?.[node.type] || []).find((model) => model.id === id) || catalog?.models?.[node.type]?.[0]; }
@@ -287,19 +322,32 @@
     if (target.matches("[data-v2-set-interaction]")) { app()?.setCanvasInteractionMode?.(target.dataset.v2SetInteraction); $("v2InteractionPalette").hidden = true; renderInteractionPalette(); return; }
     if (target.matches("[data-v2-add-node]")) { $("v2AddPalette").hidden = true; await app().addNodeToCanvas(target.dataset.v2AddNode); renderWorkspace(); if (mediaTypes.has(target.dataset.v2AddNode)) { const last = currentNodes().at(-1); openMediaInspector(last?.id); } return; }
     if (target.matches("[data-v2-open-assets-kind]")) { await openAssetLibrary(target.dataset.v2OpenAssetsKind); return; }
-    if (target.matches("[data-v2-open-assets-manager]")) { $("canvasAssetLibrary").hidden = true; activeAssetKind = ""; setActiveTab("assets"); $("canvasV2Left").hidden = false; setLeftCollapsed(false); renderLeft(); return; }
+    if (target.matches("[data-v2-open-assets-manager]")) {
+      $("canvasAssetLibrary").hidden = true;
+      $("canvasGeneratedHistory").hidden = true;
+      activeAssetKind = "";
+      setActiveTab("assets");
+      $("canvasV2Left").hidden = false;
+      setLeftCollapsed(false);
+      renderLeft();
+      return;
+    }
+    if (target.matches("[data-v2-open-generated-history]")) { $("v2AddPalette").hidden = true; await openGeneratedHistory(); return; }
     if (target.matches("[data-v2-expand-left]")) { setLeftCollapsed(false); renderLeft(); return; }
     if (target.matches("[data-v2-media-settings]")) { app().openSettings("media"); return; }
     if (target.matches("#canvasV2ToggleLeft")) { setLeftCollapsed(!$("canvasV2Left").classList.contains("collapsed")); return; }
     if (target.matches("[data-v2-close-inspector]")) { $("canvasMediaInspector").hidden = true; return; }
     if (target.matches("[data-v2-close-asset-editor]")) { $("canvasAssetEditor").hidden = true; return; }
     if (target.matches("[data-v2-close-asset-library]")) { $("canvasAssetLibrary").hidden = true; return; }
+    if (target.matches("[data-v2-close-generated-history]")) { $("canvasGeneratedHistory").hidden = true; return; }
     if (target.matches("[data-v2-select-library-asset]")) { $("canvasAssetLibrary").dataset.assetId = target.dataset.v2SelectLibraryAsset; renderAssetLibrary(); return; }
     if (target.matches("[data-v2-apply-library-asset]")) { const selected = assets.find((asset) => asset.id === target.dataset.v2ApplyLibraryAsset); if (selected) { await app()?.addAssetToCanvas?.(selected); $("canvasAssetLibrary").hidden = true; renderWorkspace(); } return; }
+    if (target.matches("[data-v2-select-history]")) { $("canvasGeneratedHistory").dataset.historyId = target.dataset.v2SelectHistory; renderGeneratedHistory(); return; }
+    if (target.matches("[data-v2-add-history]")) { const selected = generatedHistory.find((item) => item.id === target.dataset.v2AddHistory); if (selected) { await app()?.addGeneratedMediaToCanvas?.(selected); $("canvasGeneratedHistory").hidden = true; renderWorkspace(); } return; }
     if (target.matches("[data-v2-save-media]")) { await saveMediaInspector(); return; }
     if (target.matches("[data-v2-run-media]")) { await saveMediaInspector({ run: true }); return; }
     if (target.matches("[data-v2-refresh-task]")) { await refreshMediaTask(); return; }
-    if (target.matches("[data-v2-create-asset]")) { await editAsset(); return; }
+    if (target.matches("[data-v2-create-asset]")) { $("v2AddPalette").hidden = true; await editAsset(); return; }
     if (target.matches("[data-v2-edit-asset]")) { await editAsset(target.dataset.v2EditAsset); return; }
     if (target.matches("[data-v2-save-asset]")) { await saveAssetEditor(); return; }
     if (target.matches("[data-v2-delete-asset]")) { await app().api("/api/assets/delete", { method: "POST", body: JSON.stringify({ id: $("canvasAssetEditor").dataset.assetId }) }); await loadAssets(); renderAssets(); $("canvasAssetEditor").hidden = true; return; }

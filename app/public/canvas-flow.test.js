@@ -38,6 +38,7 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(appSource, /window\.MbhCanvasApp = \{[\s\S]*setAppMode,/);
   assert.match(appSource, /function setCanvasInteractionMode/);
   assert.match(appSource, /async function addAssetToCanvas/);
+  assert.match(appSource, /async function addGeneratedMediaToCanvas/);
   assert.match(canvasV2Source, /\$\("canvasStage"\)\.hidden = true/);
   assert.match(canvasV2Source, /\$\("canvasStage"\)\.hidden = false/);
   assert.match(canvasV2Source, /querySelector\("\.canvas-view-tools"\)\.hidden = true/);
@@ -63,6 +64,9 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(canvasV2Source, /data-v2-open-assets-kind/);
   assert.match(canvasV2Source, /function openAssetLibrary/);
   assert.match(canvasV2Source, /data-v2-apply-library-asset/);
+  assert.match(canvasV2Source, /data-v2-open-generated-history/);
+  assert.match(canvasV2Source, /function openGeneratedHistory/);
+  assert.match(canvasV2Source, /data-v2-add-history/);
   assert.match(canvasV2Source, /v2CanvasNodeCount/);
   assert.match(canvasV2Styles, /canvas-v2-workspace \.canvas-v2-left \{ left: 0/);
   assert.match(canvasV2Styles, /canvas-v2-utility-dock/);
@@ -73,6 +77,7 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(canvasV2Styles, /canvas-v2-left-collapsed\) \.canvas-v2-utility-dock/);
   assert.match(canvasV2Styles, /\.v2-add-palette \{ display:block; grid-template-columns:none;/);
   assert.match(canvasV2Styles, /\.canvas-asset-library/);
+  assert.match(canvasV2Styles, /\.v2-history-preview/);
   assert.match(canvasV2Styles, /\.v2-interaction-icon/);
   assert.match(clientStyles, /mbh-react-flow--pan \.react-flow__pane/);
   assert.match(appSource, /if \(isCanvasMergedNode\(node\)\) \{[\s\S]*badge\.textContent = "合"/);

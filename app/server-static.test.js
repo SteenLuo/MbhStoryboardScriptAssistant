@@ -157,6 +157,12 @@ test("multimedia canvas API keeps model capabilities and a no-key preflight boun
   assert.match(statusSource, /\/tasks\/\$\{encodeURIComponent\(config\.lastTask\.taskId\)\}/);
 });
 
+test("generated media history is available for placing prior results on a canvas", () => {
+  assert.match(serverSource, /async function listMediaHistory\(\)/);
+  assert.match(serverSource, /url\.pathname === "\/api\/media\/history"/);
+  assert.match(serverSource, /outputUrls\.forEach/);
+});
+
 test("React Flow canvas resets legacy scrolling instead of leaving the viewport offscreen", () => {
   const canvasV2Css = fs.readFileSync(path.join(__dirname, "public", "assets", "canvas-v2.css"), "utf8");
   assert.match(canvasClientSource, /function renderReactFlowCanvas\(\)[\s\S]*stage\.scrollLeft = 0/);
