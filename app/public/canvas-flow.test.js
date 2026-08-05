@@ -59,6 +59,8 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(canvasV2Styles, /::-webkit-scrollbar-thumb/);
   assert.match(canvasV2Styles, /\.v2-left-footer/);
   assert.match(canvasV2Styles, /canvas-v2-utility-dock \.canvas-view-tools \{ position:static/);
+  assert.match(canvasV2Styles, /canvas-v2-left \{ left: 0; top: 0; bottom: 0/);
+  assert.match(canvasV2Styles, /canvas-v2-left-collapsed\) \.canvas-v2-utility-dock/);
 });
 
 test("React Flow bridge persists a drag only after its stop event", () => {
