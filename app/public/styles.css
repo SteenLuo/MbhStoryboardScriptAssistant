@@ -979,6 +979,18 @@ body.canvas-node-dragging .canvas-node-body {
   pointer-events: none;
 }
 
+.canvas-node-revision-action {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.canvas-node-revision-action:hover,
+.canvas-node-revision-action:focus-visible {
+  color: var(--panel);
+  background: color-mix(in srgb, var(--accent) 84%, var(--ink));
+  outline: none;
+}
+
 .canvas-node-issue-badge {
   position: absolute;
   top: -28px;
