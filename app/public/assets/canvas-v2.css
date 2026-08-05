@@ -16,6 +16,18 @@ body.canvas-v2-mode .canvas-shell { min-height: 100vh; grid-template-columns: 1f
 body.canvas-v2-mode .canvas-top { display: none; }
 body.canvas-v2-mode .canvas-stage { grid-column: 1; grid-row: 1; height: 100vh; border: 0; overflow: hidden; }
 body.canvas-v2-mode {
+  /* Reference canvas language: neutral black, white and gray only. */
+  --panel: #1c1c1c;
+  --field-bg: #202020;
+  --ink: #f2f2f2;
+  --muted: #9a9a9a;
+  --line: #353535;
+  --accent: #ededed;
+  --accent-dark: #ffffff;
+  --gold: #c4c4c4;
+  --app-bg: #141414;
+  --grid-a: rgba(255, 255, 255, .055);
+  --grid-b: rgba(255, 255, 255, .025);
   --v2-surface: #171717;
   --v2-surface-muted: #222222;
   --v2-ink: #f2f2f2;
@@ -28,6 +40,43 @@ body.canvas-v2-mode {
   --canvas-node-scrollbar-thumb: #666;
   --canvas-node-scrollbar-thumb-hover: #858585;
 }
+body.canvas-v2-mode.canvas-v2-workspace .canvas-shell,
+body.canvas-v2-mode.canvas-v2-workspace .canvas-stage,
+body.canvas-v2-mode.canvas-v2-workspace .mbh-react-flow,
+body.canvas-v2-mode.canvas-v2-workspace .mbh-react-flow .react-flow {
+  background-color: #141414;
+  background-image: radial-gradient(rgba(255, 255, 255, .11) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+body.canvas-v2-mode.canvas-v2-workspace .canvas-v2-left { top: 16px; }
+body.canvas-v2-mode.canvas-v2-workspace .canvas-node {
+  --canvas-node-custom-bg: #222;
+  --canvas-node-readable-ink: #ededed;
+  border-color: #3b3b3b;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .42);
+}
+body.canvas-v2-mode.canvas-v2-workspace .canvas-node.novel,
+body.canvas-v2-mode.canvas-v2-workspace .canvas-node.script,
+body.canvas-v2-mode.canvas-v2-workspace .canvas-node.storyboard,
+body.canvas-v2-mode.canvas-v2-workspace .canvas-node.label { border-color: #3b3b3b; }
+body.canvas-v2-mode.canvas-v2-workspace .canvas-node-type-icon,
+body.canvas-v2-mode.canvas-v2-workspace .canvas-node-type-icon.script,
+body.canvas-v2-mode.canvas-v2-workspace .canvas-node-type-icon.storyboard,
+body.canvas-v2-mode.canvas-v2-workspace .canvas-node-type-icon.label { color: #b8b8b8; background: #2a2a2a; }
+body.canvas-v2-mode.canvas-v2-workspace .mbh-react-flow .react-flow__edge-path { stroke: #7b7b7b; }
+body.canvas-v2-mode.canvas-v2-workspace .mbh-react-flow .react-flow__edge.selected .react-flow__edge-path { stroke: #f1f1f1; }
+body.canvas-v2-mode.canvas-v2-workspace .mbh-react-flow .mbh-flow-handle { border-color: #202020; background: #ededed; }
+body.canvas-v2-mode.canvas-v2-workspace .canvas-view-tools {
+  border-color: #323232;
+  color: #a8a8a8;
+  background: rgba(24, 24, 24, .96);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .34);
+}
+body.canvas-v2-mode.canvas-v2-workspace .canvas-view-tools button { color: #bdbdbd; }
+body.canvas-v2-mode.canvas-v2-workspace .canvas-view-tools button:hover,
+body.canvas-v2-mode.canvas-v2-workspace .canvas-view-tools button:focus-visible,
+body.canvas-v2-mode.canvas-v2-workspace .canvas-view-tools button.active { color: #161616; background: #f0f0f0; }
+body.canvas-v2-mode.canvas-v2-workspace .canvas-view-tools-divider { background: #3b3b3b; }
 body.canvas-v2-mode .canvas-node {
   --canvas-node-custom-bg: var(--v2-surface);
   --canvas-node-readable-ink: var(--v2-ink);
