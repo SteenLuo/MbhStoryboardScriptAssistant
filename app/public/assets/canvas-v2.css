@@ -129,19 +129,19 @@ body.canvas-v2-mode.canvas-v2-workspace .v2-left-content::-webkit-scrollbar-thum
 .v2-left-footer { display:flex; align-items:center; min-height:48px; padding:0 12px; border-top:1px solid var(--v2-line); background:#181818; }.v2-left-footer span { margin-left:auto; color:var(--v2-muted); font-size:11px; white-space:nowrap; }
 body.canvas-v2-mode.canvas-v2-workspace .v2-left-collapse { position:static; display:grid; place-items:center; flex:0 0 30px; width:30px; height:30px; margin:0; padding:0; line-height:1; font-size:20px; }
 .v2-node-toolbar { display:flex; align-items:center; justify-content:space-between; padding:10px 7px 7px; color:var(--v2-ink); font-size:12px; }.v2-node-toolbar small { color:var(--v2-muted); font-size:11px; }
-.canvas-v2-utility-dock { position:absolute; z-index:28; left:16px; bottom:16px; display:flex; align-items:center; border:1px solid #333; border-radius:10px; background:rgba(24,24,24,.97); box-shadow:0 10px 24px rgba(0,0,0,.34); }.canvas-v2-utility-dock>button { display:grid; place-items:center; width:30px; height:30px; padding:0; border:0; color:#e7e7e7; background:transparent; cursor:pointer; font-size:13px; }.canvas-v2-utility-dock>button:hover { background:#2a2a2a; }.canvas-v2-utility-dock>button span { margin-left:5px; }.canvas-v2-utility-dock>[data-v2-expand-left] { display:flex; width:auto; padding:0 10px; white-space:nowrap; }
+.canvas-v2-utility-dock { position:absolute; z-index:28; left:16px; bottom:16px; display:flex; align-items:center; border:0; border-radius:0; background:transparent; box-shadow:none; }.canvas-v2-utility-dock>button { display:grid; place-items:center; width:30px; height:30px; padding:0; border:0; color:#e7e7e7; background:transparent; cursor:pointer; font-size:13px; }.canvas-v2-utility-dock>button:hover { background:#2a2a2a; }.canvas-v2-utility-dock>button span { margin-left:5px; }.canvas-v2-utility-dock>[data-v2-expand-left] { display:flex; width:auto; padding:0 10px; white-space:nowrap; }
 body.canvas-v2-mode.canvas-v2-workspace:not(.canvas-v2-left-collapsed) .canvas-v2-utility-dock { left:296px; }
 body.canvas-v2-mode.canvas-v2-workspace:not(.canvas-v2-left-collapsed) .canvas-v2-utility-dock>[data-v2-expand-left] { display:grid; width:30px; padding:0; }
 body.canvas-v2-mode.canvas-v2-workspace:not(.canvas-v2-left-collapsed) .canvas-v2-utility-dock>button span { display:none; }
 /* Keep every legacy view action, but fold the row into the persistent
    lower-left utility strip instead of leaving an independent floating card. */
-body.canvas-v2-mode.canvas-v2-workspace .canvas-v2-utility-dock .canvas-view-tools { position:static; left:auto; right:auto; top:auto; bottom:auto; z-index:auto; display:flex; align-items:center; width:auto; min-width:0; padding:0 3px; border:0; border-left:1px solid #3b3b3b; border-radius:0; color:#a8a8a8; background:transparent; box-shadow:none; backdrop-filter:none; }
+body.canvas-v2-mode.canvas-v2-workspace .canvas-v2-utility-dock .canvas-view-tools { position:static; left:auto; right:auto; top:auto; bottom:auto; z-index:auto; display:flex; align-items:center; width:auto; min-width:0; padding:0 3px; border:0; border-radius:0; color:#a8a8a8; background:transparent; box-shadow:none; backdrop-filter:none; }
 body.canvas-v2-mode.canvas-v2-workspace .canvas-v2-utility-dock .canvas-view-tools button { width:20px; min-width:20px; height:28px; color:#bdbdbd; font-size:12px; }
 body.canvas-v2-mode.canvas-v2-workspace .canvas-v2-utility-dock .canvas-view-tools button:hover,
 body.canvas-v2-mode.canvas-v2-workspace .canvas-v2-utility-dock .canvas-view-tools button:focus-visible,
 body.canvas-v2-mode.canvas-v2-workspace .canvas-v2-utility-dock .canvas-view-tools button.active { color:#161616; background:#f0f0f0; }
 body.canvas-v2-mode.canvas-v2-workspace .canvas-v2-utility-dock .canvas-view-tools-divider { background:#3b3b3b; }
-body.canvas-v2-mode.canvas-v2-workspace .canvas-v2-utility-dock .canvas-view-tools-divider { width:1px; margin:0 2px; }
+body.canvas-v2-mode.canvas-v2-workspace .canvas-v2-utility-dock .canvas-view-tools-divider { display:none; }
 body.canvas-v2-mode.canvas-v2-workspace .canvas-v2-utility-dock .canvas-zoom-control { grid-template-columns:20px 34px 20px; gap:0; min-height:28px; margin-left:0; padding-left:2px; }
 body.canvas-v2-mode.canvas-v2-workspace .canvas-v2-utility-dock .canvas-zoom-control button { width:20px; min-width:20px; height:28px; }
 body.canvas-v2-mode.canvas-v2-workspace .canvas-v2-utility-dock #canvasZoomLabel { width:34px; min-width:34px; font-size:10px; }
