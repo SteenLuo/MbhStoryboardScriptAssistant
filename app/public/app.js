@@ -4025,20 +4025,6 @@ function renderCanvasNode(node, options = {}) {
     badge.title = "修改节点";
     item.appendChild(badge);
     item.appendChild(renderCanvasRevisionChat(node));
-  } else if (canvasRevisionNodeTypes.has(node.type)) {
-    const badge = document.createElement("button");
-    badge.type = "button";
-    badge.className = "canvas-node-revision-badge canvas-node-revision-action";
-    badge.textContent = "修";
-    badge.title = "创建修改节点";
-    badge.setAttribute("aria-label", `修改${node.title || canvasTypeLabels[node.type] || "节点"}`);
-    badge.addEventListener("pointerdown", (event) => event.stopPropagation());
-    badge.addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      await createRevisionCanvasNode(node.id);
-    });
-    item.appendChild(badge);
   }
   applyCanvasNodeBusy(item, node.id);
 

@@ -71,8 +71,9 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(canvasV2Styles, /canvas-v2-left-collapsed\) \.canvas-v2-utility-dock/);
   assert.match(canvasV2Styles, /\.v2-add-palette \{ display:block; grid-template-columns:none;/);
   assert.match(canvasV2Styles, /\.canvas-asset-library/);
-  assert.match(appSource, /canvas-node-revision-action/);
-  assert.match(appSource, /await createRevisionCanvasNode\(node\.id\)/);
+  assert.match(appSource, /if \(isCanvasMergedNode\(node\)\) \{[\s\S]*badge\.textContent = "合"/);
+  assert.match(appSource, /if \(isCanvasRevisionNode\(node\)\) \{[\s\S]*badge\.textContent = "修"/);
+  assert.doesNotMatch(appSource, /else if \(canvasRevisionNodeTypes\.has\(node\.type\)\)/);
 });
 
 test("React Flow bridge persists a drag only after its stop event", () => {
