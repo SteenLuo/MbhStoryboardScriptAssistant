@@ -19,6 +19,7 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(clientSource, /panOnDrag=\{\[1, 2\]\}/);
   assert.match(clientSource, /selectionOnDrag/);
   assert.match(clientSource, /type: "bezier"/);
+  assert.doesNotMatch(clientSource, /<Controls/);
   assert.match(clientSource, /selectionKeyCode="Shift"/);
   assert.match(clientSource, /NodeResizer/);
   assert.match(clientSource, /onNodeDragStop/);
@@ -50,12 +51,14 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(canvasV2Styles, /canvas-v2-workspace \.canvas-view-tools/);
   assert.match(canvasV2Source, /function setLeftCollapsed\(collapsed\)/);
   assert.match(canvasV2Source, /function setActiveTab\(tab\)/);
-  assert.match(canvasV2Source, /data-v2-expand-assets/);
+  assert.match(canvasV2Source, /data-v2-expand-left/);
+  assert.match(canvasV2Source, /utility\.append\(viewTools\)/);
   assert.match(canvasV2Source, /v2CanvasNodeCount/);
   assert.match(canvasV2Styles, /canvas-v2-workspace \.canvas-v2-left \{ left: 0/);
   assert.match(canvasV2Styles, /canvas-v2-utility-dock/);
   assert.match(canvasV2Styles, /::-webkit-scrollbar-thumb/);
   assert.match(canvasV2Styles, /\.v2-left-footer/);
+  assert.match(canvasV2Styles, /canvas-v2-utility-dock \.canvas-view-tools \{ position:static/);
 });
 
 test("React Flow bridge persists a drag only after its stop event", () => {

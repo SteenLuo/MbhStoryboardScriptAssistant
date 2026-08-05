@@ -16,7 +16,7 @@
 
   function setLeftCollapsed(collapsed) {
     $("canvasV2Left")?.classList.toggle("collapsed", collapsed);
-    $("canvasV2UtilityDock").hidden = !collapsed;
+    $("canvasV2UtilityDock").hidden = false;
     document.body.classList.toggle("canvas-v2-left-collapsed", collapsed);
   }
 
@@ -40,7 +40,7 @@
     utility.id = "canvasV2UtilityDock";
     utility.className = "canvas-v2-utility-dock";
     utility.hidden = true;
-    utility.innerHTML = `<button type="button" data-v2-expand-assets title="展开资产管理">▣ <span>资产管理</span></button>`;
+    utility.innerHTML = `<button type="button" data-v2-expand-left title="展开左侧面板">▣ <span>资产管理</span></button>`;
     const dock = document.createElement("div");
     dock.id = "canvasV2Dock";
     dock.className = "canvas-v2-dock";
@@ -53,6 +53,8 @@
     assetEditor.id = "canvasAssetEditor";
     assetEditor.className = "canvas-media-inspector canvas-asset-editor";
     assetEditor.hidden = true;
+    const viewTools = document.querySelector(".canvas-view-tools");
+    if (viewTools) utility.append(viewTools);
     shell.append(home, left, utility, dock, inspector, assetEditor);
     shell.addEventListener("click", handleClick);
   }
@@ -219,7 +221,7 @@
     if (target.matches("[data-v2-toggle-add]")) { const palette = $("v2AddPalette"); palette.hidden = !palette.hidden; return; }
     if (target.matches("[data-v2-add-node]")) { $("v2AddPalette").hidden = true; await app().addNodeToCanvas(target.dataset.v2AddNode); renderWorkspace(); if (mediaTypes.has(target.dataset.v2AddNode)) { const last = currentNodes().at(-1); openMediaInspector(last?.id); } return; }
     if (target.matches("[data-v2-open-assets]")) { setActiveTab("assets"); $("canvasV2Left").hidden = false; setLeftCollapsed(false); renderLeft(); return; }
-    if (target.matches("[data-v2-expand-assets]")) { setActiveTab("assets"); setLeftCollapsed(false); renderLeft(); return; }
+    if (target.matches("[data-v2-expand-left]")) { setLeftCollapsed(false); renderLeft(); return; }
     if (target.matches("[data-v2-media-settings]")) { app().openSettings("media"); return; }
     if (target.matches("#canvasV2ToggleLeft")) { setLeftCollapsed(!$("canvasV2Left").classList.contains("collapsed")); return; }
     if (target.matches("[data-v2-close-inspector]")) { $("canvasMediaInspector").hidden = true; return; }

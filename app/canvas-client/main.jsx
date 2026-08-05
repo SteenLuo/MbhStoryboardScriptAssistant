@@ -4,7 +4,6 @@ import {
   applyEdgeChanges,
   applyNodeChanges,
   Background,
-  Controls,
   Handle,
   MiniMap,
   NodeResizer,
@@ -185,7 +184,6 @@ function CanvasSurface({ bridge }) {
     >
       <Background gap={22} size={1} />
       {showMiniMap && <MiniMap pannable zoomable nodeStrokeWidth={2} />}
-      <Controls showInteractive={false} />
     </ReactFlow>
   );
 }
