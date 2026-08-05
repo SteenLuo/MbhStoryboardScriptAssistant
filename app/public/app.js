@@ -38,6 +38,7 @@ const state = {
   selectedCanvasEdgeId: "",
   canvasGroupPrimaryNodeId: "",
   canvasZoom: 1,
+  canvasInteractionMode: "select",
   canvasViewportAnimation: null,
   canvasStatusLockUntil: 0,
   canvasMiniMapDrag: null,
@@ -3495,6 +3496,57 @@ async function addNodeToCanvas(type, position = null) {
   renderCanvas();
 }
 
+async function addAssetToCanvas(asset) {
+  if (!state.currentCanvas || canvasIsArchived()) return [];
+  const safeAsset = asset && typeof asset === "object" ? asset : null;
+  const elements = (safeAsset?.elements || []).filter((element) => element?.source);
+  if (!safeAsset || !elements.length) {
+    canvasStatus("该资产没有可导入的图片、视频或音频元素");
+    return [];
+  }
+  const existing = state.currentCanvas.nodes || [];
+  const startX = 180 + (existing.length % 4) * 90;
+  const startY = 180 + (existing.length % 3) * 70;
+  const imported = elements.map((element, index) => {
+    const type = ["image", "video", "audio"].includes(element.mediaType) ? element.mediaType : "image";
+    return {
+      id: `asset-${Date.now()}-${index}-${Math.random().toString(16).slice(2, 6)}`,
+      type,
+      title: uniqueCanvasNodeTitle(`${safeAsset.title || "资产"} · ${element.title || type}`),
+      content: safeAsset.description || "",
+      x: startX + (index % 3) * 460,
+      y: startY + Math.floor(index / 3) * 360,
+      width: type === "video" ? 440 : type === "audio" ? 380 : 420,
+      height: type === "video" ? 390 : type === "audio" ? 300 : 360,
+      meta: {
+        assetSnapshot: {
+          assetId: safeAsset.id || "",
+          assetTitle: safeAsset.title || "资产",
+          assetKind: safeAsset.kind || "",
+          assetScope: safeAsset.scope || "project",
+          elementId: element.id || "",
+          elementTitle: element.title || "",
+          importedAt: new Date().toISOString(),
+        },
+        media: {
+          model: "资产引用",
+          prompt: safeAsset.description || "",
+          outputUrls: [element.source],
+          mode: "asset-reference",
+        },
+      },
+    };
+  });
+  state.currentCanvas.nodes = [...existing, ...imported];
+  state.selectedCanvasNodeId = imported.at(-1)?.id || "";
+  state.selectedCanvasNodeIds = new Set(imported.map((node) => node.id));
+  state.selectedCanvasEdgeId = "";
+  await saveCurrentCanvas();
+  renderCanvas();
+  canvasStatus(`已导入「${safeAsset.title || "资产"}」的 ${imported.length} 个元素`);
+  return imported;
+}
+
 function renderCanvas() {
   const canvas = state.currentCanvas;
   const layer = $("canvasNodes");
@@ -3531,6 +3583,18 @@ function canvasFlowEnabled() {
   return Boolean(window.MbhCanvasFlow?.createCanvasFlow && $("canvasReactRoot"));
 }
 
+function canvasInteractionMode() {
+  return state.canvasInteractionMode === "pan" ? "pan" : "select";
+}
+
+function setCanvasInteractionMode(mode = "select") {
+  const next = mode === "pan" ? "pan" : "select";
+  if (canvasInteractionMode() === next) return;
+  state.canvasInteractionMode = next;
+  renderCanvas();
+  canvasStatus(next === "pan" ? "已切换为抓手工具" : "已切换为移动选择");
+}
+
 function canvasFlowNodeRevision(nodeId) {
   const node = currentCanvasNode(nodeId);
   if (!node) return "missing";
@@ -3556,6 +3620,7 @@ function createCanvasFlowBridge() {
         nodes: canvas.nodes || [],
         edges: canvas.edges || [],
         nodeRevision: state.canvasFlowRevision,
+        interactionMode: canvasInteractionMode(),
       };
     },
     subscribe(listener) {
@@ -3568,6 +3633,7 @@ function createCanvasFlowBridge() {
     },
     nodeRevision: canvasFlowNodeRevision,
     isReadOnly: canvasIsArchived,
+    interactionMode: canvasInteractionMode,
     mountNode(nodeId, host) {
       const node = currentCanvasNode(nodeId);
       if (!node || !host) return () => {};
@@ -7681,11 +7747,13 @@ window.MbhCanvasApp = {
   loadCanvas,
   newCanvas,
   addNodeToCanvas,
+  addAssetToCanvas,
   saveCurrentCanvas,
   renderCanvas,
   focusCanvasNodeToViewport,
   fitCanvasToContent,
   openSettings,
+  setCanvasInteractionMode,
   escapeHtml,
 };
 

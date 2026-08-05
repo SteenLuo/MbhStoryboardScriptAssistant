@@ -16,8 +16,9 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(clientSource, /onlyRenderVisibleElements/);
   assert.match(clientSource, /viewportZoom < 0\.45 \? \[\] : edges/);
   assert.match(clientSource, /panOnDrag/);
-  assert.match(clientSource, /panOnDrag=\{\[1, 2\]\}/);
+  assert.match(clientSource, /panOnDrag=\{interactionMode === "pan" \? \[0, 1, 2\] : \[1, 2\]\}/);
   assert.match(clientSource, /selectionOnDrag/);
+  assert.match(clientSource, /setInteractionMode/);
   assert.match(clientSource, /type: "bezier"/);
   assert.doesNotMatch(clientSource, /<Controls/);
   assert.match(clientSource, /selectionKeyCode="Shift"/);
@@ -34,6 +35,8 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(canvasV2Styles, /--v2-surface: #171717/);
   assert.match(canvasV2Styles, /sessions \.session-list/);
   assert.match(appSource, /window\.MbhCanvasApp = \{[\s\S]*setAppMode,/);
+  assert.match(appSource, /function setCanvasInteractionMode/);
+  assert.match(appSource, /async function addAssetToCanvas/);
   assert.match(canvasV2Source, /\$\("canvasStage"\)\.hidden = true/);
   assert.match(canvasV2Source, /\$\("canvasStage"\)\.hidden = false/);
   assert.match(canvasV2Source, /querySelector\("\.canvas-view-tools"\)\.hidden = true/);
@@ -53,6 +56,11 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(canvasV2Source, /function setActiveTab\(tab\)/);
   assert.match(canvasV2Source, /data-v2-expand-left/);
   assert.match(canvasV2Source, /utility\.append\(viewTools\)/);
+  assert.match(canvasV2Source, /data-v2-toggle-interaction/);
+  assert.match(canvasV2Source, /data-v2-set-interaction/);
+  assert.match(canvasV2Source, /data-v2-open-assets-kind/);
+  assert.match(canvasV2Source, /function openAssetLibrary/);
+  assert.match(canvasV2Source, /data-v2-apply-library-asset/);
   assert.match(canvasV2Source, /v2CanvasNodeCount/);
   assert.match(canvasV2Styles, /canvas-v2-workspace \.canvas-v2-left \{ left: 0/);
   assert.match(canvasV2Styles, /canvas-v2-utility-dock/);
@@ -61,6 +69,8 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(canvasV2Styles, /canvas-v2-utility-dock \.canvas-view-tools \{ position:static/);
   assert.match(canvasV2Styles, /canvas-v2-left \{ left: 0; top: 0; bottom: 0/);
   assert.match(canvasV2Styles, /canvas-v2-left-collapsed\) \.canvas-v2-utility-dock/);
+  assert.match(canvasV2Styles, /\.v2-add-palette \{ display:block; grid-template-columns:none;/);
+  assert.match(canvasV2Styles, /\.canvas-asset-library/);
   assert.match(appSource, /canvas-node-revision-action/);
   assert.match(appSource, /await createRevisionCanvasNode\(node\.id\)/);
 });

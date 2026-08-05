@@ -82,6 +82,7 @@ function CanvasSurface({ bridge }) {
   const [edges, setEdges] = useState(() => bridge.snapshot().edges.map((edge) => canvasEdgeToFlowEdge(edge, bridge)));
   const [showMiniMap, setShowMiniMap] = useState(false);
   const [viewportZoom, setViewportZoom] = useState(1);
+  const [interactionMode, setInteractionMode] = useState(() => bridge.snapshot().interactionMode || "select");
   const applyingExternalViewport = useRef(false);
   const frameProbe = useRef(null);
 
@@ -93,6 +94,7 @@ function CanvasSurface({ bridge }) {
   useEffect(() => bridge.subscribe((next) => {
     setNodes(next.nodes.map((node) => canvasNodeToFlowNode(node, bridge)));
     setEdges(next.edges.map((edge) => canvasEdgeToFlowEdge(edge, bridge)));
+    setInteractionMode(next.interactionMode || "select");
   }), [bridge]);
 
   useEffect(() => {
@@ -167,14 +169,13 @@ function CanvasSurface({ bridge }) {
       minZoom={0.25}
       maxZoom={4}
       onlyRenderVisibleElements
-      // Dragging blank space with the primary button draws a selection box,
-      // matching the previous canvas. Viewport panning stays on middle/right
-      // mouse buttons so multi-select and grouping remain discoverable.
-      panOnDrag={[1, 2]}
-      selectionOnDrag
+      // The dock mirrors the benchmark's two modes: selection on the primary
+      // button, or a hand tool that pans with the primary button.
+      panOnDrag={interactionMode === "pan" ? [0, 1, 2] : [1, 2]}
+      selectionOnDrag={interactionMode !== "pan"}
       selectionKeyCode="Shift"
       selectionMode="partial"
-      nodesDraggable={!bridge.isReadOnly()}
+      nodesDraggable={!bridge.isReadOnly() && interactionMode !== "pan"}
       nodesConnectable={!bridge.isReadOnly()}
       elevateNodesOnSelect={false}
       elevateEdgesOnSelect={false}
