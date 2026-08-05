@@ -45,7 +45,7 @@
     const dock = document.createElement("div");
     dock.id = "canvasV2Dock";
     dock.className = "canvas-v2-dock";
-    dock.innerHTML = `<div class="v2-add-wrap"><button type="button" class="v2-dock-icon v2-dock-add" data-v2-toggle-add aria-label="添加节点" title="添加节点">＋</button><div id="v2AddPalette" class="v2-add-palette" hidden></div></div><div class="v2-interaction-wrap"><button type="button" class="v2-dock-icon" data-v2-toggle-interaction aria-label="移动" title="移动">⌁</button><div id="v2InteractionPalette" class="v2-interaction-palette" hidden></div></div><span></span><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="person" aria-label="角色资产库" title="角色资产库">♙</button><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="item" aria-label="物品资产库" title="物品资产库">◇</button><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="scene" aria-label="场景资产库" title="场景资产库">⌂</button><span></span><button type="button" class="v2-dock-icon" data-v2-media-settings aria-label="模型 API 配置" title="模型 API 配置">⚙</button>`;
+    dock.innerHTML = `<div class="v2-add-wrap"><button type="button" class="v2-dock-icon v2-dock-add" data-v2-toggle-add aria-label="添加节点" title="添加节点">＋</button><div id="v2AddPalette" class="v2-add-palette" hidden></div></div><div class="v2-interaction-wrap"><button type="button" class="v2-dock-icon" data-v2-toggle-interaction aria-label="移动" title="移动">${interactionIcon("select")}</button><div id="v2InteractionPalette" class="v2-interaction-palette" hidden></div></div><span></span><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="person" aria-label="角色资产库" title="角色资产库">♙</button><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="item" aria-label="物品资产库" title="物品资产库">◇</button><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="scene" aria-label="场景资产库" title="场景资产库">⌂</button><span></span><button type="button" class="v2-dock-icon" data-v2-media-settings aria-label="模型 API 配置" title="模型 API 配置">⚙</button>`;
     const inspector = document.createElement("aside");
     inspector.id = "canvasMediaInspector";
     inspector.className = "canvas-media-inspector";
@@ -160,13 +160,20 @@
     palette.innerHTML = `<h4>添加节点</h4>${entries.map(([type, label, icon]) => `<button type="button" data-v2-add-node="${type}"><b>${icon}</b><span>${label}</span></button>`).join("")}<div class="v2-palette-divider"></div><h4>添加资源</h4><button type="button" data-v2-open-assets-manager><b>▦</b><span>资产管理</span></button>`;
   }
 
+  function interactionIcon(mode) {
+    if (mode === "pan") {
+      return `<svg class="v2-interaction-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11V5a1.5 1.5 0 0 1 3 0v5-2a1.5 1.5 0 0 1 3 0v2-1a1.5 1.5 0 0 1 3 0v2-1a1.5 1.5 0 0 1 3 0v6.1c0 2.2-1.4 4.2-3.5 4.9l-3.3 1.1a5 5 0 0 1-5.2-1.2L4.4 17a1.7 1.7 0 0 1 2.4-2.4L8 15.8V11Z"/></svg>`;
+    }
+    return `<svg class="v2-interaction-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 13 8-6.3 1.8L9.9 19 5 3Z"/><path d="m12 13 4 5"/></svg>`;
+  }
+
   function renderInteractionPalette() {
     const palette = $("v2InteractionPalette");
     if (!palette) return;
     const mode = app()?.state.canvasInteractionMode === "pan" ? "pan" : "select";
-    palette.innerHTML = `<button type="button" data-v2-set-interaction="select" class="${mode === "select" ? "active" : ""}"><span>⌁</span><b>移动</b><small>V</small></button><button type="button" data-v2-set-interaction="pan" class="${mode === "pan" ? "active" : ""}"><span>✋</span><b>抓手工具</b><small>H</small></button>`;
+    palette.innerHTML = `<button type="button" data-v2-set-interaction="select" class="${mode === "select" ? "active" : ""}">${interactionIcon("select")}<b>移动</b><small>V</small></button><button type="button" data-v2-set-interaction="pan" class="${mode === "pan" ? "active" : ""}">${interactionIcon("pan")}<b>抓手工具</b><small>H</small></button>`;
     const trigger = document.querySelector("[data-v2-toggle-interaction]");
-    if (trigger) { trigger.classList.toggle("active", mode === "pan"); trigger.title = mode === "pan" ? "抓手工具" : "移动"; trigger.setAttribute("aria-label", mode === "pan" ? "抓手工具" : "移动"); }
+    if (trigger) { trigger.classList.toggle("active", mode === "pan"); trigger.title = mode === "pan" ? "抓手工具" : "移动"; trigger.setAttribute("aria-label", mode === "pan" ? "抓手工具" : "移动"); trigger.innerHTML = interactionIcon(mode); }
   }
 
   function assetElementPreview(element) {

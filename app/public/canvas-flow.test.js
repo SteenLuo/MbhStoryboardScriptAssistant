@@ -19,6 +19,7 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(clientSource, /panOnDrag=\{interactionMode === "pan" \? \[0, 1, 2\] : \[1, 2\]\}/);
   assert.match(clientSource, /selectionOnDrag/);
   assert.match(clientSource, /setInteractionMode/);
+  assert.match(clientSource, /mbh-react-flow--\$\{interactionMode\}/);
   assert.match(clientSource, /type: "bezier"/);
   assert.doesNotMatch(clientSource, /<Controls/);
   assert.match(clientSource, /selectionKeyCode="Shift"/);
@@ -58,6 +59,7 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(canvasV2Source, /utility\.append\(viewTools\)/);
   assert.match(canvasV2Source, /data-v2-toggle-interaction/);
   assert.match(canvasV2Source, /data-v2-set-interaction/);
+  assert.match(canvasV2Source, /function interactionIcon\(mode\)/);
   assert.match(canvasV2Source, /data-v2-open-assets-kind/);
   assert.match(canvasV2Source, /function openAssetLibrary/);
   assert.match(canvasV2Source, /data-v2-apply-library-asset/);
@@ -71,6 +73,8 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(canvasV2Styles, /canvas-v2-left-collapsed\) \.canvas-v2-utility-dock/);
   assert.match(canvasV2Styles, /\.v2-add-palette \{ display:block; grid-template-columns:none;/);
   assert.match(canvasV2Styles, /\.canvas-asset-library/);
+  assert.match(canvasV2Styles, /\.v2-interaction-icon/);
+  assert.match(clientStyles, /mbh-react-flow--pan \.react-flow__pane/);
   assert.match(appSource, /if \(isCanvasMergedNode\(node\)\) \{[\s\S]*badge\.textContent = "合"/);
   assert.match(appSource, /if \(isCanvasRevisionNode\(node\)\) \{[\s\S]*badge\.textContent = "修"/);
   assert.doesNotMatch(appSource, /else if \(canvasRevisionNodeTypes\.has\(node\.type\)\)/);

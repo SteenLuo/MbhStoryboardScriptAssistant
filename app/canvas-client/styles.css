@@ -4,6 +4,20 @@
   background: transparent;
 }
 
+.mbh-react-flow--select .react-flow__pane {
+  cursor: default;
+}
+
+.mbh-react-flow--pan .react-flow__pane,
+.mbh-react-flow--pan .react-flow__viewport {
+  cursor: grab;
+}
+
+.mbh-react-flow--pan .react-flow__pane:active,
+.mbh-react-flow--pan .react-flow__viewport:active {
+  cursor: grabbing;
+}
+
 .mbh-react-flow .react-flow__node {
   border: 0;
   background: transparent;

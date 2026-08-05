@@ -181,7 +181,7 @@ function CanvasSurface({ bridge }) {
       elevateEdgesOnSelect={false}
       deleteKeyCode={null}
       multiSelectionKeyCode={["Control", "Meta"]}
-      className="mbh-react-flow"
+      className={`mbh-react-flow mbh-react-flow--${interactionMode}`}
     >
       <Background gap={22} size={1} />
       {showMiniMap && <MiniMap pannable zoomable nodeStrokeWidth={2} />}
