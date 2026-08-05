@@ -9,6 +9,7 @@ const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const indexSource = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const clientStyles = fs.readFileSync(path.join(root, "canvas-client", "styles.css"), "utf8");
 const canvasV2Styles = fs.readFileSync(path.join(__dirname, "assets", "canvas-v2.css"), "utf8");
+const canvasV2Source = fs.readFileSync(path.join(__dirname, "assets", "canvas-v2.js"), "utf8");
 
 test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(clientSource, /from "@xyflow\/react"/);
@@ -29,8 +30,11 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(canvasV2Styles, /canvas-group-bar \{/);
   assert.doesNotMatch(canvasV2Styles, /canvas-top, body\.canvas-v2-mode #canvasGroupBar/);
   assert.match(canvasV2Styles, /body\.canvas-v2-mode \.sessions \{ display: block;/);
-  assert.match(canvasV2Styles, /--v2-surface: color-mix/);
+  assert.match(canvasV2Styles, /--v2-surface: #171717/);
+  assert.match(canvasV2Styles, /sessions \.session-list/);
   assert.match(appSource, /window\.MbhCanvasApp = \{[\s\S]*setAppMode,/);
+  assert.match(canvasV2Source, /\$\("canvasStage"\)\.hidden = true/);
+  assert.match(canvasV2Source, /\$\("canvasStage"\)\.hidden = false/);
 });
 
 test("React Flow bridge persists a drag only after its stop event", () => {
