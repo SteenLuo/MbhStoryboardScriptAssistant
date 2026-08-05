@@ -14,6 +14,17 @@
   function currentNodes() { return canvas()?.nodes || []; }
   function mediaNode(id) { return currentNodes().find((node) => node.id === id && mediaTypes.has(node.type)); }
 
+  function setLeftCollapsed(collapsed) {
+    $("canvasV2Left")?.classList.toggle("collapsed", collapsed);
+    $("canvasV2UtilityDock").hidden = !collapsed;
+    document.body.classList.toggle("canvas-v2-left-collapsed", collapsed);
+  }
+
+  function setActiveTab(tab) {
+    activeTab = tab;
+    document.querySelectorAll("[data-v2-tab]").forEach((button) => button.classList.toggle("active", button.dataset.v2Tab === tab));
+  }
+
   function ensureChrome() {
     const shell = $("canvasShell");
     if (!shell || $("canvasProjectHome")) return;
@@ -24,7 +35,12 @@
     const left = document.createElement("aside");
     left.id = "canvasV2Left";
     left.className = "canvas-v2-left";
-    left.innerHTML = `<div class="v2-left-head"><button type="button" class="v2-project-back" data-v2-back-home title="返回项目">‹</button><div><strong id="v2CanvasTitle">画布</strong><span id="v2CanvasMeta">0 个元素</span></div></div><div class="v2-tabs"><button type="button" data-v2-tab="nodes" class="active">画布元素</button><button type="button" data-v2-tab="assets">资产</button></div><div id="v2LeftContent" class="v2-left-content"></div><button id="canvasV2ToggleLeft" type="button" class="v2-left-collapse" title="收起画布侧栏">‹</button>`;
+    left.innerHTML = `<div class="v2-left-head"><button type="button" class="v2-project-back" data-v2-back-home title="返回项目">‹</button><div><strong id="v2CanvasTitle">画布</strong><span id="v2CanvasMeta">0 个元素</span></div></div><div class="v2-tabs"><button type="button" data-v2-tab="nodes" class="active">画布</button><button type="button" data-v2-tab="assets">资产</button></div><div id="v2LeftContent" class="v2-left-content"></div><button id="canvasV2ToggleLeft" type="button" class="v2-left-collapse" title="收起画布侧栏">‹</button>`;
+    const utility = document.createElement("div");
+    utility.id = "canvasV2UtilityDock";
+    utility.className = "canvas-v2-utility-dock";
+    utility.hidden = true;
+    utility.innerHTML = `<button type="button" data-v2-expand-assets title="展开资产管理">▣ <span>资产管理</span></button>`;
     const dock = document.createElement("div");
     dock.id = "canvasV2Dock";
     dock.className = "canvas-v2-dock";
@@ -37,7 +53,7 @@
     assetEditor.id = "canvasAssetEditor";
     assetEditor.className = "canvas-media-inspector canvas-asset-editor";
     assetEditor.hidden = true;
-    shell.append(home, left, dock, inspector, assetEditor);
+    shell.append(home, left, utility, dock, inspector, assetEditor);
     shell.addEventListener("click", handleClick);
   }
 
@@ -58,11 +74,13 @@
     if (!document.body.classList.contains("canvas-v2-mode")) return;
     app()?.clearCanvasRoute?.();
     document.body.classList.remove("canvas-v2-workspace");
+    document.body.classList.remove("canvas-v2-left-collapsed");
     $("canvasProjectHome").hidden = false;
     $("canvasStage").hidden = true;
     document.querySelector(".canvas-view-tools").hidden = true;
     $("canvasMiniMap").hidden = true;
     $("canvasV2Left").hidden = true;
+    $("canvasV2UtilityDock").hidden = true;
     $("canvasV2Dock").hidden = true;
     $("canvasMediaInspector").hidden = true;
     renderProjects();
@@ -75,6 +93,7 @@
     $("canvasStage").hidden = false;
     document.querySelector(".canvas-view-tools").hidden = false;
     $("canvasV2Left").hidden = false;
+    setLeftCollapsed(false);
     $("canvasV2Dock").hidden = false;
     renderWorkspace();
   }
@@ -105,7 +124,7 @@
       return;
     }
     const nodes = currentNodes();
-    target.innerHTML = nodes.length ? `<div class="v2-node-list">${nodes.map((node) => `<button type="button" data-v2-focus-node="${esc(node.id)}"><span class="v2-node-dot ${esc(node.type)}"></span><span><strong>${esc(node.title || "未命名元素")}</strong><small>${esc(node.type === "label" ? "备注" : ({ novel: "小说", script: "剧本", storyboard: "分镜脚本", image: "图片", video: "视频", audio: "音频" }[node.type] || "元素"))}</small></span><i>⌖</i></button>`).join("")}</div>` : `<div class="v2-empty"><b>画布还是空的</b><span>从底部“添加”放入文本、图片、视频或音频元素。</span></div>`;
+    target.innerHTML = nodes.length ? `<div class="v2-node-toolbar"><span>画布元素</span><small>共 ${nodes.length} 节点</small></div><div class="v2-node-list">${nodes.map((node) => `<button type="button" data-v2-focus-node="${esc(node.id)}"><span class="v2-node-dot ${esc(node.type)}"></span><span><strong>${esc(node.title || "未命名元素")}</strong><small>${esc(node.type === "label" ? "备注" : ({ novel: "小说", script: "剧本", storyboard: "分镜脚本", image: "图片", video: "视频", audio: "音频" }[node.type] || "元素"))}</small></span><i>⌖</i></button>`).join("")}</div>` : `<div class="v2-empty"><b>画布还是空的</b><span>从底部“添加”放入文本、图片、视频或音频元素。</span></div>`;
   }
 
   function renderAssets() {
@@ -194,13 +213,14 @@
     if (target.matches("[data-v2-new-project]")) { await app().newCanvas(); return; }
     if (target.matches("[data-v2-open-project]")) { await app().loadCanvas(target.dataset.v2OpenProject); openWorkspace(); return; }
     if (target.matches("[data-v2-back-home]")) { showHome(); return; }
-    if (target.matches("[data-v2-tab]")) { activeTab = target.dataset.v2Tab; document.querySelectorAll("[data-v2-tab]").forEach((button) => button.classList.toggle("active", button === target)); renderLeft(); return; }
+    if (target.matches("[data-v2-tab]")) { setActiveTab(target.dataset.v2Tab); renderLeft(); return; }
     if (target.matches("[data-v2-focus-node]")) { app().focusCanvasNodeToViewport(target.dataset.v2FocusNode); return; }
     if (target.matches("[data-v2-toggle-add]")) { const palette = $("v2AddPalette"); palette.hidden = !palette.hidden; return; }
     if (target.matches("[data-v2-add-node]")) { $("v2AddPalette").hidden = true; await app().addNodeToCanvas(target.dataset.v2AddNode); renderWorkspace(); if (mediaTypes.has(target.dataset.v2AddNode)) { const last = currentNodes().at(-1); openMediaInspector(last?.id); } return; }
-    if (target.matches("[data-v2-open-assets]")) { activeTab = "assets"; $("canvasV2Left").hidden = false; renderLeft(); return; }
+    if (target.matches("[data-v2-open-assets]")) { setActiveTab("assets"); $("canvasV2Left").hidden = false; setLeftCollapsed(false); renderLeft(); return; }
+    if (target.matches("[data-v2-expand-assets]")) { setActiveTab("assets"); setLeftCollapsed(false); renderLeft(); return; }
     if (target.matches("[data-v2-media-settings]")) { app().openSettings("media"); return; }
-    if (target.matches("#canvasV2ToggleLeft")) { $("canvasV2Left").classList.toggle("collapsed"); return; }
+    if (target.matches("#canvasV2ToggleLeft")) { setLeftCollapsed(!$("canvasV2Left").classList.contains("collapsed")); return; }
     if (target.matches("[data-v2-close-inspector]")) { $("canvasMediaInspector").hidden = true; return; }
     if (target.matches("[data-v2-close-asset-editor]")) { $("canvasAssetEditor").hidden = true; return; }
     if (target.matches("[data-v2-save-media]")) { await saveMediaInspector(); return; }
