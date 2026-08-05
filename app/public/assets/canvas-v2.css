@@ -10,6 +10,7 @@ body.canvas-v2-mode .sessions #toggleSidebar,
 body.canvas-v2-mode .sessions .session-list,
 body.canvas-v2-mode .sessions .sidebar-footer { display: none; }
 body.canvas-v2-mode .sessions .mode-switch { display: grid; width: 108px; pointer-events: auto; border-color: #3a3a3a; color: #a9a9a9; background: #171717; box-shadow: 0 8px 22px rgba(0, 0, 0, .28); }
+body.canvas-v2-mode.canvas-v2-workspace .sessions { display: none; }
 body.canvas-v2-mode .app-shell { display: block; min-height: 100vh; }
 body.canvas-v2-mode .canvas-shell { min-height: 100vh; grid-template-columns: 1fr; position: relative; background: var(--app-bg); }
 body.canvas-v2-mode .canvas-top { display: none; }

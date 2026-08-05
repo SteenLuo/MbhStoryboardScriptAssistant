@@ -56,6 +56,7 @@
   function showHome() {
     ensureChrome();
     if (!document.body.classList.contains("canvas-v2-mode")) return;
+    document.body.classList.remove("canvas-v2-workspace");
     $("canvasProjectHome").hidden = false;
     $("canvasStage").hidden = true;
     document.querySelector(".canvas-view-tools").hidden = true;
@@ -68,6 +69,7 @@
 
   function openWorkspace() {
     ensureChrome();
+    document.body.classList.add("canvas-v2-workspace");
     $("canvasProjectHome").hidden = true;
     $("canvasStage").hidden = false;
     document.querySelector(".canvas-view-tools").hidden = false;
