@@ -40,6 +40,11 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(canvasV2Source, /classList\.remove\("canvas-v2-workspace"\)/);
   assert.match(canvasV2Source, /classList\.add\("canvas-v2-workspace"\)/);
   assert.match(canvasV2Styles, /canvas-v2-mode\.canvas-v2-workspace \.sessions \{ display: none;/);
+  assert.match(appSource, /function canvasRouteId\(\)/);
+  assert.match(appSource, /searchParams\.set\("canvas", canvasId\)/);
+  assert.match(appSource, /await loadCanvas\(canvasId, \{ syncRoute: false \}\)/);
+  assert.match(canvasV2Source, /app\(\)\?\.clearCanvasRoute\?\.\(\)/);
+  assert.match(canvasV2Source, /!new URLSearchParams\(window\.location\.search\)\.get\("canvas"\)/);
 });
 
 test("React Flow bridge persists a drag only after its stop event", () => {

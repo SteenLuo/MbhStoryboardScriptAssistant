@@ -56,6 +56,7 @@
   function showHome() {
     ensureChrome();
     if (!document.body.classList.contains("canvas-v2-mode")) return;
+    app()?.clearCanvasRoute?.();
     document.body.classList.remove("canvas-v2-workspace");
     $("canvasProjectHome").hidden = false;
     $("canvasStage").hidden = true;
@@ -224,5 +225,10 @@
   });
 
   window.MbhCanvasV2 = { showHome, openWorkspace, onCanvasLoaded: openWorkspace, openMediaInspector };
-  if (app()?.state.appMode === "canvas") window.setTimeout(showHome, 0);
+  // On a direct project URL app.js restores the workspace after loading the
+  // project list. Do not race that restoration by immediately clearing the
+  // route and showing the picker.
+  if (app()?.state.appMode === "canvas" && !new URLSearchParams(window.location.search).get("canvas")) {
+    window.setTimeout(showHome, 0);
+  }
 })();

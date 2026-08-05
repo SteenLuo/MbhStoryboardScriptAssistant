@@ -2035,6 +2035,39 @@ async function sendMessage(event) {
   }
 }
 
+function canvasRouteId() {
+  return new URLSearchParams(window.location.search).get("canvas")?.trim() || "";
+}
+
+function syncCanvasRoute(canvasId, { replace = false } = {}) {
+  const url = new URL(window.location.href);
+  if (canvasId) url.searchParams.set("canvas", canvasId);
+  else url.searchParams.delete("canvas");
+  if (url.href === window.location.href) return;
+  window.history[replace ? "replaceState" : "pushState"]({}, "", url);
+}
+
+function clearCanvasRoute() {
+  syncCanvasRoute("");
+}
+
+async function restoreCanvasRoute() {
+  const canvasId = canvasRouteId();
+  if (!canvasId) {
+    window.MbhCanvasV2?.showHome();
+    return;
+  }
+  try {
+    await loadCanvas(canvasId, { syncRoute: false });
+    window.MbhCanvasV2?.openWorkspace?.();
+  } catch (error) {
+    // A removed or unavailable project should not leave the user on a broken
+    // deep link. Fall back to the project picker and clean the stale address.
+    clearCanvasRoute();
+    window.MbhCanvasV2?.showHome();
+  }
+}
+
 function setAppMode(mode, options = {}) {
   if (!options.keepPendingCorrection) clearPendingLearningCorrection();
   state.appMode = mode === "canvas" ? "canvas" : "chat";
@@ -2057,7 +2090,7 @@ function setAppMode(mode, options = {}) {
     modeSwitch.title = canvasActive ? "切换到对话" : "切换到画布";
   }
   if (state.appMode === "canvas") {
-    loadCanvases({ openFirst: false }).then(() => window.MbhCanvasV2?.showHome());
+    loadCanvases({ openFirst: false }).then(() => restoreCanvasRoute());
   } else {
     renderConversationList();
   }
@@ -2182,10 +2215,11 @@ async function newCanvas(defaultTitle = "") {
   window.MbhCanvasV2?.openWorkspace?.();
 }
 
-async function loadCanvas(id) {
+async function loadCanvas(id, options = {}) {
   const canvas = await api(`/api/canvas?id=${encodeURIComponent(id)}`);
   state.currentCanvasId = canvas.id;
   state.currentCanvas = canvas;
+  if (options.syncRoute !== false) syncCanvasRoute(canvas.id, { replace: options.replaceRoute === true });
   state.activeCanvasNodeId = "";
   state.selectedCanvasNodeId = "";
   state.selectedCanvasNodeIds = new Set();
@@ -7605,6 +7639,13 @@ function bindEvents() {
     autoGrowTextarea();
     updateCanvasViewportTools();
   });
+  window.addEventListener("popstate", () => {
+    if (canvasRouteId()) {
+      setAppMode("canvas");
+      return;
+    }
+    if (state.appMode === "canvas") window.MbhCanvasV2?.showHome();
+  });
   $("chatInput").addEventListener("input", () => {
     autoGrowTextarea();
     updateSendState();
@@ -7621,6 +7662,7 @@ window.MbhCanvasApp = {
   state,
   api,
   setAppMode,
+  clearCanvasRoute,
   loadCanvases,
   loadCanvas,
   newCanvas,
@@ -7639,7 +7681,7 @@ async function init() {
   loadSidebarWidth();
   loadSidebarCollapsed();
   bindEvents();
-  setAppMode(state.appMode);
+  setAppMode(canvasRouteId() ? "canvas" : state.appMode);
   setComposeMode("");
   autoGrowTextarea();
   updateSendState();
