@@ -5,6 +5,7 @@
   let catalog = null;
   let assets = [];
   let activeTab = "nodes";
+  let activeAssetKind = "";
 
   function esc(value) {
     return app()?.escapeHtml?.(String(value ?? "")) || String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
@@ -44,7 +45,7 @@
     const dock = document.createElement("div");
     dock.id = "canvasV2Dock";
     dock.className = "canvas-v2-dock";
-    dock.innerHTML = `<div class="v2-add-wrap"><button type="button" class="v2-dock-icon" data-v2-toggle-add aria-label="添加画布元素" title="添加画布元素">＋</button><div id="v2AddPalette" class="v2-add-palette" hidden></div></div><span></span><button type="button" class="v2-dock-icon" data-v2-open-assets aria-label="资产库" title="资产库">▦</button><button type="button" class="v2-dock-icon" data-v2-media-settings aria-label="模型 API 配置" title="模型 API 配置">⚙</button>`;
+    dock.innerHTML = `<div class="v2-add-wrap"><button type="button" class="v2-dock-icon" data-v2-toggle-add aria-label="添加画布元素" title="添加画布元素">＋</button><div id="v2AddPalette" class="v2-add-palette" hidden></div></div><span></span><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="person" aria-label="角色资产库" title="角色资产库">♙</button><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="item" aria-label="物品资产库" title="物品资产库">◇</button><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="scene" aria-label="场景资产库" title="场景资产库">⌂</button><span></span><button type="button" class="v2-dock-icon" data-v2-media-settings aria-label="模型 API 配置" title="模型 API 配置">⚙</button>`;
     const inspector = document.createElement("aside");
     inspector.id = "canvasMediaInspector";
     inspector.className = "canvas-media-inspector";
@@ -135,7 +136,8 @@
     if (!list) return;
     const kinds = [{ id: "person", label: "角色", icon: "♙", hint: "人物三视图、表情与声音参考" }, { id: "item", label: "物品", icon: "◇", hint: "三视图、局部与材质细节" }, { id: "scene", label: "场景", icon: "⌂", hint: "俯视图、3D 效果与场景参考" }];
     const card = (asset) => `<article class="v2-asset-card"><div><span class="asset-scope">${asset.scope === "global" ? "全局" : "项目"}</span></div><strong>${esc(asset.title)}</strong><small>${asset.elements.length} 个元素</small><div class="v2-asset-actions"><button type="button" data-v2-edit-asset="${esc(asset.id)}">编辑</button><button type="button" data-v2-export-asset="${esc(asset.id)}">导出</button>${asset.scope === "project" ? `<button type="button" data-v2-promote-asset="${esc(asset.id)}">提升全局</button>` : ""}</div></article>`;
-    list.innerHTML = kinds.map((kind) => {
+    const visibleKinds = activeAssetKind ? kinds.filter((kind) => kind.id === activeAssetKind) : kinds;
+    list.innerHTML = visibleKinds.map((kind) => {
       const entries = assets.filter((asset) => asset.kind === kind.id);
       return `<section class="v2-asset-group"><header><span>${kind.icon}</span><strong>${kind.label}</strong><small>${entries.length}</small></header>${entries.length ? entries.map(card).join("") : `<p class="v2-asset-empty">${kind.hint}</p>`}</section>`;
     }).join("");
@@ -220,11 +222,11 @@
     if (target.matches("[data-v2-new-project]")) { await app().newCanvas(); return; }
     if (target.matches("[data-v2-open-project]")) { await app().loadCanvas(target.dataset.v2OpenProject); openWorkspace(); return; }
     if (target.matches("[data-v2-back-home]")) { showHome(); return; }
-    if (target.matches("[data-v2-tab]")) { setActiveTab(target.dataset.v2Tab); renderLeft(); return; }
+    if (target.matches("[data-v2-tab]")) { activeAssetKind = ""; setActiveTab(target.dataset.v2Tab); renderLeft(); return; }
     if (target.matches("[data-v2-focus-node]")) { app().focusCanvasNodeToViewport(target.dataset.v2FocusNode); return; }
     if (target.matches("[data-v2-toggle-add]")) { const palette = $("v2AddPalette"); palette.hidden = !palette.hidden; return; }
     if (target.matches("[data-v2-add-node]")) { $("v2AddPalette").hidden = true; await app().addNodeToCanvas(target.dataset.v2AddNode); renderWorkspace(); if (mediaTypes.has(target.dataset.v2AddNode)) { const last = currentNodes().at(-1); openMediaInspector(last?.id); } return; }
-    if (target.matches("[data-v2-open-assets]")) { setActiveTab("assets"); $("canvasV2Left").hidden = false; setLeftCollapsed(false); renderLeft(); return; }
+    if (target.matches("[data-v2-open-assets-kind]")) { activeAssetKind = target.dataset.v2OpenAssetsKind; setActiveTab("assets"); $("canvasV2Left").hidden = false; setLeftCollapsed(false); renderLeft(); return; }
     if (target.matches("[data-v2-expand-left]")) { setLeftCollapsed(false); renderLeft(); return; }
     if (target.matches("[data-v2-media-settings]")) { app().openSettings("media"); return; }
     if (target.matches("#canvasV2ToggleLeft")) { setLeftCollapsed(!$("canvasV2Left").classList.contains("collapsed")); return; }
