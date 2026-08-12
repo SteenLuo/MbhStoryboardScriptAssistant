@@ -50,6 +50,10 @@ function canvasNodeToFlowNode(node, bridge) {
     height: Number(node.height || 220),
     draggable: !bridge.isReadOnly(),
     selectable: true,
+    // App-level editing rerenders the node host. Carry the original canvas
+    // selection back into React Flow so resize handles and node actions do not
+    // disappear when a double-click enters Markdown editing.
+    selected: bridge.isNodeSelected(node.id),
     data: {
       bridge,
       nodeId: node.id,

@@ -3682,6 +3682,7 @@ function createCanvasFlowBridge() {
     },
     nodeRevision: canvasFlowNodeRevision,
     isReadOnly: canvasIsArchived,
+    isNodeSelected: isCanvasNodeSelected,
     interactionMode: canvasInteractionMode,
     mountNode(nodeId, host) {
       const node = currentCanvasNode(nodeId);
