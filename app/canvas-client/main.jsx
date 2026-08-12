@@ -77,7 +77,7 @@ function canvasEdgeToFlowEdge(edge, bridge) {
 }
 
 function CanvasSurface({ bridge }) {
-  const { fitView, setViewport, getViewport, screenToFlowPosition } = useReactFlow();
+  const { fitView, setCenter, setViewport, getViewport, screenToFlowPosition } = useReactFlow();
   const [nodes, setNodes] = useState(() => bridge.snapshot().nodes.map((node) => canvasNodeToFlowNode(node, bridge)));
   const [edges, setEdges] = useState(() => bridge.snapshot().edges.map((edge) => canvasEdgeToFlowEdge(edge, bridge)));
   const [showMiniMap, setShowMiniMap] = useState(false);
@@ -122,6 +122,25 @@ function CanvasSurface({ bridge }) {
   }), [bridge]);
   const onEdgesChange = useCallback((changes) => setEdges((current) => applyEdgeChanges(changes, current)), []);
   const onNodeClick = useCallback((event, node) => bridge.selectNode(node.id, event), [bridge]);
+  const focusNode = useCallback((nodeId) => {
+    const target = nodes.find((node) => node.id === nodeId);
+    const canvasRect = document.querySelector(".mbh-react-flow")?.getBoundingClientRect();
+    if (!target || !canvasRect) return;
+    const width = Math.max(1, Number(target.measured?.width || target.width || 320));
+    const height = Math.max(1, Number(target.measured?.height || target.height || 220));
+    // Keep the 1.0 intent: a double-click makes the chosen card readable
+    // instead of merely fitting the whole graph around it.
+    const targetWidth = Math.max(240, canvasRect.width * 0.48 - 88);
+    const targetHeight = Math.max(180, canvasRect.height * 0.42 - 88);
+    const zoom = Math.max(0.25, Math.min(2, targetWidth / width, targetHeight / height));
+    setCenter(target.position.x + width / 2, target.position.y + height / 2, { zoom, duration: 220 });
+  }, [nodes, setCenter]);
+  const onNodeDoubleClick = useCallback((event, node) => {
+    // The legacy card owns its title/body double-click semantics. This catches
+    // the remaining card surface so every node still has a clear focus action.
+    if (event.target.closest(".canvas-node-headline, .canvas-node-body, button, input, textarea")) return;
+    focusNode(node.id);
+  }, [focusNode]);
   const onPaneClick = useCallback(() => bridge.clearSelection(), [bridge]);
   const onEdgeClick = useCallback((event, edge) => bridge.selectEdge(edge.id, event), [bridge]);
   const onMoveEnd = useCallback((_event, viewport) => {
@@ -133,10 +152,7 @@ function CanvasSurface({ bridge }) {
   useEffect(() => {
     bridge.setViewportActions({
       fit: () => fitView({ padding: 0.16, duration: 220, maxZoom: 1.4 }),
-      focus: (nodeId) => {
-        const target = nodes.filter((node) => node.id === nodeId);
-        if (target.length) fitView({ nodes: target, padding: 0.45, duration: 220, maxZoom: 1.5 });
-      },
+      focus: focusNode,
       zoomTo: (zoom) => {
         const current = getViewport();
         const next = { ...current, zoom: Math.max(0.25, Math.min(4, Number(zoom || current.zoom))) };
@@ -147,7 +163,7 @@ function CanvasSurface({ bridge }) {
       current: () => getViewport(),
       project: (point) => screenToFlowPosition(point),
     });
-  }, [bridge, fitView, getViewport, nodes, screenToFlowPosition, setViewport]);
+  }, [bridge, fitView, focusNode, getViewport, screenToFlowPosition, setViewport]);
 
   return (
     <ReactFlow
@@ -159,6 +175,7 @@ function CanvasSurface({ bridge }) {
       onNodeDragStop={onNodeDragStop}
       onNodeDragStart={onNodeDragStart}
       onNodeClick={onNodeClick}
+      onNodeDoubleClick={onNodeDoubleClick}
       onPaneClick={onPaneClick}
       onEdgeClick={onEdgeClick}
       onMoveEnd={onMoveEnd}

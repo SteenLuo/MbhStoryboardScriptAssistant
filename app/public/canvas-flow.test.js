@@ -25,6 +25,9 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(clientSource, /selectionKeyCode="Shift"/);
   assert.match(clientSource, /NodeResizer/);
   assert.match(clientSource, /onNodeDragStop/);
+  assert.match(clientSource, /onNodeDoubleClick=\{onNodeDoubleClick\}/);
+  assert.match(clientSource, /const \{ fitView, setCenter, setViewport, getViewport, screenToFlowPosition \} = useReactFlow\(\)/);
+  assert.match(clientSource, /setCenter\(target\.position\.x \+ width \/ 2, target\.position\.y \+ height \/ 2, \{ zoom, duration: 220 \}\)/);
   assert.match(indexSource, /\/assets\/canvas-flow\.js/);
   assert.match(indexSource, /\/assets\/canvas-flow\.css/);
   assert.doesNotMatch(indexSource, /https?:\/\/.*(react|flow)/i);

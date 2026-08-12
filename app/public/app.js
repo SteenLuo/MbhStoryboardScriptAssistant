@@ -3292,6 +3292,8 @@ function canvasExpandedZoomForBounds(bounds) {
 function centerCanvasOnNode(nodeId = state.selectedCanvasNodeId) {
   if (canvasFlowEnabled() && state.canvasFlowBridge) {
     state.canvasFlowBridge.focus(nodeId);
+    const node = currentCanvasNode(nodeId);
+    if (node) canvasStatus(`已定位到「${node.title || "选中节点"}`);
     return;
   }
   const node = currentCanvasNode(nodeId);
@@ -3311,6 +3313,8 @@ function centerCanvasOnNode(nodeId = state.selectedCanvasNodeId) {
 function focusCanvasNodeToViewport(nodeId) {
   if (canvasFlowEnabled() && state.canvasFlowBridge) {
     state.canvasFlowBridge.focus(nodeId);
+    const node = currentCanvasNode(nodeId);
+    if (node) canvasStatus(`已放大「${node.title || "节点"}`);
     return;
   }
   const node = currentCanvasNode(nodeId);
