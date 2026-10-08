@@ -11,10 +11,11 @@ const clientStyles = fs.readFileSync(path.join(root, "canvas-client", "styles.cs
 const canvasV2Styles = fs.readFileSync(path.join(__dirname, "assets", "canvas-v2.css"), "utf8");
 const canvasV2Source = fs.readFileSync(path.join(__dirname, "assets", "canvas-v2.js"), "utf8");
 
-test("React Flow canvas uses a local bundle with viewport culling", () => {
+test("React Flow canvas keeps low-zoom context while culling at readable zoom", () => {
   assert.match(clientSource, /from "@xyflow\/react"/);
   assert.match(clientSource, /onlyRenderVisibleElements/);
-  assert.match(clientSource, /viewportZoom < 0\.45 \? \[\] : edges/);
+  assert.match(clientSource, /edges=\{edges\}/);
+  assert.match(clientSource, /onlyRenderVisibleElements=\{viewportZoom >= 0\.45\}/);
   assert.match(clientSource, /panOnDrag/);
   assert.match(clientSource, /panOnDrag=\{interactionMode === "pan" \? \[0, 1, 2\] : \[1, 2\]\}/);
   assert.match(clientSource, /selectionOnDrag/);
@@ -28,8 +29,8 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(appSource, /isNodeSelected: isCanvasNodeSelected/);
   assert.match(clientSource, /onNodeDragStop/);
   assert.match(clientSource, /onNodeDoubleClick=\{onNodeDoubleClick\}/);
-  assert.match(clientSource, /const \{ fitView, setCenter, setViewport, getViewport, screenToFlowPosition \} = useReactFlow\(\)/);
-  assert.match(clientSource, /setCenter\(target\.position\.x \+ width \/ 2, target\.position\.y \+ height \/ 2, \{ zoom, duration: 220 \}\)/);
+  assert.match(clientSource, /const \{ fitView, setViewport, getViewport, screenToFlowPosition \} = useReactFlow\(\)/);
+  assert.match(clientSource, /moveNodeToSafeCenter/);
   assert.match(indexSource, /\/assets\/canvas-flow\.js/);
   assert.match(indexSource, /\/assets\/canvas-flow\.css/);
   assert.doesNotMatch(indexSource, /https?:\/\/.*(react|flow)/i);
@@ -88,6 +89,25 @@ test("React Flow canvas uses a local bundle with viewport culling", () => {
   assert.match(appSource, /if \(isCanvasMergedNode\(node\)\) \{[\s\S]*badge\.textContent = "合"/);
   assert.match(appSource, /if \(isCanvasRevisionNode\(node\)\) \{[\s\S]*badge\.textContent = "修"/);
   assert.doesNotMatch(appSource, /else if \(canvasRevisionNodeTypes\.has\(node\.type\)\)/);
+});
+
+test("React Flow keeps the visible canvas center when the viewport changes", () => {
+  assert.match(clientSource, /safeViewportGeometry/);
+  assert.match(clientSource, /new ResizeObserver/);
+  assert.match(clientSource, /previousGeometry\.centerX/);
+  assert.match(clientSource, /bottomInset/);
+  assert.match(clientSource, /locate: locateNode/);
+});
+
+test("React Flow uses benchmark wheel and blank-double-click behavior", () => {
+  assert.match(clientSource, /zoomOnScroll=\{false\}/);
+  assert.match(clientSource, /zoomOnDoubleClick=\{false\}/);
+  assert.match(clientSource, /panOnScroll/);
+  assert.match(clientSource, /onPaneDoubleClick/);
+  assert.match(clientSource, /bridge\.openQuickAdd/);
+  assert.match(clientSource, /handleBlankDoubleClick/);
+  assert.match(clientSource, /handleModifiedWheel/);
+  assert.match(clientSource, /event\.ctrlKey/);
 });
 
 test("React Flow bridge persists a drag only after its stop event", () => {

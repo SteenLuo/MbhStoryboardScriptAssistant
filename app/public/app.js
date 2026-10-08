@@ -3291,7 +3291,7 @@ function canvasExpandedZoomForBounds(bounds) {
 
 function centerCanvasOnNode(nodeId = state.selectedCanvasNodeId) {
   if (canvasFlowEnabled() && state.canvasFlowBridge) {
-    state.canvasFlowBridge.focus(nodeId);
+    state.canvasFlowBridge.locate(nodeId);
     const node = currentCanvasNode(nodeId);
     if (node) canvasStatus(`已定位到「${node.title || "选中节点"}`);
     return;
@@ -3482,16 +3482,39 @@ async function addNodeToCanvas(type, position = null) {
     x: 140 + (index % 4) * 70,
     y: 140 + index * 44,
   };
+  const mediaDefaults = cleanType === "image"
+    ? {
+        model: "seedream-5.0-pro",
+        modelLabel: "Seedream 5.0 Pro",
+        mode: "text-to-image",
+        ratio: "16:9",
+        resolution: "2K",
+        count: 1,
+        referenceAssetIds: [],
+      }
+    : cleanType === "video"
+      ? {
+          model: "doubao-seedance-2-0",
+          modelLabel: "豆包 Seedance 2.0",
+          mode: "text-to-video",
+          ratio: "16:9",
+          resolution: "1080P",
+          duration: 5,
+          count: 1,
+          referenceAssetIds: [],
+        }
+      : null;
+  const titleBase = cleanType === "image" ? "图片节点" : cleanType === "video" ? "视频节点" : canvasTypeLabels[cleanType] || "标识";
   const node = {
     id: `node-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
     type: cleanType,
-    title: uniqueCanvasNodeTitle(canvasTypeLabels[cleanType] || "标识"),
+    title: uniqueCanvasNodeTitle(titleBase),
     content: "",
     x: Number(point.x || 0),
     y: Number(point.y || 0),
-    width: cleanType === "label" ? 260 : cleanType === "image" ? 420 : cleanType === "video" ? 440 : cleanType === "audio" ? 380 : 360,
-    height: cleanType === "label" ? 140 : cleanType === "image" ? 360 : cleanType === "video" ? 390 : cleanType === "audio" ? 300 : 240,
-    meta: {},
+    width: cleanType === "label" ? 260 : cleanType === "image" || cleanType === "video" ? 620 : cleanType === "audio" ? 380 : 360,
+    height: cleanType === "label" ? 140 : cleanType === "image" ? 590 : cleanType === "video" ? 600 : cleanType === "audio" ? 300 : 240,
+    meta: mediaDefaults ? { media: mediaDefaults } : {},
   };
   state.currentCanvas.nodes = [...nodes, node];
   await saveCurrentCanvas();
@@ -3720,10 +3743,9 @@ function createCanvasFlowBridge() {
       const selected = Array.isArray(nodeIds) ? nodeIds : [];
       setCanvasMultiSelection(selected, selected.at(-1) || "");
     },
-    selectEdge(edgeId, event) {
-      if (event) openCanvasEdgeMenu(event, edgeId);
-      else selectCanvasEdge(edgeId);
-    },
+    selectEdge(edgeId) { selectCanvasEdge(edgeId); },
+    openEdgeMenu(edgeId, event) { openCanvasEdgeMenu(event, edgeId); },
+    openQuickAdd(point) { window.MbhCanvasV2?.openQuickAdd?.(point); },
     clearSelection() { clearCanvasSelection(); },
     async connect(connection) {
       const from = connection?.source;
@@ -3748,6 +3770,7 @@ function createCanvasFlowBridge() {
     setViewportActions(actions) { bridge.viewportActions = actions; },
     fit() { bridge.viewportActions?.fit?.(); },
     focus(nodeId) { bridge.viewportActions?.focus?.(nodeId); },
+    locate(nodeId) { (bridge.viewportActions?.locate || bridge.viewportActions?.focus)?.(nodeId); },
     zoomTo(nextZoom) { bridge.viewportActions?.zoomTo?.(nextZoom); },
     toggleMiniMap() { bridge.viewportActions?.toggleMiniMap?.(); },
     project(point) { return bridge.viewportActions?.project?.(point) || point; },
@@ -3947,6 +3970,13 @@ function renderCanvasNode(node, options = {}) {
   const mediaConfig = node.meta?.media || {};
   setMarkdownEditorValue(body, node.content || "");
   if (isMediaNode) {
+    if (node.type === "image") {
+      item.style.width = "620px";
+      item.style.height = "590px";
+    } else if (node.type === "video") {
+      item.style.width = "620px";
+      item.style.height = "600px";
+    }
     body.classList.add("canvas-media-node-body");
     const previewUrl = Array.isArray(mediaConfig.outputUrls) ? mediaConfig.outputUrls[0] : "";
     const preview = previewUrl
@@ -3956,7 +3986,29 @@ function renderCanvasNode(node, options = {}) {
           ? `<video class="canvas-media-output" src="${escapeHtml(previewUrl)}" controls preload="metadata"></video>`
           : `<audio class="canvas-media-output" src="${escapeHtml(previewUrl)}" controls></audio>`
       : "";
-    body.innerHTML = `<div class="canvas-media-kind">${escapeHtml(canvasTypeLabels[node.type] || "媒体")} · ${escapeHtml(mediaConfig.model || "待选模型")}</div>${preview}<div class="canvas-media-mode">${escapeHtml(mediaConfig.lastTask?.status || mediaConfig.mode || "在右侧配置生成方式")}</div><div class="canvas-media-prompt">${escapeHtml(mediaConfig.prompt || node.content || "填写提示词后生成")}</div><button type="button" class="canvas-media-configure">配置节点</button>`;
+    const modeLabel = ({
+      "text-to-image": "文生图",
+      "image-to-image": "参考图生图",
+      "multi-angle": "多角度",
+      "nine-grid": "九宫格",
+      "text-to-video": "文生视频",
+      "reference-to-video": "全能参考图生视频",
+      "first-last-frame": "首尾帧生成视频",
+      "text-to-speech": "文本转语音",
+    })[mediaConfig.mode] || (node.type === "video" ? "文生视频" : "配置生成方式");
+    if (node.type === "image") {
+      const params = [mediaConfig.ratio || "16:9", mediaConfig.resolution || "2K", `${mediaConfig.count || 1}张`].join(" · ");
+      const references = Array.isArray(mediaConfig.referenceSnapshot) ? mediaConfig.referenceSnapshot.slice(0, 4) : [];
+      body.classList.add("canvas-image-generator");
+      const modelLabel = mediaConfig.modelLabel || ({ "seedream-5.0-pro": "Seedream 5.0 Pro", "gpt-image-2": "GPT Image 2", "qwen-image-2.0": "Qwen Image 2.0" })[mediaConfig.model] || mediaConfig.model || "选择图片模型";
+      body.innerHTML = `<div class="canvas-media-preview canvas-image-preview">${preview || `<i class="ph ph-image" aria-hidden="true"></i><div class="canvas-image-suggestions"><span>尝试：</span><button type="button" data-image-mode="image-to-image"><i class="ph ph-images"></i>图生图</button><button type="button" data-image-mode="upscale"><i class="ph ph-stack"></i>图片高清</button></div>`}</div><div class="canvas-media-composer"><div class="canvas-media-tools"><button type="button" data-media-action="reference">${canvasTypeIcon("label")} 参考</button><button type="button" data-media-action="mark"><i class="ph ph-map-pin"></i> 标记</button><button type="button" data-media-action="style"><i class="ph ph-cube"></i> 风格</button><button type="button" data-media-action="focus"><i class="ph ph-corners-in"></i> 聚焦</button></div>${references.length ? `<div class="canvas-media-reference-strip">${references.map((reference, index) => `<span title="${escapeHtml(reference.title || `参考 ${index + 1}`)}">${reference.mediaType === "image" && reference.source ? `<img src="${escapeHtml(reference.source)}" alt="" />` : canvasTypeIcon(reference.mediaType || "image")}</span>`).join("")}</div>` : ""}<button type="button" class="canvas-media-prompt canvas-media-configure" data-media-action="prompt">${escapeHtml(mediaConfig.prompt || node.content || "描述你想要生成的画面内容，@引用素材")}</button><div class="canvas-media-config"><button type="button" class="canvas-media-configure canvas-media-model-trigger" data-media-action="model"><i class="ph ph-sparkle"></i><span>${escapeHtml(modelLabel)}</span><i class="ph ph-caret-up"></i></button><button type="button" class="canvas-media-configure" data-media-action="params"><span>${escapeHtml(params)}</span><i class="ph ph-caret-down"></i></button><button type="button" class="canvas-media-preset canvas-media-configure" data-media-action="preset" aria-label="预设"><i class="ph ph-squares-four"></i></button><button type="button" class="canvas-media-submit canvas-media-configure" data-media-action="generate" aria-label="开始生成"><i class="ph ph-arrow-up"></i></button></div></div>`;
+    } else if (node.type === "video") {
+      const params = [mediaConfig.ratio || "16:9", mediaConfig.resolution || "2K", mediaConfig.duration ? `${mediaConfig.duration}s` : "5s", `${mediaConfig.count || 1}个`].join(" · ");
+      body.classList.add("canvas-video-generator");
+      body.innerHTML = `<div class="canvas-media-preview canvas-video-preview">${preview || `<i class="ph ph-play" aria-hidden="true"></i><div class="canvas-video-suggestions"><span>尝试：</span><button type="button" data-video-mode="long-video">5分钟超长视频</button><button type="button" data-video-mode="first-last-frame">首尾帧生成视频</button><button type="button" data-video-mode="reference-to-video">首帧生成视频</button></div>`}</div><div class="canvas-media-composer"><div class="canvas-media-tools"><button type="button" data-media-action="reference">${canvasTypeIcon("label")} 参考</button><button type="button" data-media-action="effects"><i class="ph ph-cube"></i> 特效</button><button type="button" data-media-action="characters"><i class="ph ph-shield"></i> 角色库</button><button type="button" data-media-action="camera"><i class="ph ph-video-camera"></i> 运镜</button></div><button type="button" class="canvas-media-prompt canvas-media-configure" data-media-action="prompt">${escapeHtml(mediaConfig.prompt || node.content || "描述你想要生成的画面内容，@引用素材")}</button><div class="canvas-media-config"><button type="button" class="canvas-media-configure" data-media-action="model"><span>${escapeHtml(mediaConfig.model || "选择视频模型")}</span></button><button type="button" class="canvas-media-configure" data-media-action="mode"><span>${escapeHtml(modeLabel)}</span></button><button type="button" class="canvas-media-configure" data-media-action="params"><span>${escapeHtml(params)}</span></button><button type="button" class="canvas-media-submit canvas-media-configure" data-media-action="generate" aria-label="开始生成"><i class="ph ph-arrow-up"></i></button></div></div>`;
+    } else {
+      body.innerHTML = `<div class="canvas-media-kind">${escapeHtml(canvasTypeLabels[node.type] || "媒体")} · ${escapeHtml(mediaConfig.model || "待选模型")}</div>${preview}<div class="canvas-media-mode">${escapeHtml(mediaConfig.lastTask?.status || modeLabel)}</div><div class="canvas-media-prompt">${escapeHtml(mediaConfig.prompt || node.content || "填写提示词后生成")}</div><button type="button" class="canvas-media-configure">配置节点</button>`;
+    }
   }
   body.dataset.placeholder = "点击编辑节点内容。";
   body.setAttribute("aria-label", `${node.title || "节点"}内容`);
@@ -3973,8 +4025,38 @@ function renderCanvasNode(node, options = {}) {
     body.title = "配置图片、视频或音频节点";
     body.addEventListener("click", (event) => {
       const configure = event.target.closest(".canvas-media-configure");
-      if (configure) event.preventDefault();
-      window.MbhCanvasV2?.openMediaInspector?.(node.id);
+      const mediaAction = event.target.closest("[data-media-action]")?.dataset.mediaAction || "";
+      const videoMode = event.target.closest("[data-video-mode]")?.dataset.videoMode || "";
+      const imageMode = event.target.closest("[data-image-mode]")?.dataset.imageMode || "";
+      if (!configure && !mediaAction && !videoMode && !imageMode) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (videoMode) {
+        window.MbhCanvasV2?.applyMediaQuickMode?.(node.id, videoMode);
+        return;
+      }
+      if (imageMode) {
+        window.MbhCanvasV2?.applyMediaQuickMode?.(node.id, imageMode);
+        return;
+      }
+      if (mediaAction === "reference") {
+        window.MbhCanvasV2?.openReferencePicker?.(node.id);
+        return;
+      }
+      if (["effects", "characters", "camera", "mark", "style", "focus"].includes(mediaAction)) {
+        window.MbhCanvasV2?.openMediaTool?.(node.id, mediaAction);
+        return;
+      }
+      if (mediaAction === "generate") {
+        window.MbhCanvasV2?.runMediaNode?.(node.id);
+        return;
+      }
+      if (mediaAction === "model") {
+        const rect = configure?.getBoundingClientRect?.();
+        window.MbhCanvasV2?.openMediaModelPicker?.(node.id, rect ? { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height } : null);
+        return;
+      }
+      window.MbhCanvasV2?.openMediaInspector?.(node.id, mediaAction || "prompt");
     });
   }
   body.addEventListener("pointerdown", (event) => {
@@ -4619,6 +4701,7 @@ function renderCanvasGroupBar() {
   const canGroup = canGroupCanvasNodes(nodes);
   bar.hidden = nodes.length < 2;
   if (bar.hidden) return;
+  $("canvasMergeOptions").hidden = true;
   count.textContent = canGroup.ok ? `已选 ${nodes.length} 个` : canGroup.reason;
   select.innerHTML = "";
   for (const node of nodes) {
@@ -4634,6 +4717,30 @@ function renderCanvasGroupBar() {
   }
   select.value = state.canvasGroupPrimaryNodeId;
   $("mergeSelectedCanvasNodes").disabled = !canGroup.ok;
+}
+
+async function copySelectedCanvasNodes() {
+  const nodes = selectedCanvasNodes();
+  if (nodes.length < 2 || canvasIsArchived()) return;
+  const idMap = new Map();
+  const copies = nodes.map((node, index) => {
+    const id = `node-${Date.now()}-${index}-${Math.random().toString(16).slice(2, 6)}`;
+    idMap.set(node.id, id);
+    return { ...structuredClone(node), id, title: uniqueCanvasNodeTitle(`${node.title || "节点"} 副本`, id), x: Number(node.x || 0) + 42, y: Number(node.y || 0) + 42 };
+  });
+  const edges = (state.currentCanvas.edges || []).filter((edge) => idMap.has(edge.from) && idMap.has(edge.to)).map((edge, index) => ({ ...structuredClone(edge), id: `edge-${Date.now()}-${index}-${Math.random().toString(16).slice(2, 6)}`, from: idMap.get(edge.from), to: idMap.get(edge.to) }));
+  state.currentCanvas.nodes = [...state.currentCanvas.nodes, ...copies];
+  state.currentCanvas.edges = [...(state.currentCanvas.edges || []), ...edges];
+  setCanvasMultiSelection(copies.map((node) => node.id), copies.at(-1)?.id || "");
+  await saveCurrentCanvas();
+  renderCanvas();
+  canvasStatus(`已复制 ${copies.length} 个节点`);
+}
+
+async function deleteCanvasSelectionFromBar() {
+  const ids = selectedCanvasNodes().map((node) => node.id);
+  if (ids.length < 2 || canvasIsArchived()) return;
+  await deleteSelectedCanvasNodes(ids);
 }
 
 function setCanvasMultiSelection(nodeIds = [], primaryNodeId = "") {
@@ -7539,6 +7646,9 @@ function bindEvents() {
   $("canvasGroupPrimarySelect").addEventListener("change", (event) => {
     state.canvasGroupPrimaryNodeId = event.target.value;
   });
+  $("copySelectedCanvasNodes").addEventListener("click", copySelectedCanvasNodes);
+  $("deleteSelectedCanvasNodes").addEventListener("click", deleteCanvasSelectionFromBar);
+  $("toggleCanvasMergeOptions").addEventListener("click", () => { $("canvasMergeOptions").hidden = !$("canvasMergeOptions").hidden; });
   $("mergeSelectedCanvasNodes").addEventListener("click", groupSelectedCanvasNodes);
   $("cancelCanvasGroup").addEventListener("click", clearCanvasSelection);
   $("closeCanvasMergeHistory").addEventListener("click", closeCanvasMergeHistory);
@@ -7733,6 +7843,49 @@ function bindEvents() {
         redoCanvasEdit();
         return;
       }
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "v") {
+        event.preventDefault();
+        setCanvasInteractionMode("select");
+        window.MbhCanvasV2?.refresh?.();
+        return;
+      }
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "h") {
+        event.preventDefault();
+        setCanvasInteractionMode("pan");
+        window.MbhCanvasV2?.refresh?.();
+        return;
+      }
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "a") {
+        event.preventDefault();
+        window.MbhCanvasV2?.toggleAdd?.();
+        return;
+      }
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "f") {
+        event.preventDefault();
+        if (event.shiftKey) centerCanvasOnNode();
+        else fitCanvasToContent();
+        return;
+      }
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "m") {
+        event.preventDefault();
+        toggleCanvasMiniMap();
+        return;
+      }
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "?") {
+        event.preventDefault();
+        window.MbhCanvasV2?.openShortcuts?.();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && key === "c" && selectedCanvasNodes().length > 1) {
+        event.preventDefault();
+        copySelectedCanvasNodes();
+        return;
+      }
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedCanvasNodes().length > 1) {
+        event.preventDefault();
+        deleteCanvasSelectionFromBar();
+        return;
+      }
     }
     if (event.key === "Escape") {
       closeContextMenu();
@@ -7783,12 +7936,19 @@ window.MbhCanvasApp = {
   loadCanvas,
   newCanvas,
   addNodeToCanvas,
+  canvasStagePoint,
   addAssetToCanvas,
   addGeneratedMediaToCanvas,
   saveCurrentCanvas,
   renderCanvas,
   focusCanvasNodeToViewport,
   fitCanvasToContent,
+  undoCanvasEdit,
+  redoCanvasEdit,
+  setCanvasZoom,
+  canvasZoom,
+  toggleCanvasMiniMap,
+  centerCanvasOnNode,
   openSettings,
   setCanvasInteractionMode,
   escapeHtml,

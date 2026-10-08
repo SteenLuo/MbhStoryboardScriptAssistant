@@ -853,7 +853,7 @@ test("canvas archive markdown and storyboard issue controls are wired", () => {
   assert.match(archivePageSource, /canvas-archive-title-button/);
   assert.match(archivePageSource, /viewArchivedCanvas\(item\.id\)/);
   assert.match(archivePageSource, /item\.edgeCount/);
-  assert.match(appSource, /async function loadCanvas\(id\)[\s\S]*renderCanvasHeaderState/);
+  assert.match(appSource, /async function loadCanvas\(id(?:, options = \{\})?\)[\s\S]*renderCanvasHeaderState/);
   assert.match(headerStateSource, /只读归档画布/);
   assert.match(headerStateSource, /button\.hidden = canvasIsArchived\(canvas\)/);
   assert.match(nodeMenuSource, /if \(!canvasIsArchived\(\)\)/);

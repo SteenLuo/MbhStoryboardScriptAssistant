@@ -10,6 +10,7 @@ export default defineConfig({
   plugins: [react()],
   build: {
     emptyOutDir: false,
+    assetsInlineLimit: 0,
     lib: {
       entry: path.resolve(import.meta.dirname, "canvas-client/main.jsx"),
       name: "MbhCanvasFlow",

@@ -224,6 +224,7 @@ function normalizeMediaNodeConfig(type, value = {}) {
     type: nodeType,
     providerId: String(value.providerId || "apimart"),
     model: model.id,
+    modelLabel: String(value.modelLabel || model.label || model.id),
     mode,
     prompt: String(value.prompt || ""),
     ratio,

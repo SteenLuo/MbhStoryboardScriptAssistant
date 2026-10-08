@@ -42,12 +42,14 @@ function LegacyCanvasNode({ data, selected }) {
 }
 
 function canvasNodeToFlowNode(node, bridge) {
+  const isImage = node.type === "image";
+  const isVideo = node.type === "video";
   return {
     id: node.id,
     type: "legacy",
     position: { x: Number(node.x || 0), y: Number(node.y || 0) },
-    width: Number(node.width || 320),
-    height: Number(node.height || 220),
+    width: isImage || isVideo ? 620 : Number(node.width || 320),
+    height: isImage ? 590 : isVideo ? 600 : Number(node.height || 220),
     draggable: !bridge.isReadOnly(),
     selectable: true,
     // App-level editing rerenders the node host. Carry the original canvas
@@ -81,7 +83,7 @@ function canvasEdgeToFlowEdge(edge, bridge) {
 }
 
 function CanvasSurface({ bridge }) {
-  const { fitView, setCenter, setViewport, getViewport, screenToFlowPosition } = useReactFlow();
+  const { fitView, setViewport, getViewport, screenToFlowPosition } = useReactFlow();
   const [nodes, setNodes] = useState(() => bridge.snapshot().nodes.map((node) => canvasNodeToFlowNode(node, bridge)));
   const [edges, setEdges] = useState(() => bridge.snapshot().edges.map((edge) => canvasEdgeToFlowEdge(edge, bridge)));
   const [showMiniMap, setShowMiniMap] = useState(false);
@@ -89,6 +91,26 @@ function CanvasSurface({ bridge }) {
   const [interactionMode, setInteractionMode] = useState(() => bridge.snapshot().interactionMode || "select");
   const applyingExternalViewport = useRef(false);
   const frameProbe = useRef(null);
+  const viewportGeometryRef = useRef(null);
+
+  const safeViewportGeometry = useCallback(() => {
+    const canvasRect = document.querySelector(".mbh-react-flow")?.getBoundingClientRect();
+    if (!canvasRect) return null;
+    const leftPanel = document.getElementById("canvasV2Left");
+    const leftRect = leftPanel && !leftPanel.hidden && !leftPanel.classList.contains("collapsed")
+      ? leftPanel.getBoundingClientRect()
+      : null;
+    const dock = document.getElementById("canvasV2Dock");
+    const dockRect = dock && !dock.hidden ? dock.getBoundingClientRect() : null;
+    const leftInset = leftRect ? Math.max(0, Math.min(canvasRect.width, leftRect.right - canvasRect.left)) : 0;
+    const bottomInset = dockRect ? Math.max(0, Math.min(canvasRect.height, canvasRect.bottom - dockRect.top + 12)) : 0;
+    return {
+      width: canvasRect.width,
+      height: canvasRect.height,
+      centerX: leftInset + Math.max(0, canvasRect.width - leftInset) / 2,
+      centerY: Math.max(0, canvasRect.height - bottomInset) / 2,
+    };
+  }, []);
 
   useEffect(() => {
     frameProbe.current = createFrameProbe((sample) => bridge.reportPerformance(sample));
@@ -126,19 +148,39 @@ function CanvasSurface({ bridge }) {
   }), [bridge]);
   const onEdgesChange = useCallback((changes) => setEdges((current) => applyEdgeChanges(changes, current)), []);
   const onNodeClick = useCallback((event, node) => bridge.selectNode(node.id, event), [bridge]);
-  const focusNode = useCallback((nodeId) => {
+  const moveNodeToSafeCenter = useCallback((nodeId, requestedZoom) => {
     const target = nodes.find((node) => node.id === nodeId);
-    const canvasRect = document.querySelector(".mbh-react-flow")?.getBoundingClientRect();
-    if (!target || !canvasRect) return;
+    const geometry = safeViewportGeometry();
+    if (!target || !geometry) return;
     const width = Math.max(1, Number(target.measured?.width || target.width || 320));
     const height = Math.max(1, Number(target.measured?.height || target.height || 220));
+    const zoom = Math.max(0.25, Math.min(2, requestedZoom(width, height, geometry)));
+    const next = {
+      x: geometry.centerX - (target.position.x + width / 2) * zoom,
+      y: geometry.centerY - (target.position.y + height / 2) * zoom,
+      zoom,
+    };
+    setViewport(next, { duration: 220 });
+  }, [nodes, safeViewportGeometry, setViewport]);
+
+  const focusNode = useCallback((nodeId) => {
     // Keep the 1.0 intent: a double-click makes the chosen card readable
-    // instead of merely fitting the whole graph around it.
-    const targetWidth = Math.max(240, canvasRect.width * 0.48 - 88);
-    const targetHeight = Math.max(180, canvasRect.height * 0.42 - 88);
-    const zoom = Math.max(0.25, Math.min(2, targetWidth / width, targetHeight / height));
-    setCenter(target.position.x + width / 2, target.position.y + height / 2, { zoom, duration: 220 });
-  }, [nodes, setCenter]);
+    // instead of merely fitting the whole graph around it. Reserve the left
+    // panel and bottom dock so the card is centered in the genuinely visible
+    // area, not beneath an overlay.
+    moveNodeToSafeCenter(nodeId, (width, height, geometry) => {
+      const targetWidth = Math.max(240, geometry.width * 0.48 - 88);
+      const targetHeight = Math.max(180, geometry.height * 0.42 - 88);
+      return Math.min(targetWidth / width, targetHeight / height);
+    });
+  }, [moveNodeToSafeCenter]);
+
+  const locateNode = useCallback((nodeId) => {
+    // Sidebar navigation is a location action, not an aggressive zoom action.
+    // On compact viewports cap it at 100% so neighboring cards do not look as
+    // though the lower half of the canvas disappeared.
+    moveNodeToSafeCenter(nodeId, () => Math.min(1, Math.max(0.65, getViewport().zoom)));
+  }, [getViewport, moveNodeToSafeCenter]);
   const onNodeDoubleClick = useCallback((event, node) => {
     // The legacy card owns its title/body double-click semantics. This catches
     // the remaining card surface so every node still has a clear focus action.
@@ -146,7 +188,16 @@ function CanvasSurface({ bridge }) {
     focusNode(node.id);
   }, [focusNode]);
   const onPaneClick = useCallback(() => bridge.clearSelection(), [bridge]);
-  const onEdgeClick = useCallback((event, edge) => bridge.selectEdge(edge.id, event), [bridge]);
+  const onPaneDoubleClick = useCallback((event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    bridge.openQuickAdd({ x: event.clientX, y: event.clientY });
+  }, [bridge]);
+  const onEdgeClick = useCallback((_event, edge) => bridge.selectEdge(edge.id), [bridge]);
+  const onEdgeContextMenu = useCallback((event, edge) => {
+    event.preventDefault();
+    bridge.openEdgeMenu(edge.id, event);
+  }, [bridge]);
   const onMoveEnd = useCallback((_event, viewport) => {
     frameProbe.current?.stop();
     setViewportZoom((current) => Math.abs(current - viewport.zoom) > 0.01 ? viewport.zoom : current);
@@ -157,6 +208,7 @@ function CanvasSurface({ bridge }) {
     bridge.setViewportActions({
       fit: () => fitView({ padding: 0.16, duration: 220, maxZoom: 1.4 }),
       focus: focusNode,
+      locate: locateNode,
       zoomTo: (zoom) => {
         const current = getViewport();
         const next = { ...current, zoom: Math.max(0.25, Math.min(4, Number(zoom || current.zoom))) };
@@ -167,12 +219,75 @@ function CanvasSurface({ bridge }) {
       current: () => getViewport(),
       project: (point) => screenToFlowPosition(point),
     });
-  }, [bridge, fitView, focusNode, getViewport, screenToFlowPosition, setViewport]);
+  }, [bridge, fitView, focusNode, getViewport, locateNode, screenToFlowPosition, setViewport]);
+
+  useEffect(() => {
+    const root = document.querySelector(".mbh-react-flow");
+    if (!root || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      const nextGeometry = safeViewportGeometry();
+      const previousGeometry = viewportGeometryRef.current;
+      viewportGeometryRef.current = nextGeometry;
+      if (!nextGeometry || !previousGeometry) return;
+      if (Math.abs(nextGeometry.width - previousGeometry.width) < 1 && Math.abs(nextGeometry.height - previousGeometry.height) < 1) return;
+      const current = getViewport();
+      const worldCenter = {
+        x: (previousGeometry.centerX - current.x) / current.zoom,
+        y: (previousGeometry.centerY - current.y) / current.zoom,
+      };
+      const next = {
+        x: nextGeometry.centerX - worldCenter.x * current.zoom,
+        y: nextGeometry.centerY - worldCenter.y * current.zoom,
+        zoom: current.zoom,
+      };
+      applyingExternalViewport.current = true;
+      setViewport(next, { duration: 0 });
+      bridge.commitViewport(next);
+      requestAnimationFrame(() => { applyingExternalViewport.current = false; });
+    });
+    viewportGeometryRef.current = safeViewportGeometry();
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [bridge, getViewport, safeViewportGeometry, setViewport]);
+
+  useEffect(() => {
+    const root = document.querySelector(".mbh-react-flow");
+    if (!root) return undefined;
+    const handleModifiedWheel = (event) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const current = getViewport();
+      const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      const rootRect = root.getBoundingClientRect();
+      const nextZoom = Math.max(0.25, Math.min(4, current.zoom * Math.exp(-event.deltaY * 0.0016)));
+      const next = {
+        x: event.clientX - rootRect.left - point.x * nextZoom,
+        y: event.clientY - rootRect.top - point.y * nextZoom,
+        zoom: nextZoom,
+      };
+      setViewport(next, { duration: 0 });
+      bridge.commitViewport(next);
+    };
+    root.addEventListener("wheel", handleModifiedWheel, { capture: true, passive: false });
+    return () => root.removeEventListener("wheel", handleModifiedWheel, { capture: true });
+  }, [bridge, getViewport, screenToFlowPosition, setViewport]);
+
+  useEffect(() => {
+    const root = document.querySelector(".mbh-react-flow");
+    if (!root) return undefined;
+    const handleBlankDoubleClick = (event) => {
+      if (event.target.closest?.(".react-flow__node, .react-flow__edge, button, input, textarea, select")) return;
+      onPaneDoubleClick(event);
+    };
+    root.addEventListener("dblclick", handleBlankDoubleClick);
+    return () => root.removeEventListener("dblclick", handleBlankDoubleClick);
+  }, [onPaneDoubleClick]);
 
   return (
     <ReactFlow
       nodes={nodes}
-      edges={viewportZoom < 0.45 ? [] : edges}
+      edges={edges}
       nodeTypes={flowNodeTypes}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
@@ -182,6 +297,7 @@ function CanvasSurface({ bridge }) {
       onNodeDoubleClick={onNodeDoubleClick}
       onPaneClick={onPaneClick}
       onEdgeClick={onEdgeClick}
+      onEdgeContextMenu={onEdgeContextMenu}
       onMoveEnd={onMoveEnd}
       onMoveStart={() => frameProbe.current?.start("viewport-pan")}
       onConnect={(connection) => bridge.connect(connection)}
@@ -189,7 +305,14 @@ function CanvasSurface({ bridge }) {
       fitViewOptions={{ padding: 0.16, maxZoom: 1.4 }}
       minZoom={0.25}
       maxZoom={4}
-      onlyRenderVisibleElements
+      // Benchmark behavior: a plain wheel scrolls/pans the infinite canvas.
+      // Zoom is deliberate via Ctrl/Cmd + wheel or a touchpad pinch.
+      zoomOnScroll={false}
+      zoomOnDoubleClick={false}
+      panOnScroll
+      panOnScrollMode="free"
+      preventScrolling
+      onlyRenderVisibleElements={viewportZoom >= 0.45}
       // The dock mirrors the benchmark's two modes: selection on the primary
       // button, or a hand tool that pans with the primary button.
       panOnDrag={interactionMode === "pan" ? [0, 1, 2] : [1, 2]}

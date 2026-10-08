@@ -7,6 +7,7 @@
     "test:canvas": "node --test public/canvas-flow.test.js public/canvas-performance.test.js"
   },
   "dependencies": {
+    "@phosphor-icons/web": "^2.1.2",
     "@xyflow/react": "12.11.2",
     "react": "19.2.8",
     "react-dom": "19.2.8"

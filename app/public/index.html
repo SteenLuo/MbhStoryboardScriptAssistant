@@ -5,8 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>猫主子漫剧剧本分镜小助手</title>
     <link rel="stylesheet" href="/styles.css?v=20260805-canvas-library" />
-    <link rel="stylesheet" href="/assets/canvas-flow.css?v=20260805-interaction-cursor" />
-    <link rel="stylesheet" href="/assets/canvas-v2.css?v=20260805-resource-history" />
+    <link rel="stylesheet" href="/assets/canvas-flow.css?v=20260812-benchmark-polish" />
+    <link rel="stylesheet" href="/assets/canvas-v2.css?v=20260812-benchmark-polish" />
+    <link rel="stylesheet" href="/assets/phosphor/style.css?v=2.1.2" />
   </head>
   <body>
     <div class="app-shell">
@@ -149,27 +150,32 @@
 
         <div id="canvasGroupBar" class="canvas-group-bar" hidden>
           <span id="canvasGroupCount">已选 0 个</span>
+          <button id="copySelectedCanvasNodes" type="button">复制</button>
+          <button id="deleteSelectedCanvasNodes" type="button">删除</button>
+          <button id="toggleCanvasMergeOptions" type="button">合并为版本</button>
+          <div id="canvasMergeOptions" class="canvas-merge-options" hidden>
           <label>
             唯一版本
             <select id="canvasGroupPrimarySelect"></select>
           </label>
           <button id="mergeSelectedCanvasNodes" type="button">合并</button>
+          </div>
           <button id="cancelCanvasGroup" class="ghost" type="button">取消</button>
         </div>
         <div id="canvasMiniMap" class="canvas-minimap" aria-label="画布缩略图" hidden>
           <svg id="canvasMiniMapSvg" viewBox="0 0 180 116" aria-hidden="true"></svg>
         </div>
         <div class="canvas-view-tools" aria-label="画布视图工具">
-          <button id="undoCanvasEdit" type="button" aria-label="撤销画布编辑" title="撤销 Ctrl+Z" disabled>↶</button>
-          <button id="redoCanvasEdit" type="button" aria-label="重做画布编辑" title="重做 Ctrl+Y" disabled>↷</button>
+          <button id="undoCanvasEdit" type="button" aria-label="撤销画布编辑" title="撤销 Ctrl+Z" disabled><i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i></button>
+          <button id="redoCanvasEdit" type="button" aria-label="重做画布编辑" title="重做 Ctrl+Y" disabled><i class="ph ph-arrow-clockwise" aria-hidden="true"></i></button>
           <span class="canvas-view-tools-divider" aria-hidden="true"></span>
-          <button id="toggleCanvasMiniMap" type="button" aria-label="显示缩略图" title="显示缩略图">▣</button>
-          <button id="fitCanvasView" type="button" aria-label="适配全部元素" title="适配全部元素">⛶</button>
-          <button id="centerSelectedCanvasNode" type="button" aria-label="定位选中节点" title="定位选中节点">◎</button>
+          <button id="toggleCanvasMiniMap" type="button" aria-label="显示缩略图" title="显示缩略图"><i class="ph ph-map-trifold" aria-hidden="true"></i></button>
+          <button id="fitCanvasView" type="button" aria-label="适配全部元素" title="适配全部元素"><i class="ph ph-corners-out" aria-hidden="true"></i></button>
+          <button id="centerSelectedCanvasNode" type="button" aria-label="定位选中节点" title="定位选中节点"><i class="ph ph-crosshair" aria-hidden="true"></i></button>
           <div class="canvas-zoom-control" aria-label="缩放">
-            <button id="canvasZoomOut" type="button" aria-label="缩小" title="缩小">−</button>
+            <button id="canvasZoomOut" type="button" aria-label="缩小" title="缩小"><i class="ph ph-minus" aria-hidden="true"></i></button>
             <span id="canvasZoomLabel">100%</span>
-            <button id="canvasZoomIn" type="button" aria-label="放大" title="放大">＋</button>
+            <button id="canvasZoomIn" type="button" aria-label="放大" title="放大"><i class="ph ph-plus" aria-hidden="true"></i></button>
           </div>
         </div>
         <div id="canvasStatus" class="canvas-status">未读取画布</div>
@@ -536,8 +542,8 @@
     <script src="/markdown-format.js?v=20260611-markdown-v1"></script>
     <script src="/compose-validation.js?v=20260611-compose-validation-v1"></script>
     <script src="/project-tree.js?v=20260627-canvas-icons-paws-v1"></script>
-    <script src="/assets/canvas-flow.js?v=20260812-double-click-selection"></script>
+    <script src="/assets/canvas-flow.js?v=20260812-benchmark-polish"></script>
     <script src="/app.js?v=20260805-resource-history"></script>
-    <script src="/assets/canvas-v2.js?v=20260805-resource-history"></script>
+    <script src="/assets/canvas-v2.js?v=20260812-benchmark-polish"></script>
   </body>
 </html>

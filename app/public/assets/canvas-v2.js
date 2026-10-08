@@ -7,6 +7,15 @@
   let generatedHistory = [];
   let activeTab = "nodes";
   let activeAssetKind = "";
+  let activeHistoryType = "image";
+  let quickAddPosition = null;
+
+  function icon(name, extra = "") {
+    return `<i class="ph ph-${name}${extra ? ` ${extra}` : ""}" aria-hidden="true"></i>`;
+  }
+
+  const nodeIconNames = { novel: "text-align-left", script: "article", storyboard: "film-strip", label: "note", image: "image", video: "play", audio: "music-note" };
+  const assetIconNames = { person: "user", item: "diamond", scene: "house-line" };
 
   function esc(value) {
     return app()?.escapeHtml?.(String(value ?? "")) || String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
@@ -37,20 +46,28 @@
     const left = document.createElement("aside");
     left.id = "canvasV2Left";
     left.className = "canvas-v2-left";
-    left.innerHTML = `<div class="v2-left-head"><button type="button" class="v2-project-back" data-v2-back-home title="返回项目">‹</button><div><strong id="v2CanvasTitle">画布</strong><span id="v2CanvasMeta">0 个元素</span></div></div><div class="v2-tabs"><button type="button" data-v2-tab="nodes" class="active">画布</button><button type="button" data-v2-tab="assets">资产</button></div><div id="v2LeftContent" class="v2-left-content"></div><footer class="v2-left-footer"><button id="canvasV2ToggleLeft" type="button" class="v2-left-collapse" title="收起画布侧栏">‹</button><span id="v2CanvasNodeCount">共 0 节点</span></footer>`;
+    left.innerHTML = `<div class="v2-left-head"><button type="button" class="v2-project-back" data-v2-back-home title="返回项目">${icon("caret-left")}</button><div><strong id="v2CanvasTitle">画布</strong><span id="v2CanvasMeta">0 个元素</span></div></div><div class="v2-tabs"><button type="button" data-v2-tab="nodes" class="active">画布</button><button type="button" data-v2-tab="assets">资产</button></div><div id="v2LeftContent" class="v2-left-content"></div><footer class="v2-left-footer"><button id="canvasV2ToggleLeft" type="button" class="v2-left-collapse" title="收起画布侧栏">${icon("sidebar-simple")}</button><span id="v2CanvasNodeCount">共 0 节点</span></footer>`;
     const utility = document.createElement("div");
     utility.id = "canvasV2UtilityDock";
     utility.className = "canvas-v2-utility-dock";
     utility.hidden = true;
-    utility.innerHTML = `<button type="button" data-v2-expand-left title="展开左侧面板">▣ <span>资产管理</span></button>`;
+    utility.innerHTML = `<button type="button" data-v2-expand-left title="展开左侧面板">${icon("sidebar-simple")}<span>资产管理</span></button>`;
     const dock = document.createElement("div");
     dock.id = "canvasV2Dock";
     dock.className = "canvas-v2-dock";
-    dock.innerHTML = `<div class="v2-add-wrap"><button type="button" class="v2-dock-icon v2-dock-add" data-v2-toggle-add aria-label="添加节点" title="添加节点">＋</button><div id="v2AddPalette" class="v2-add-palette" hidden></div></div><div class="v2-interaction-wrap"><button type="button" class="v2-dock-icon" data-v2-toggle-interaction aria-label="移动" title="移动">${interactionIcon("select")}</button><div id="v2InteractionPalette" class="v2-interaction-palette" hidden></div></div><span></span><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="person" aria-label="角色资产库" title="角色资产库">♙</button><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="item" aria-label="物品资产库" title="物品资产库">◇</button><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="scene" aria-label="场景资产库" title="场景资产库">⌂</button><span></span><button type="button" class="v2-dock-icon" data-v2-media-settings aria-label="模型 API 配置" title="模型 API 配置">⚙</button>`;
+    dock.innerHTML = `<div class="v2-add-wrap"><button type="button" class="v2-dock-icon v2-dock-add" data-v2-toggle-add aria-label="添加" title="添加">${icon("plus")}</button><div id="v2AddPalette" class="v2-add-palette" hidden></div></div><div class="v2-interaction-wrap"><button type="button" class="v2-dock-icon" data-v2-toggle-interaction aria-label="移动选择" title="移动选择">${interactionIcon("select")}</button><div id="v2InteractionPalette" class="v2-interaction-palette" hidden></div></div><span></span><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="person" aria-label="角色资产库" title="角色资产库">${icon("user")}</button><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="item" aria-label="物品资产库" title="物品资产库">${icon("diamond")}</button><button type="button" class="v2-dock-icon" data-v2-open-assets-kind="scene" aria-label="场景资产库" title="场景资产库">${icon("house-line")}</button><button type="button" class="v2-dock-icon" data-v2-open-generated-history aria-label="生成历史" title="生成历史">${icon("clock-counter-clockwise")}</button><button type="button" class="v2-dock-icon" data-v2-shortcuts aria-label="快捷键" title="快捷键">${icon("keyboard")}</button><span></span><button type="button" class="v2-dock-icon" data-v2-media-settings aria-label="模型 API 配置" title="模型 API 配置">${icon("gear-six")}</button>`;
     const inspector = document.createElement("aside");
     inspector.id = "canvasMediaInspector";
     inspector.className = "canvas-media-inspector";
     inspector.hidden = true;
+    const mediaTool = document.createElement("section");
+    mediaTool.id = "canvasMediaTool";
+    mediaTool.className = "canvas-media-tool";
+    mediaTool.hidden = true;
+    const mediaModelPicker = document.createElement("div");
+    mediaModelPicker.id = "canvasMediaModelPicker";
+    mediaModelPicker.className = "canvas-media-model-picker";
+    mediaModelPicker.hidden = true;
     const assetEditor = document.createElement("aside");
     assetEditor.id = "canvasAssetEditor";
     assetEditor.className = "canvas-media-inspector canvas-asset-editor";
@@ -63,9 +80,17 @@
     historyLibrary.id = "canvasGeneratedHistory";
     historyLibrary.className = "canvas-asset-library canvas-generated-history";
     historyLibrary.hidden = true;
+    const shortcuts = document.createElement("section");
+    shortcuts.id = "canvasV2Shortcuts";
+    shortcuts.className = "canvas-asset-library canvas-v2-shortcuts";
+    shortcuts.hidden = true;
+    const quickAdd = document.createElement("div");
+    quickAdd.id = "canvasV2QuickAdd";
+    quickAdd.className = "v2-quick-add";
+    quickAdd.hidden = true;
     const viewTools = document.querySelector(".canvas-view-tools");
     if (viewTools) utility.append(viewTools);
-    shell.append(home, left, utility, dock, inspector, assetEditor, assetLibrary, historyLibrary);
+    shell.append(home, left, utility, dock, inspector, mediaTool, mediaModelPicker, assetEditor, assetLibrary, historyLibrary, shortcuts, quickAdd);
     shell.addEventListener("click", handleClick);
   }
 
@@ -95,6 +120,7 @@
     $("canvasV2UtilityDock").hidden = true;
     $("canvasV2Dock").hidden = true;
     $("canvasMediaInspector").hidden = true;
+    $("canvasMediaTool").hidden = true;
     $("canvasAssetLibrary").hidden = true;
     $("canvasGeneratedHistory").hidden = true;
     renderProjects();
@@ -140,11 +166,11 @@
       return;
     }
     const nodes = currentNodes();
-    target.innerHTML = nodes.length ? `<div class="v2-node-toolbar"><span>画布元素</span></div><div class="v2-node-list">${nodes.map((node) => `<button type="button" data-v2-focus-node="${esc(node.id)}"><span class="v2-node-dot ${esc(node.type)}"></span><span><strong>${esc(node.title || "未命名元素")}</strong><small>${esc(node.type === "label" ? "备注" : ({ novel: "小说", script: "剧本", storyboard: "分镜脚本", image: "图片", video: "视频", audio: "音频" }[node.type] || "元素"))}</small></span><i>⌖</i></button>`).join("")}</div>` : `<div class="v2-empty"><b>画布还是空的</b><span>从底部“添加”放入文本、图片、视频或音频元素。</span></div>`;
+    target.innerHTML = nodes.length ? `<div class="v2-node-toolbar"><span>画布元素</span><small>${nodes.length}</small></div><div class="v2-node-list">${nodes.map((node) => `<button type="button" data-v2-focus-node="${esc(node.id)}"><span class="v2-node-thumb ${esc(node.type)}">${icon(nodeIconNames[node.type] || "square")}</span><span><strong>${esc(node.title || "未命名元素")}</strong><small>${esc(node.type === "label" ? "备注" : ({ novel: "小说", script: "剧本", storyboard: "分镜脚本", image: "图片", video: "视频", audio: "音频" }[node.type] || "元素"))}</small></span><i class="ph ph-crosshair-simple v2-row-action" aria-hidden="true"></i></button>`).join("")}</div>` : `<div class="v2-empty"><b>画布还是空的</b><span>从底部“添加”放入文本、图片、视频或音频元素。</span></div>`;
   }
 
   function assetKindDefinitions() {
-    return [{ id: "person", label: "角色", icon: "♙", hint: "人物三视图、表情与声音参考" }, { id: "item", label: "物品", icon: "◇", hint: "三视图、局部与材质细节" }, { id: "scene", label: "场景", icon: "⌂", hint: "俯视图、3D 效果与场景参考" }];
+    return [{ id: "person", label: "角色", icon: "user", hint: "人物三视图、表情与声音参考" }, { id: "item", label: "物品", icon: "diamond", hint: "三视图、局部与材质细节" }, { id: "scene", label: "场景", icon: "house-line", hint: "俯视图、3D 效果与场景参考" }];
   }
 
   function renderAssets() {
@@ -155,22 +181,62 @@
     const visibleKinds = activeAssetKind ? kinds.filter((kind) => kind.id === activeAssetKind) : kinds;
     list.innerHTML = visibleKinds.map((kind) => {
       const entries = assets.filter((asset) => asset.kind === kind.id);
-      return `<section class="v2-asset-group"><header><span>${kind.icon}</span><strong>${kind.label}</strong><small>${entries.length}</small></header>${entries.length ? entries.map(card).join("") : `<p class="v2-asset-empty">${kind.hint}</p>`}</section>`;
+      return `<section class="v2-asset-group"><header><span>${icon(kind.icon)}</span><strong>${kind.label}</strong><small>${entries.length}</small></header>${entries.length ? entries.map(card).join("") : `<p class="v2-asset-empty">${kind.hint}</p>`}</section>`;
     }).join("");
   }
 
   function renderAddPalette() {
     const palette = $("v2AddPalette");
     if (!palette) return;
-    const entries = [["novel", "小说", "☰"], ["script", "剧本", "▤"], ["storyboard", "分镜脚本", "▦"], ["label", "备注", "◇"], ["image", "图片", "▧"], ["video", "视频", "▷"], ["audio", "音频", "♪"]];
-    palette.innerHTML = `<h4>添加节点</h4>${entries.map(([type, label, icon]) => `<button type="button" data-v2-add-node="${type}"><b>${icon}</b><span>${label}</span></button>`).join("")}<div class="v2-palette-divider"></div><h4>添加资源</h4><button type="button" data-v2-create-asset><b>＋</b><span>新建资产</span></button><button type="button" data-v2-open-generated-history><b>◷</b><span>从生成历史选择</span></button>`;
+    const entries = [["novel", "小说"], ["script", "剧本"], ["storyboard", "分镜脚本"], ["label", "备注"], ["image", "图片"], ["video", "视频"], ["audio", "音频"]];
+    palette.innerHTML = `<h4>添加节点</h4>${entries.map(([type, label]) => `<button type="button" data-v2-add-node="${type}"><b>${icon(nodeIconNames[type])}</b><span>${label}</span></button>`).join("")}<div class="v2-palette-divider"></div><h4>添加资源</h4><button type="button" data-v2-create-asset><b>${icon("plus-circle")}</b><span>新建资产</span></button><button type="button" data-v2-open-generated-history><b>${icon("clock-counter-clockwise")}</b><span>从生成历史选择</span></button>`;
+  }
+
+  function quickAddMarkup() {
+    return `<h4>添加节点</h4>
+      <button type="button" data-v2-add-node="label"><b>${icon("text-align-left")}</b><span>文本</span></button>
+      <button type="button" data-v2-add-node="image"><b>${icon("image")}</b><span>图片</span></button>
+      <button type="button" data-v2-add-node="video"><b>${icon("video")}</b><span>视频</span></button>
+      <button type="button" class="v2-quick-muted" disabled><b>${icon("scissors")}</b><span>智能剪辑</span><small>Beta</small></button>
+      <button type="button" class="v2-quick-muted" disabled><b>${icon("stack")}</b><span>导演台</span><small class="v2-tag-new">NEW</small></button>
+      <button type="button" class="v2-quick-muted" disabled><b>${icon("timer")}</b><span>逐帧拉片</span><small class="v2-tag-model">SD 2.5</small></button>
+      <button type="button" data-v2-add-node="audio"><b>${icon("waveform")}</b><span>音频</span></button>
+      <button type="button" data-v2-quick-submenu="script"><b>${icon("article")}</b><span>脚本</span><i>${icon("caret-right")}</i></button>
+      <button type="button" data-v2-quick-submenu="assets"><b>${icon("shapes")}</b><span>素材库</span><i>${icon("caret-right")}</i></button>
+      <h4 class="v2-quick-resource-title">添加资源</h4>
+      <button type="button" data-v2-create-asset><b>${icon("upload-simple")}</b><span>上传</span></button>
+      <button type="button" data-v2-open-generated-history><b>${icon("clock-counter-clockwise")}</b><span>从生成历史选择</span></button>`;
+  }
+
+  function positionQuickAdd(clientPoint) {
+    const menu = $("canvasV2QuickAdd");
+    const shell = $("canvasShell");
+    if (!menu || !shell) return;
+    const shellRect = shell.getBoundingClientRect();
+    const width = 196;
+    const height = 482;
+    menu.style.left = `${Math.max(12, Math.min(clientPoint.x - shellRect.left, shellRect.width - width - 12))}px`;
+    menu.style.top = `${Math.max(12, Math.min(clientPoint.y - shellRect.top, shellRect.height - height - 12))}px`;
+  }
+
+  function openQuickAdd(clientPoint) {
+    ensureChrome();
+    const menu = $("canvasV2QuickAdd");
+    if (!menu) return;
+    quickAddPosition = app()?.canvasStagePoint?.(clientPoint.x, clientPoint.y) || null;
+    menu.innerHTML = quickAddMarkup();
+    menu.hidden = false;
+    positionQuickAdd(clientPoint);
+  }
+
+  function closeQuickAdd() {
+    const menu = $("canvasV2QuickAdd");
+    if (menu) menu.hidden = true;
+    quickAddPosition = null;
   }
 
   function interactionIcon(mode) {
-    if (mode === "pan") {
-      return `<svg class="v2-interaction-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11V5a1.5 1.5 0 0 1 3 0v5-2a1.5 1.5 0 0 1 3 0v2-1a1.5 1.5 0 0 1 3 0v2-1a1.5 1.5 0 0 1 3 0v6.1c0 2.2-1.4 4.2-3.5 4.9l-3.3 1.1a5 5 0 0 1-5.2-1.2L4.4 17a1.7 1.7 0 0 1 2.4-2.4L8 15.8V11Z"/></svg>`;
-    }
-    return `<svg class="v2-interaction-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 13 8-6.3 1.8L9.9 19 5 3Z"/><path d="m12 13 4 5"/></svg>`;
+    return icon(mode === "pan" ? "hand" : "cursor-click", "v2-interaction-icon");
   }
 
   function renderInteractionPalette() {
@@ -182,9 +248,26 @@
     if (trigger) { trigger.classList.toggle("active", mode === "pan"); trigger.title = mode === "pan" ? "抓手工具" : "移动"; trigger.setAttribute("aria-label", mode === "pan" ? "抓手工具" : "移动"); trigger.innerHTML = interactionIcon(mode); }
   }
 
+  function toggleAdd() {
+    ensureChrome();
+    const palette = $("v2AddPalette");
+    const trigger = document.querySelector("[data-v2-toggle-add]");
+    if (!palette || !trigger) return;
+    $("v2InteractionPalette").hidden = true;
+    palette.hidden = !palette.hidden;
+    trigger.classList.toggle("active", !palette.hidden);
+    trigger.innerHTML = icon(palette.hidden ? "plus" : "x");
+  }
+
+  function openShortcuts() {
+    ensureChrome();
+    renderShortcuts();
+    $("canvasV2Shortcuts").hidden = false;
+  }
+
   function assetElementPreview(element) {
     if (element?.mediaType === "image" && element.source) return `<img src="${esc(element.source)}" alt="${esc(element.title || "资产预览")}" />`;
-    return `<span class="v2-library-media-icon">${element?.mediaType === "video" ? "▷" : element?.mediaType === "audio" ? "♪" : "▧"}</span>`;
+    return `<span class="v2-library-media-icon">${icon(element?.mediaType === "video" ? "play" : element?.mediaType === "audio" ? "music-note" : "image")}</span>`;
   }
 
   async function openAssetLibrary(kind) {
@@ -217,7 +300,7 @@
   function generatedHistoryPreview(item) {
     if (item.mediaType === "image") return `<img src="${esc(item.source)}" alt="${esc(item.nodeTitle || "生成图片")}" />`;
     if (item.mediaType === "video") return `<video src="${esc(item.source)}" muted preload="metadata"></video>`;
-    return `<span class="v2-library-media-icon">${item.mediaType === "audio" ? "♪" : "▧"}</span>`;
+    return `<span class="v2-library-media-icon">${icon(item.mediaType === "audio" ? "music-note" : "image")}</span>`;
   }
 
   async function openGeneratedHistory() {
@@ -233,14 +316,29 @@
   function renderGeneratedHistory() {
     const panel = $("canvasGeneratedHistory");
     if (!panel || panel.hidden) return;
-    const selected = generatedHistory.find((item) => item.id === panel.dataset.historyId) || generatedHistory[0];
+    const counts = { image: 0, video: 0, audio: 0 };
+    generatedHistory.forEach((item) => { if (counts[item.mediaType] !== undefined) counts[item.mediaType] += 1; });
+    const typedHistory = generatedHistory.filter((item) => item.mediaType === activeHistoryType);
+    const selected = typedHistory.find((item) => item.id === panel.dataset.historyId) || typedHistory[0];
     panel.dataset.historyId = selected?.id || "";
     if (!selected) {
-      panel.innerHTML = `<div class="v2-library-modal"><header><h2>从生成历史选择</h2><button type="button" data-v2-close-generated-history aria-label="关闭">×</button></header><div class="v2-library-empty"><b>还没有可用的生成结果</b><p>图片、视频和音频生成完成后，会在这里供你重新放入任意画布。</p></div></div>`;
+      panel.innerHTML = `<div class="v2-library-modal v2-history-modal"><header><h2>历史素材</h2><button type="button" data-v2-close-generated-history aria-label="关闭">${icon("x")}</button></header><nav class="v2-history-tabs">${[["image","图片"],["video","视频"],["audio","音频"]].map(([type,label]) => `<button type="button" class="${type === activeHistoryType ? "active" : ""}" data-v2-history-type="${type}">${label}<span>${counts[type]}</span></button>`).join("")}</nav><div class="v2-history-toolbar"><span>按生成时间排序</span><button type="button">${icon("check-square")} 批量管理</button></div><div class="v2-library-empty"><span class="v2-empty-icon">${icon(activeHistoryType === "video" ? "video" : activeHistoryType === "audio" ? "music-note" : "image")}</span><b>还没有${({image:"图片",video:"视频",audio:"音频"})[activeHistoryType]}素材</b><p>生成完成后的内容会按日期归档，可预览并重新添加到当前画布。</p></div></div>`;
       return;
     }
     const typeLabel = { image: "图片", video: "视频", audio: "音频" }[selected.mediaType] || "媒体";
-    panel.innerHTML = `<div class="v2-library-modal"><header><h2>从生成历史选择</h2><button type="button" data-v2-close-generated-history aria-label="关闭">×</button></header><section class="v2-library-feature"><div class="v2-library-feature-title"><strong>${esc(selected.nodeTitle || `历史${typeLabel}`)}</strong><span>${typeLabel}</span></div><div class="v2-history-preview">${generatedHistoryPreview(selected)}</div><p>${esc(selected.prompt || `${selected.canvasTitle || "画布"}中的生成结果`)}</p><button type="button" class="v2-library-apply" data-v2-add-history="${esc(selected.id)}">＋ 添加到当前画布</button></section><section class="v2-library-list"><div><strong>生成历史</strong><small>${generatedHistory.length} 个结果</small></div><div class="v2-library-cards">${generatedHistory.map((item) => `<button type="button" class="${item.id === selected.id ? "active" : ""}" data-v2-select-history="${esc(item.id)}">${generatedHistoryPreview(item)}<span>${esc(item.nodeTitle || "未命名结果")}</span></button>`).join("")}</div></section></div>`;
+    panel.innerHTML = `<div class="v2-library-modal v2-history-modal"><header><h2>历史素材</h2><button type="button" data-v2-close-generated-history aria-label="关闭">${icon("x")}</button></header><nav class="v2-history-tabs">${[["image","图片"],["video","视频"],["audio","音频"]].map(([type,label]) => `<button type="button" class="${type === activeHistoryType ? "active" : ""}" data-v2-history-type="${type}">${label}<span>${counts[type]}</span></button>`).join("")}</nav><div class="v2-history-toolbar"><span>最近生成</span><button type="button">${icon("check-square")} 批量管理</button></div><section class="v2-library-feature"><div class="v2-library-feature-title"><strong>${esc(selected.nodeTitle || `历史${typeLabel}`)}</strong><span>${typeLabel}</span></div><div class="v2-history-preview">${generatedHistoryPreview(selected)}</div><p>${esc(selected.prompt || `${selected.canvasTitle || "画布"}中的生成结果`)}</p><div class="v2-history-actions"><button type="button" title="预览">${icon("eye")}</button><button type="button" title="下载">${icon("download-simple")}</button><button type="button" class="v2-library-apply" data-v2-add-history="${esc(selected.id)}">${icon("plus")} 添加到画布</button></div></section><section class="v2-library-list"><div><strong>生成记录</strong><small>${typedHistory.length} 个结果</small></div><div class="v2-library-cards">${typedHistory.map((item) => `<button type="button" class="${item.id === selected.id ? "active" : ""}" data-v2-select-history="${esc(item.id)}">${generatedHistoryPreview(item)}<span>${esc(item.nodeTitle || "未命名结果")}</span></button>`).join("")}</div></section></div>`;
+  }
+
+  function renderShortcuts() {
+    const panel = $("canvasV2Shortcuts");
+    if (!panel) return;
+    const groups = [
+      ["选择与编辑", [["移动选择", "V"], ["抓手工具", "H"], ["多选节点", "Ctrl + 点击"], ["框选节点", "拖拽空白处"], ["复制", "Ctrl + C"], ["删除", "Delete"]]],
+      ["画布与节点", [["定位节点", "双击 / 左侧点击"], ["编辑文本", "双击节点"], ["连接节点", "拖拽连接点"], ["添加节点", "A"], ["适配全部", "F"], ["快捷键", "?"]]],
+      ["视图", [["放大", "+"], ["缩小", "−"], ["缩略图", "M"], ["定位选中", "Shift + F"]]],
+      ["历史", [["撤销", "Ctrl + Z"], ["重做", "Ctrl + Y"]]],
+    ];
+    panel.innerHTML = `<div class="v2-shortcut-card"><header><div><h2>快捷键</h2><p>画布常用操作</p></div><button type="button" data-v2-close-shortcuts aria-label="关闭">${icon("x")}</button></header><div class="v2-shortcut-grid">${groups.map(([title, rows]) => `<section><h3>${title}</h3>${rows.map(([label,key]) => `<div><span>${label}</span><kbd>${key}</kbd></div>`).join("")}</section>`).join("")}</div></div>`;
   }
 
   function modelFor(node, id) { return (catalog?.models?.[node.type] || []).find((model) => model.id === id) || catalog?.models?.[node.type]?.[0]; }
@@ -265,6 +363,119 @@
     const providers = [{ id: "apimart", label: `APIMart 统一 API${providerSettings.apimart?.hasApiKey ? "（已配置）" : "（待配置）"}` }, ...individual.map((item) => ({ id: item.id, label: `${item.label}${item.hasApiKey ? "（已配置）" : "（待配置）"}` }))];
     const task = config.lastTask;
     panel.innerHTML = `<header><div><span>${typeLabel}节点</span><h2>${esc(node.title || "未命名节点")}</h2></div><button type="button" data-v2-close-inspector>×</button></header><div class="media-inspector-body"><label>API 接入<select data-media-field="providerId">${selectOptions(providers, config.providerId || "apimart", (item) => item.label)}</select></label><label>模型<select data-media-field="model">${selectOptions(catalog.models[node.type], config.model, (item) => item.label)}</select></label><label>生成方式<select data-media-field="mode">${selectOptions(model.modes, config.mode, (item) => ({ "text-to-image": "文生图", "image-to-image": "参考图生图", "multi-angle": "多角度", "nine-grid": "九宫格", "text-to-video": "文生视频", "reference-to-video": "全能参考图生视频", "first-last-frame": "首尾帧视频", "text-to-speech": "文本转语音" })[item] || item)}</select></label><label>提示词<textarea data-media-field="prompt" placeholder="描述你要生成的内容">${esc(config.prompt || "")}</textarea></label>${model.ratios ? `<label>比例<select data-media-field="ratio">${selectOptions(model.ratios, config.ratio)}</select></label>` : ""}${model.resolutions ? `<label>清晰度<select data-media-field="resolution">${selectOptions(model.resolutions, config.resolution)}</select></label>` : ""}${model.counts ? `<label>生成数量<select data-media-field="count">${selectOptions(model.counts, config.count, (item) => `${item} 张`)}</select></label>` : ""}${model.durations ? `<label>视频时长<select data-media-field="duration">${selectOptions(model.durations, config.duration, (item) => `${item} 秒`)}</select></label>` : ""}<fieldset><legend>引用资产（最多 ${model.maxReferences || 0} 个）</legend>${assets.length ? assets.map((asset) => `<label class="asset-check"><input type="checkbox" data-media-asset="${esc(asset.id)}" ${config.referenceAssetIds?.includes(asset.id) ? "checked" : ""}/><span>${esc(asset.title)} <small>${asset.elements.length} 个元素</small></span></label>`).join("") : `<p class="v2-muted">还没有可引用资产。请先在资产库中创建。</p>`}</fieldset><p class="media-capability-note">当前模型支持：${esc((model.modes || []).join(" / "))}${model.supportsAudioReference ? "；支持声音参考" : ""}${config.referenceSnapshot?.length ? `；已冻结 ${config.referenceSnapshot.length} 个引用元素` : ""}</p>${task ? `<p class="media-task-state">最近任务：${esc(task.status || "submitted")} ${task.message ? `· ${esc(task.message)}` : ""}</p>` : ""}<div class="media-inspector-actions"><button type="button" data-v2-save-media class="v2-primary">保存节点配置</button><button type="button" data-v2-run-media>开始生成</button>${task?.taskId ? `<button type="button" data-v2-refresh-task>刷新任务</button>` : ""}</div><p id="v2MediaRunState" class="v2-muted"></p></div>`;
+  }
+
+  const imageModelPresentation = {
+    "seedream-5.0-pro": { seconds: "20s", note: "交互式编辑、中文排版与多图一致性" },
+    "gpt-image-2": { seconds: "50s", note: "高质量图片生成与编辑，语义理解强" },
+    "qwen-image-2.0": { seconds: "30s", note: "中文文字排版与多图生成" },
+  };
+
+  async function openMediaModelPicker(id, anchor = null) {
+    const node = mediaNode(id);
+    if (!node) return;
+    await loadCatalog();
+    const models = catalog?.models?.[node.type] || [];
+    const panel = $("canvasMediaModelPicker");
+    const selected = node.meta?.media?.model || models[0]?.id || "";
+    panel.dataset.nodeId = node.id;
+    panel.innerHTML = models.map((model) => {
+      const presentation = imageModelPresentation[model.id] || { seconds: "", note: (model.modes || []).join(" · ") };
+      return `<button type="button" class="canvas-model-option${model.id === selected ? " selected" : ""}" data-v2-select-media-model="${esc(model.id)}"><span class="canvas-model-icon">${icon(node.type === "image" ? "sparkle" : "play")}</span><span class="canvas-model-copy"><b>${esc(model.label)}</b>${presentation.note ? `<small>${esc(presentation.note)}</small>` : ""}</span>${presentation.seconds ? `<em>${esc(presentation.seconds)}</em>` : ""}</button>`;
+    }).join("");
+    panel.hidden = false;
+    const width = 370;
+    const viewportPadding = 12;
+    const left = Math.min(window.innerWidth - width - viewportPadding, Math.max(viewportPadding, Number(anchor?.left || (window.innerWidth - width) / 2)));
+    panel.style.left = `${left}px`;
+    panel.style.top = "auto";
+    panel.style.bottom = "auto";
+    const measuredHeight = Math.min(410, Math.max(120, panel.scrollHeight));
+    const anchorTop = Number(anchor?.top || window.innerHeight / 2);
+    if (anchorTop > measuredHeight + 24) panel.style.top = `${Math.max(viewportPadding, anchorTop - measuredHeight - 8)}px`;
+    else panel.style.top = `${Math.min(window.innerHeight - measuredHeight - viewportPadding, Number(anchor?.bottom || anchorTop) + 8)}px`;
+  }
+
+  async function selectMediaModel(id, modelId) {
+    const node = mediaNode(id);
+    if (!node) return;
+    await loadCatalog();
+    const model = modelFor(node, modelId);
+    if (!model) return;
+    const current = node.meta?.media || {};
+    const pickSupported = (values, currentValue) => (values || []).map(String).includes(String(currentValue)) ? currentValue : values?.[0];
+    node.meta = { ...(node.meta || {}), media: {
+      ...current,
+      model: model.id,
+      modelLabel: model.label,
+      mode: pickSupported(model.modes, current.mode),
+      ratio: pickSupported(model.ratios, current.ratio),
+      resolution: pickSupported(model.resolutions, current.resolution),
+      count: pickSupported(model.counts, current.count),
+      duration: pickSupported(model.durations, current.duration),
+    } };
+    await app().saveCurrentCanvas();
+    app().renderCanvas();
+    renderWorkspace();
+    $("canvasMediaModelPicker").hidden = true;
+  }
+
+  function mediaToolDefinitions(node) {
+    return node.type === "image"
+      ? {
+          mark: ["标记", "在画布中框选并标记需要保留、调整或忽略的区域。"],
+          style: ["风格", "从风格预设或项目资产中选择画面风格参考。"],
+          focus: ["聚焦", "选择主体区域，生成时优先保持主体与构图。"],
+        }
+      : {
+          effects: ["特效", "选择可用于当前视频节点的动态特效。"],
+          characters: ["角色库", "从全局或项目角色资产中选择，引用时冻结为当前画布快照。"],
+          camera: ["运镜", "选择推、拉、摇、移、环绕等镜头运动。"],
+        };
+  }
+
+  async function openReferencePicker(id, kind = "") {
+    const node = mediaNode(id);
+    if (!node) return;
+    await loadAssets();
+    const panel = $("canvasMediaTool");
+    const candidates = assets.filter((asset) => !kind || asset.kind === kind).flatMap((asset) => (asset.elements || []).filter((element) => element.source).map((element) => ({ ...element, assetId: asset.id, assetTitle: asset.title })));
+    panel.hidden = false;
+    panel.dataset.nodeId = id;
+    panel.innerHTML = `<div class="canvas-reference-picker"><header><div><span>${kind === "person" ? "选择角色参考" : "从资产库添加参考"}</span><h2>${esc(node.title || "媒体节点")}</h2></div><button type="button" data-v2-close-media-tool aria-label="关闭">${icon("x")}</button></header><div class="canvas-reference-grid">${candidates.length ? candidates.map((item) => `<button type="button" data-v2-pick-reference="${esc(item.assetId)}" title="${esc(item.title || item.assetTitle)}">${item.mediaType === "image" ? `<img src="${esc(item.source)}" alt="" />` : `<span>${icon(item.mediaType === "video" ? "play" : "music-note")}</span>`}<b>${esc(item.title || item.assetTitle)}</b><small>${esc(item.assetTitle)}</small></button>`).join("") : `<div class="v2-library-empty"><span class="v2-empty-icon">${icon(kind === "person" ? "user" : "image")}</span><b>${kind === "person" ? "暂无角色资产" : "暂无可引用素材"}</b><p>先在角色、物品或场景资产库中添加参考元素。</p></div>`}</div><footer><button type="button" data-v2-close-media-tool>取消</button><button type="button" data-v2-open-assets-kind="${kind || "person"}" class="v2-primary">打开资产库</button></footer></div>`;
+  }
+
+  function openMediaTool(id, action) {
+    const node = mediaNode(id);
+    if (!node) return;
+    if (action === "characters") { openReferencePicker(id, "person"); return; }
+    const [title, description] = mediaToolDefinitions(node)[action] || ["节点工具", "配置当前媒体节点。"];
+    const panel = $("canvasMediaTool");
+    const choices = action === "camera" ? ["固定", "缓推", "拉远", "平移", "环绕"] : action === "effects" ? ["光影", "粒子", "转场", "速度", "氛围"] : action === "style" ? ["写实", "电影感", "动漫", "国风", "概念设计"] : action === "mark" ? ["保留区域", "重绘区域", "移除区域"] : action === "focus" ? ["人物主体", "前景", "背景", "构图中心"] : [];
+    panel.hidden = false;
+    panel.dataset.nodeId = id;
+    panel.dataset.mediaAction = action;
+    panel.innerHTML = `<div class="canvas-media-tool-card"><header><div><span>${esc(node.type === "image" ? "图片节点" : "视频节点")}</span><h2>${esc(title)}</h2></div><button type="button" data-v2-close-media-tool aria-label="关闭">${icon("x")}</button></header><p>${esc(description)}</p>${choices.length ? `<div class="canvas-tool-choices">${choices.map((choice) => `<button type="button" data-v2-media-tool-value="${esc(choice)}">${esc(choice)}</button>`).join("")}</div>` : `<div class="v2-library-empty"><span class="v2-empty-icon">${icon("crosshair-simple")}</span><b>从画布或资产库中选择</b><p>选择后会回到当前节点，不会切换离开画布。</p></div>`}<footer><button type="button" data-v2-close-media-tool>完成</button></footer></div>`;
+  }
+
+  async function applyMediaQuickMode(id, mode) {
+    const node = mediaNode(id);
+    if (!node) return;
+    if (mode === "upscale") {
+      await openReferencePicker(id, "image");
+      return;
+    }
+    const mapped = mode === "long-video" ? "text-to-video" : mode;
+    node.meta = { ...(node.meta || {}), media: { ...(node.meta?.media || {}), mode: mapped, ...(mode === "long-video" ? { duration: 300 } : {}) } };
+    await app().saveCurrentCanvas();
+    app().renderCanvas();
+    renderWorkspace();
+    if (mapped === "image-to-image") await openReferencePicker(id, "image");
+  }
+
+  async function runMediaNode(id) {
+    await openMediaInspector(id);
+    await saveMediaInspector({ run: true });
   }
 
   async function saveMediaInspector({ run = false } = {}) {
@@ -311,16 +522,19 @@
   async function importAsset(file) { const text = await file.text(); const pack = JSON.parse(text); await app().api("/api/assets/import", { method: "POST", body: JSON.stringify({ pack, canvasId: canvas().id, scope: "project" }) }); await loadAssets(); renderAssets(); }
 
   async function handleClick(event) {
+    if ($("canvasV2QuickAdd") && !$("canvasV2QuickAdd").hidden && !event.target.closest("#canvasV2QuickAdd")) closeQuickAdd();
     const target = event.target.closest("button, [data-v2-tab]"); if (!target) return;
     if (target.matches("[data-v2-new-project]")) { await app().newCanvas(); return; }
     if (target.matches("[data-v2-open-project]")) { await app().loadCanvas(target.dataset.v2OpenProject); openWorkspace(); return; }
     if (target.matches("[data-v2-back-home]")) { showHome(); return; }
     if (target.matches("[data-v2-tab]")) { activeAssetKind = ""; setActiveTab(target.dataset.v2Tab); renderLeft(); return; }
-    if (target.matches("[data-v2-focus-node]")) { app().focusCanvasNodeToViewport(target.dataset.v2FocusNode); return; }
-    if (target.matches("[data-v2-toggle-add]")) { const palette = $("v2AddPalette"); $("v2InteractionPalette").hidden = true; palette.hidden = !palette.hidden; return; }
+    if (target.matches("[data-v2-focus-node]")) { app().centerCanvasOnNode(target.dataset.v2FocusNode); return; }
+    if (target.matches("[data-v2-toggle-add]")) { toggleAdd(); return; }
     if (target.matches("[data-v2-toggle-interaction]")) { const palette = $("v2InteractionPalette"); $("v2AddPalette").hidden = true; palette.hidden = !palette.hidden; return; }
     if (target.matches("[data-v2-set-interaction]")) { app()?.setCanvasInteractionMode?.(target.dataset.v2SetInteraction); $("v2InteractionPalette").hidden = true; renderInteractionPalette(); return; }
-    if (target.matches("[data-v2-add-node]")) { $("v2AddPalette").hidden = true; await app().addNodeToCanvas(target.dataset.v2AddNode); renderWorkspace(); if (mediaTypes.has(target.dataset.v2AddNode)) { const last = currentNodes().at(-1); openMediaInspector(last?.id); } return; }
+    if (target.matches("[data-v2-add-node]")) { const position = target.closest("#canvasV2QuickAdd") ? quickAddPosition : null; $("v2AddPalette").hidden = true; closeQuickAdd(); const addTrigger = document.querySelector("[data-v2-toggle-add]"); if (addTrigger) { addTrigger.classList.remove("active"); addTrigger.innerHTML = icon("plus"); } await app().addNodeToCanvas(target.dataset.v2AddNode, position); renderWorkspace(); return; }
+    if (target.matches('[data-v2-quick-submenu="script"]')) { closeQuickAdd(); toggleAdd(); return; }
+    if (target.matches('[data-v2-quick-submenu="assets"]')) { closeQuickAdd(); await openAssetLibrary("person"); return; }
     if (target.matches("[data-v2-open-assets-kind]")) { await openAssetLibrary(target.dataset.v2OpenAssetsKind); return; }
     if (target.matches("[data-v2-open-assets-manager]")) {
       $("canvasAssetLibrary").hidden = true;
@@ -332,11 +546,32 @@
       renderLeft();
       return;
     }
-    if (target.matches("[data-v2-open-generated-history]")) { $("v2AddPalette").hidden = true; await openGeneratedHistory(); return; }
+    if (target.matches("[data-v2-open-generated-history]")) { $("v2AddPalette").hidden = true; const addTrigger = document.querySelector("[data-v2-toggle-add]"); if (addTrigger) { addTrigger.classList.remove("active"); addTrigger.innerHTML = icon("plus"); } await openGeneratedHistory(); return; }
+    if (target.matches("[data-v2-history-type]")) { activeHistoryType = target.dataset.v2HistoryType; $("canvasGeneratedHistory").dataset.historyId = ""; renderGeneratedHistory(); return; }
+    if (target.matches("[data-v2-shortcuts]")) { openShortcuts(); return; }
+    if (target.matches("[data-v2-close-shortcuts]")) { $("canvasV2Shortcuts").hidden = true; return; }
     if (target.matches("[data-v2-expand-left]")) { setLeftCollapsed(false); renderLeft(); return; }
     if (target.matches("[data-v2-media-settings]")) { app().openSettings("media"); return; }
     if (target.matches("#canvasV2ToggleLeft")) { setLeftCollapsed(!$("canvasV2Left").classList.contains("collapsed")); return; }
     if (target.matches("[data-v2-close-inspector]")) { $("canvasMediaInspector").hidden = true; return; }
+    if (target.matches("[data-v2-close-media-tool]")) { $("canvasMediaTool").hidden = true; return; }
+    if (target.matches("[data-v2-select-media-model]")) { await selectMediaModel($("canvasMediaModelPicker").dataset.nodeId, target.dataset.v2SelectMediaModel); return; }
+    if (target.matches("[data-v2-pick-reference]")) {
+      const node = mediaNode($("canvasMediaTool").dataset.nodeId);
+      if (!node) return;
+      const assetId = target.dataset.v2PickReference;
+      const ids = Array.from(new Set([...(node.meta?.media?.referenceAssetIds || []), assetId]));
+      const maxReferences = modelFor(node, node.meta?.media?.model)?.maxReferences || 0;
+      node.meta = { ...(node.meta || {}), media: { ...(node.meta?.media || {}), referenceAssetIds: ids, referenceSnapshot: snapshotReferences(ids, maxReferences) } };
+      await app().saveCurrentCanvas(); app().renderCanvas(); renderWorkspace(); $("canvasMediaTool").hidden = true; return;
+    }
+    if (target.matches("[data-v2-media-tool-value]")) {
+      const panel = $("canvasMediaTool"); const node = mediaNode(panel.dataset.nodeId);
+      if (!node) return;
+      const action = panel.dataset.mediaAction; const value = target.dataset.v2MediaToolValue;
+      node.meta = { ...(node.meta || {}), media: { ...(node.meta?.media || {}), [action]: value } };
+      await app().saveCurrentCanvas(); app().renderCanvas(); renderWorkspace(); panel.hidden = true; return;
+    }
     if (target.matches("[data-v2-close-asset-editor]")) { $("canvasAssetEditor").hidden = true; return; }
     if (target.matches("[data-v2-close-asset-library]")) { $("canvasAssetLibrary").hidden = true; return; }
     if (target.matches("[data-v2-close-generated-history]")) { $("canvasGeneratedHistory").hidden = true; return; }
@@ -347,7 +582,7 @@
     if (target.matches("[data-v2-save-media]")) { await saveMediaInspector(); return; }
     if (target.matches("[data-v2-run-media]")) { await saveMediaInspector({ run: true }); return; }
     if (target.matches("[data-v2-refresh-task]")) { await refreshMediaTask(); return; }
-    if (target.matches("[data-v2-create-asset]")) { $("v2AddPalette").hidden = true; await editAsset(); return; }
+    if (target.matches("[data-v2-create-asset]")) { $("v2AddPalette").hidden = true; const addTrigger = document.querySelector("[data-v2-toggle-add]"); if (addTrigger) { addTrigger.classList.remove("active"); addTrigger.innerHTML = icon("plus"); } await editAsset(); return; }
     if (target.matches("[data-v2-edit-asset]")) { await editAsset(target.dataset.v2EditAsset); return; }
     if (target.matches("[data-v2-save-asset]")) { await saveAssetEditor(); return; }
     if (target.matches("[data-v2-delete-asset]")) { await app().api("/api/assets/delete", { method: "POST", body: JSON.stringify({ id: $("canvasAssetEditor").dataset.assetId }) }); await loadAssets(); renderAssets(); $("canvasAssetEditor").hidden = true; return; }
@@ -360,12 +595,19 @@
     if (event.target.id === "v2AssetImportFile" && event.target.files?.[0]) { try { await importAsset(event.target.files[0]); } catch (error) { window.alert(`导入失败：${error.message}`); } event.target.value = ""; }
     if (event.target.matches?.('[data-media-field="model"]')) {
       const node = mediaNode($("canvasMediaInspector").dataset.nodeId);
-      if (node) { node.meta = { ...(node.meta || {}), media: { ...(node.meta?.media || {}), model: event.target.value } }; await app().saveCurrentCanvas(); }
+      const model = node ? modelFor(node, event.target.value) : null;
+      if (node) { node.meta = { ...(node.meta || {}), media: { ...(node.meta?.media || {}), model: event.target.value, modelLabel: model?.label || event.target.value } }; await app().saveCurrentCanvas(); }
       openMediaInspector($("canvasMediaInspector").dataset.nodeId);
     }
   });
 
-  window.MbhCanvasV2 = { showHome, openWorkspace, onCanvasLoaded: openWorkspace, openMediaInspector };
+  document.addEventListener("pointerdown", (event) => {
+    const picker = $("canvasMediaModelPicker");
+    if (!picker || picker.hidden || event.target.closest("#canvasMediaModelPicker") || event.target.closest('[data-media-action="model"]')) return;
+    picker.hidden = true;
+  });
+
+  window.MbhCanvasV2 = { showHome, openWorkspace, onCanvasLoaded: openWorkspace, openMediaInspector, openMediaModelPicker, openReferencePicker, openMediaTool, applyMediaQuickMode, runMediaNode, refresh: renderWorkspace, toggleAdd, openShortcuts, openQuickAdd };
   // On a direct project URL app.js restores the workspace after loading the
   // project list. Do not race that restoration by immediately clearing the
   // route and showing the picker.

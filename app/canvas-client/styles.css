@@ -41,7 +41,6 @@
   transition: opacity 120ms ease;
 }
 
-.mbh-react-flow .react-flow__node:hover .mbh-flow-handle,
 .mbh-react-flow .react-flow__node.selected .mbh-flow-handle {
   opacity: 1;
 }
@@ -60,8 +59,7 @@
 /* The canvas-plus action menu predates React Flow. It is deliberately kept:
    the React Flow handles still own drag-to-connect, while each + opens the
    existing node action menu. */
-.mbh-react-flow .react-flow__node.selected .canvas-node-plus,
-.mbh-react-flow .react-flow__node:hover .canvas-node-plus {
+.mbh-react-flow .react-flow__node.selected .canvas-node-plus {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(-50%) scale(1);
